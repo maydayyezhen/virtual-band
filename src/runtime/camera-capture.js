@@ -23,6 +23,7 @@
         stageRender: T.WebGLRenderer.prototype.render,
         rawRender,
       };
+      console.info('[Camera v2] stage camera captured');
     }
     return rawRender.call(this, scene, camera);
   };
