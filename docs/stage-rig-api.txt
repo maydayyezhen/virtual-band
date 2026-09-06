@@ -1,0 +1,29 @@
+STAGE RIG — MIDI ANIMATION API (MIDI 1.0 note numbers; C4 = 60)
+
+await window.stageRigReady;
+StageRig.lower.noteOn(60, 100);     // lower: A0-C8, notes 21..108
+StageRig.lower.noteOff(60);
+StageRig.upper.noteOn(72, 110);     // upper: C2-C7, notes 36..96
+StageRig.upper.noteOff(72);
+
+StageRig.noteOn(60, 100, 'lower');  // velocity: integer 0..127; 0 means noteOff
+StageRig.noteOff(60, 'lower');
+StageRig.handleMIDIMessage([0x90,60,100]); // MIDI channel 1 -> lower
+StageRig.handleMIDIMessage([0x91,72,110]); // MIDI channel 2 -> upper
+StageRig.handleMIDIMessage([0x80,60,0]);
+StageRig.controlChange(64,127,'lower');   // damper; 66 sostenuto; 67 soft
+StageRig.controlChange(1,90,'upper');     // modulation wheel
+StageRig.setPitchBend(0.4,'upper');       // -1..1
+StageRig.allNotesOff();                  // releases keys on both layers
+StageRig.panic();                        // also stops demo and resets pedals
+
+StageRig.lower.keys is a Map keyed by MIDI note. Each entry has an independent
+pivot (THREE.Group), key mesh, note, black, amount, and source state. The upper
+layer has the same structure. Both layers expose minNote/maxNote/noteOn/noteOff.
+Computer keys: A W S E D F T G Y H U J K; 1/2 selects a layer; Space is damper.
+Shift-drag or right-drag pans; a two-finger gesture on empty space pans/zooms.
+No audio samples or audio playback are included; these interfaces drive the
+physical key, wheel and pedal animations. Sustain does not hold keys down.
+Only channels 1 and 2 are routed; unsupported messages return false.
+An existing MIDI input can forward its event to StageRig.handleMIDIMessage(event).
+No Web MIDI permission or device connection is requested automatically.
