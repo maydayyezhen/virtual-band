@@ -19,7 +19,7 @@ This first project split intentionally preserves the v24 runtime behavior instea
 index.html
 styles/{base,player,practice}.css
 assets/songs/                  # exact v24 built-in song data, gzip-compressed JSON
-src/bootstrap.mjs              # loads pinned Three.js and project scripts
+src/bootstrap.js               # loads pinned Three.js and project scripts
 src/core/core.js
 src/instruments/
   acoustic-guitar.js
