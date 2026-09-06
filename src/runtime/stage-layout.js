@@ -4,20 +4,33 @@
 // Keep the instrument models/controllers untouched; this only changes the initial
 // ensemble placement before app.js snapshots it as the song-stage home layout.
 (() => {
+  // Wide-stage pass: favour breathing room over keeping every instrument close to
+  // the original compact camera footprint. Camera composition can be tuned after
+  // the stage spacing itself feels right.
   const layout = {
-    keyboard: { x: -6.40, y: 0, z: -3.90 },
+    // Back line: keep the very wide keyboard rig clearly separated from the drums.
+    keyboard: { x: -9.60, y: 0, z: -6.35 },
+    drums:    { x:  1.55, y: 0, z: -7.05, ry: -0.02, scale: 1.92 },
+
+    // Front-left acoustic arc. The instruments are intentionally staggered in depth
+    // rather than forming a straight retail-display row.
     acoustics: [
-      { x: -8.05, y: 3.90, z: 3.45, ry:  0.26, scale: 0.60 },
-      { x: -4.55, y: 3.90, z: 5.15, ry:  0.14, scale: 0.61 },
-      { x: -0.95, y: 3.90, z: 4.55, ry:  0.04, scale: 0.60 },
+      { x: -10.10, y: 3.90, z: 4.95, ry:  0.28, scale: 0.57 },
+      { x:  -5.80, y: 3.90, z: 7.35, ry:  0.15, scale: 0.58 },
+      { x:  -1.25, y: 3.90, z: 6.05, ry:  0.04, scale: 0.57 },
     ],
-    bass: { x: 2.65, y: 3.91, z: 5.30, ry: -0.07, scale: 0.57 },
+
+    // Bass gets its own front-centre pocket instead of sitting inside the electric
+    // cluster.
+    bass: { x: 3.45, y: 3.91, z: 7.55, ry: -0.06, scale: 0.55 },
+
+    // Right-side electric line opens outward and backward, leaving visible floor
+    // between every instrument even from a high camera angle.
     electrics: [
-      { x: 5.55, y: 2.28, z: 4.60, ry: -0.12, scale: 0.63 },
-      { x: 8.00, y: 2.28, z: 2.55, ry: -0.22, scale: 0.62 },
-      { x: 7.25, y: 2.28, z: -0.85, ry: -0.29, scale: 0.61 },
+      { x:  7.15, y: 2.28, z: 6.15, ry: -0.13, scale: 0.59 },
+      { x: 10.55, y: 2.28, z: 2.80, ry: -0.23, scale: 0.58 },
+      { x: 12.35, y: 2.28, z: -1.55, ry: -0.31, scale: 0.57 },
     ],
-    drums: { x: 1.05, y: 0, z: -5.55, ry: -0.04, scale: 2.08 },
   };
 
   const apply = (object, p) => {
