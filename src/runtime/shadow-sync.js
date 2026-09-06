@@ -16,8 +16,7 @@
   }
 
   // app.js creates the broad painted contact shadow inside start(), so it is not
-  // directly exposed. Capture that one mesh while the scene is being assembled,
-  // then immediately restore Three.js' original Scene.add implementation.
+  // directly exposed. Capture that mesh while the scene is being assembled.
   const sceneAdd = THREE.Scene.prototype.add;
   THREE.Scene.prototype.add = function (...objects) {
     const result = sceneAdd.apply(this, objects);
@@ -32,14 +31,13 @@
     if (!contactShadow) return;
     const mode = document.getElementById('bp-mode')?.value || 'song';
 
-    // The painted contact patch was authored for the full ensemble layout. When
-    // Free/Practice mode recentres a single instrument it otherwise stays behind
-    // at the old band position and reads as a "ghost" shadow. Let the real
-    // directional-light shadow ground focused instruments instead.
+    // The painted patch is only useful as broad grounding for the full ensemble.
+    // Focused Free/Practice scenes rely on the real directional-light shadow.
     contactShadow.visible = mode === 'song';
     if (mode === 'song') {
-      contactShadow.position.set(0, -0.004, -2.05);
-      contactShadow.scale.set(1, 1, 1);
+      // New band arrangement is wider and deeper than the old product-display row.
+      contactShadow.position.set(0, -0.004, -0.75);
+      contactShadow.scale.set(1.46, 1.63, 1);
     }
   }
 
@@ -51,24 +49,16 @@
   function refreshAfterLayoutChange() {
     syncContactShadow();
     refreshShadows();
-    // Some mode handlers update visibility/positions near the end of the same task.
-    // One microtask invalidation keeps the cached map aligned without enabling
-    // expensive per-frame shadow updates during key/string animation.
     queueMicrotask(() => {
       syncContactShadow();
       refreshShadows();
     });
   }
 
-  // These controls can change which instrument groups are visible or where they sit.
-  // The renderer intentionally keeps shadowMap.autoUpdate=false for performance, so
-  // layout changes must invalidate the cached shadow map explicitly.
   for (const id of ['bp-song', 'bp-mode', 'bp-instrument', 'pr-target']) {
     document.getElementById(id)?.addEventListener('change', refreshAfterLayoutChange);
   }
 
-  // Imported MIDI is parsed asynchronously. Song metadata changes after its stage
-  // layout has been applied, which gives us a reliable post-import invalidation point.
   const title = document.getElementById('bp-title');
   if (title) {
     new MutationObserver(refreshAfterLayoutChange).observe(title, {
@@ -78,7 +68,8 @@
     });
   }
 
-  // Keep an explicit hook for future scene/layout code without turning dynamic
-  // shadows back on globally.
+  // Initial scene assembly also needs one sync after app.js has created everything.
+  requestAnimationFrame(() => requestAnimationFrame(refreshAfterLayoutChange));
+
   window.refreshVirtualBandShadows = refreshAfterLayoutChange;
 })();
