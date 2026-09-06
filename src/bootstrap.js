@@ -21,13 +21,15 @@ async function boot() {
     './src/instruments/keyboard.js',
     './src/instruments/drums.js',
     './src/instruments/electric-guitar.js',
+    // Stage hooks must be installed before app.js creates the Three.js scene.
+    './src/runtime/stage-layout.js',
+    './src/runtime/shadow-sync.js',
     './src/data/song-library-loader.js',
   ];
 
   for (const src of sourceOrder) await loadScript(src);
   await window.loadVirtualBandSongs();
   await loadScript('./src/runtime/app.js');
-  await loadScript('./src/runtime/shadow-sync.js');
 }
 
 boot().catch((error) => {
