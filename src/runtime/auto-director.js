@@ -4,7 +4,7 @@
 // Reads the already-loaded song library + transport UI, then only calls the public
 // VirtualBandCamera API. It never owns a second Three.js render loop.
 (() => {
-  const camera = window.VirtualBandCamera;
+  let camera = null;
   const songs = window.VIRTUAL_BAND_SONGS || {};
   const stage = document.getElementById('stage');
   const menu = document.getElementById('camera-menu');
@@ -13,11 +13,6 @@
   const playButton = document.getElementById('bp-play');
   const progress = document.getElementById('bp-progress');
   const timeLabel = document.getElementById('bp-time');
-
-  if (!camera || !stage || !songSelect || !modeSelect || !playButton || !progress) {
-    console.warn('[Director v3] camera or player UI unavailable; auto director disabled.');
-    return;
-  }
 
   const STORAGE_KEY = 'vb-director-enabled';
   const TICK_MS = 120;
@@ -42,6 +37,9 @@
   let cutCount = 0;
   let wasPlaying = false;
   let lastScores = [];
+  let timer = 0;
+  let attached = false;
+  let initTries = 0;
   const lastShown = new Map();
 
   function bpmFor(song) {
@@ -353,8 +351,6 @@
   }
 
   function installManualOverrideHooks() {
-    // Listen on the stage ancestor so Camera v2's stopImmediatePropagation on the canvas
-    // cannot hide a real user takeover from the director.
     stage.addEventListener('pointerdown', manualOverride, {capture:true,passive:true});
     stage.addEventListener('wheel', manualOverride, {capture:true,passive:true});
     menu?.addEventListener('click', event => {
@@ -383,26 +379,42 @@
     return roots.find(r => (r.name || '').toLowerCase().includes(text)) || null;
   }
 
-  setupUi();installManualOverrideHooks();
-  setStatus(enabled ? '等待播放' : '关闭');
-  const timer = window.setInterval(tick, TICK_MS);
+  function attachDirector() {
+    if (attached) return true;
+    camera = window.VirtualBandCamera;
+    if (!camera || !stage || !menu || !songSelect || !modeSelect || !playButton || !progress) return false;
 
-  window.VirtualBandDirector = {
-    enable(){enabled=true;localStorage.setItem(STORAGE_KEY,'1');manualHoldUntil=0;resetRun(false);setStatus(isPlaying()?'准备接管':'等待播放');},
-    disable(){enabled=false;localStorage.setItem(STORAGE_KEY,'0');setStatus('关闭');},
-    toggle(){enabled?this.disable():this.enable();return enabled;},
-    setStyle(style){return style === 'balanced';},
-    cutToStageView(view='front'){cutStage(['front','left','right','top'].includes(view)?view:'front','手动指令');},
-    cutToInstrument(target,view='overall'){
-      const root=resolveTarget(target);if(!root)return false;
-      camera.focusView(root,view);lastCutAt=performance.now();currentTarget=root.name||'manual';currentShot=view;return true;
-    },
-    hold(ms=MANUAL_HOLD_MS){manualHoldUntil=performance.now()+Math.max(0,Number(ms)||0);},
-    destroy(){window.clearInterval(timer);},
-    get state(){
-      return {enabled,style:'balanced',playing:isPlaying(),currentTarget,currentShot,manualHoldMs:Math.max(0,manualHoldUntil-performance.now()),scores:lastScores.map(item=>({...item}))};
-    },
-  };
+    setupUi();installManualOverrideHooks();
+    setStatus(enabled ? '等待播放' : '关闭');
+    timer = window.setInterval(tick, TICK_MS);
 
-  console.info('[Director v3] balanced MIDI-aware auto director attached');
+    window.VirtualBandDirector = {
+      enable(){enabled=true;localStorage.setItem(STORAGE_KEY,'1');manualHoldUntil=0;resetRun(false);setStatus(isPlaying()?'准备接管':'等待播放');},
+      disable(){enabled=false;localStorage.setItem(STORAGE_KEY,'0');setStatus('关闭');},
+      toggle(){enabled?this.disable():this.enable();return enabled;},
+      setStyle(style){return style === 'balanced';},
+      cutToStageView(view='front'){cutStage(['front','left','right','top'].includes(view)?view:'front','手动指令');},
+      cutToInstrument(target,view='overall'){
+        const root=resolveTarget(target);if(!root)return false;
+        camera.focusView(root,view);lastCutAt=performance.now();currentTarget=root.name||'manual';currentShot=view;return true;
+      },
+      hold(ms=MANUAL_HOLD_MS){manualHoldUntil=performance.now()+Math.max(0,Number(ms)||0);},
+      destroy(){if(timer)window.clearInterval(timer);timer=0;attached=false;},
+      get state(){
+        return {enabled,style:'balanced',playing:isPlaying(),currentTarget,currentShot,manualHoldMs:Math.max(0,manualHoldUntil-performance.now()),scores:lastScores.map(item=>({...item}))};
+      },
+    };
+
+    attached = true;
+    console.info('[Director v3] balanced MIDI-aware auto director attached');
+    return true;
+  }
+
+  function waitForDirectorRuntime() {
+    if (attachDirector()) return;
+    if (++initTries < 600) requestAnimationFrame(waitForDirectorRuntime);
+    else console.warn('[Director v3] camera or player UI unavailable after waiting; auto director disabled.');
+  }
+
+  waitForDirectorRuntime();
 })();
