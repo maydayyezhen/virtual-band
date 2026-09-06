@@ -37,6 +37,9 @@ async function boot() {
   await loadScript('./src/runtime/camera-runtime-bridge.js');
   await loadScript('./src/runtime/camera-controller.js');
   await loadScript('./src/runtime/auto-director.js');
+  // Agent-authored timelines sit above the automatic director and can temporarily own
+  // the camera for a song while preserving the user's manual override priority.
+  await loadScript('./src/runtime/agent-camera-arrangements.js');
 }
 
 boot().catch((error) => {
