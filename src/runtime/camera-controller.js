@@ -1,7 +1,7 @@
 'use strict';
 
-// Camera v2 · phase 2.2
-// Stage composition, instrument detail views, performer POVs and playback-aware transitions.
+// Camera v2 · phase 2.3
+// Stage composition, instrument detail views, performance-observation shots and playback-aware transitions.
 (() => {
   const T = THREE;
   const stage = document.getElementById('stage');
@@ -22,9 +22,9 @@
     bass:{yaw:.14,pitch:.13,fov:28,margin:1.20,distanceScale:1.06,bias:{x:0,y:-.09,z:0}},
   };
 
-  // Box3 views are model-presentation shots. Anchor views are authored in each root's
-  // local coordinates, so they remain attached to the actual player position when the
-  // stage layout rotates/scales/moves the instrument.
+  // Box3 views present the model. Anchor views below are observer cameras deliberately
+  // offset from the performer position so the moving keys/drum surfaces stay readable.
+  // Anchors live in root-local coordinates and therefore follow stage rotation/scale/moves.
   const INSTRUMENT_VIEWS = {
     keyboard:[
       {id:'overall',label:'整体',group:'display',spec:FOCUS.keyboard},
@@ -32,9 +32,9 @@
       {id:'upper',label:'61 键',group:'display',region:{y:[.60,.96]},spec:{yaw:-.31,pitch:.15,fov:27,margin:1.13,distanceScale:1.04,bias:{x:0,y:-.02,z:0}}},
       {id:'panel',label:'控制面板',group:'display',region:{y:[.54,.94],x:[.08,.92]},spec:{yaw:-.46,pitch:.28,fov:25,margin:1.12,distanceScale:1.01,bias:{x:0,y:-.03,z:0}}},
       {id:'pedals',label:'踏板',group:'display',region:{y:[0,.27],x:[.28,.72]},spec:{yaw:-.20,pitch:.22,fov:26,margin:1.15,distanceScale:1.04,bias:{x:0,y:.02,z:0}}},
-      {id:'player',label:'乐手视角',group:'perform',anchor:{camera:[0,11.20,4.40],target:[0,8.95,-.15],fov:40}},
-      {id:'playLower',label:'下层演奏',group:'perform',anchor:{camera:[0,9.55,3.55],target:[0,8.00,-.05],fov:37}},
-      {id:'playUpper',label:'上层演奏',group:'perform',anchor:{camera:[0,11.70,3.20],target:[0,10.30,-.75],fov:37}},
+      {id:'observeAll',label:'演奏总览',group:'perform',anchor:{camera:[8.8,12.8,8.0],target:[0,9.00,-.25],fov:34}},
+      {id:'observeLower',label:'下层观察',group:'perform',anchor:{camera:[7.7,10.65,6.65],target:[0,7.92,-.02],fov:31}},
+      {id:'observeUpper',label:'上层观察',group:'perform',anchor:{camera:[-7.0,12.75,6.55],target:[0,10.28,-.72],fov:31}},
     ],
     drums:[
       {id:'overall',label:'整体',group:'display',spec:FOCUS.drums},
@@ -42,9 +42,9 @@
       {id:'left34',label:'左前 3/4',group:'display',spec:{yaw:-.52,pitch:.17,fov:29,margin:1.16,distanceScale:1.04,bias:{x:-.02,y:-.05,z:0}}},
       {id:'right34',label:'右前 3/4',group:'display',spec:{yaw:.54,pitch:.17,fov:29,margin:1.16,distanceScale:1.04,bias:{x:.02,y:-.05,z:0}}},
       {id:'top',label:'高机位',group:'display',spec:{yaw:.14,pitch:.72,fov:31,margin:1.13,distanceScale:1.04,bias:{x:0,y:-.02,z:0}}},
-      {id:'player',label:'鼓手视角',group:'perform',anchor:{camera:[0,3.50,-3.20],target:[0,1.75,.20],fov:42}},
-      {id:'hihatShoulder',label:'踩镲肩位',group:'perform',anchor:{camera:[.65,3.25,-2.80],target:[.45,1.72,-.05],fov:39}},
-      {id:'rideShoulder',label:'Ride 肩位',group:'perform',anchor:{camera:[-.65,3.25,-2.80],target:[-.35,1.78,-.05],fov:39}},
+      {id:'observeAll',label:'演奏总览',group:'perform',anchor:{camera:[4.9,4.75,5.75],target:[0,1.82,-.10],fov:35}},
+      {id:'observeLeft',label:'左侧观察',group:'perform',anchor:{camera:[4.65,3.75,.55],target:[.10,1.82,-.30],fov:34}},
+      {id:'observeRight',label:'右侧观察',group:'perform',anchor:{camera:[-4.65,3.75,.55],target:[-.10,1.82,-.30],fov:34}},
     ],
     acoustic:[
       {id:'overall',label:'整体',group:'display',spec:FOCUS.acoustic},
@@ -214,7 +214,6 @@
   function fallbackRender(now=performance.now()){
     if(!ready||!legacyRender)return;
     applyPose();
-    // Playback already drives app.js' full-scene render loop. Avoid a second WebGL render.
     if(now-lastExternalRender>48)legacyRender(scene,camera);
   }
   function transitionPump(now){
@@ -270,7 +269,7 @@
     const list=currentInstrumentViews();
     const groups=[
       {id:'display',label:'展示',items:list.filter(item=>(item.group||'display')==='display')},
-      {id:'perform',label:'演奏',items:list.filter(item=>item.group==='perform')},
+      {id:'perform',label:'演奏观察',items:list.filter(item=>item.group==='perform')},
     ].filter(group=>group.items.length);
     for(const group of groups){
       const block=document.createElement('div');block.className='camera-view-group';
@@ -290,7 +289,7 @@
       button.setAttribute('aria-pressed',String(button.dataset.focusView===focusedView)));
     const note=document.getElementById('camera-v2-note');
     if(note)note.textContent=focusedRoot
-      ?`${rootLabel(focusedRoot)} · 展示 / 演奏机位 · 双击空地返回乐队`
+      ?`${rootLabel(focusedRoot)} · 展示 / 演奏观察机位 · 双击空地返回乐队`
       :'摄影机位 · 双击乐器聚焦 · 左拖旋转 · 右拖平移';
   }
 
@@ -587,7 +586,7 @@
         };
       },
     };
-    console.info('[Camera v2] phase 2.2 performer views attached');
+    console.info('[Camera v2] phase 2.3 performance observation views attached');
     return true;
   }
 
