@@ -1,26 +1,64 @@
 'use strict';
 
-// Camera v2, phase 1. This file runs after app.js has installed its legacy listeners.
-// camera-capture.js exposes the real stage renderer/scene/camera; this controller then
-// becomes authoritative only for the final stage pose while leaving MIDI/audio logic alone.
+// Camera v2, phase 1 + composition pass.
+// The controller keeps Box3/FOV fitting as a safety frame, then applies authored
+// photographic composition on top: lens, target bias, angle and breathing room.
 (() => {
   const T = THREE;
   const stage = document.getElementById('stage');
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+  // Bias values are fractions of the current visible-band Box3.  The automatic fit
+  // still guarantees that every visible instrument remains inside the frame; these
+  // values only decide where the band sits inside that safe frame.
   const VIEWS = {
-    front: { yaw:  0.02, pitch: 0.18, margin: 1.18 },
-    left:  { yaw: -0.68, pitch: 0.23, margin: 1.16 },
-    right: { yaw:  0.68, pitch: 0.23, margin: 1.16 },
-    top:   { yaw:  0.06, pitch: 0.92, margin: 1.12 },
+    front: {
+      yaw: 0.10, pitch: 0.13, fov: 30, margin: 1.08, distanceScale: 1.08,
+      bias: { x: 0.01, y: -0.12, z: 0.08 },
+    },
+    left: {
+      yaw: -0.62, pitch: 0.16, fov: 31, margin: 1.07, distanceScale: 1.06,
+      bias: { x: -0.055, y: -0.10, z: 0.035 },
+    },
+    right: {
+      yaw: 0.62, pitch: 0.16, fov: 31, margin: 1.07, distanceScale: 1.06,
+      bias: { x: 0.055, y: -0.10, z: 0.035 },
+    },
+    top: {
+      yaw: 0.13, pitch: 0.62, fov: 33, margin: 1.08, distanceScale: 1.08,
+      bias: { x: 0, y: -0.045, z: 0.02 },
+    },
+  };
+
+  const FOCUS = {
+    keyboard: {
+      yaw: -0.43, pitch: 0.14, fov: 30, margin: 1.18, distanceScale: 1.08,
+      bias: { x: 0, y: -0.07, z: 0 },
+    },
+    drums: {
+      yaw: 0.38, pitch: 0.17, fov: 29, margin: 1.18, distanceScale: 1.05,
+      bias: { x: 0, y: -0.055, z: 0 },
+    },
+    acoustic: {
+      yaw: -0.18, pitch: 0.13, fov: 28, margin: 1.20, distanceScale: 1.06,
+      bias: { x: 0, y: -0.085, z: 0 },
+    },
+    electric: {
+      yaw: 0.20, pitch: 0.13, fov: 28, margin: 1.20, distanceScale: 1.06,
+      bias: { x: 0, y: -0.085, z: 0 },
+    },
+    bass: {
+      yaw: 0.14, pitch: 0.13, fov: 28, margin: 1.20, distanceScale: 1.06,
+      bias: { x: 0, y: -0.09, z: 0 },
+    },
   };
 
   let renderer = null, scene = null, camera = null, canvas = null;
   let legacyRender = null, ready = false, raf = 0, lastFrame = performance.now();
   let activeView = 'front', focusedRoot = null, baseDistance = 24;
 
-  const state = { target: new T.Vector3(0,4,0), yaw:0, pitch:.18, distance:30 };
-  const want  = { target: state.target.clone(), yaw:0, pitch:.18, distance:30 };
+  const state = { target: new T.Vector3(0,4,0), yaw:0, pitch:.13, distance:30, fov:30 };
+  const want  = { target: state.target.clone(), yaw:0, pitch:.13, distance:30, fov:30 };
   const roots = [];
 
   function isBandRoot(object) {
@@ -40,6 +78,16 @@
     const a = /Wish Acoustic (\d+)$/.exec(name); if (a) return `木吉他 ${a[1]}`;
     const e = /Electric (\d+)$/.exec(name); if (e) return `电吉他 ${e[1]}`;
     return name || '乐器';
+  }
+
+  function focusType(root) {
+    const label = rootLabel(root);
+    if (label === '双层键盘') return 'keyboard';
+    if (label === '架子鼓') return 'drums';
+    if (label === 'Bass') return 'bass';
+    if (label.startsWith('木吉他')) return 'acoustic';
+    if (label.startsWith('电吉他')) return 'electric';
+    return 'acoustic';
   }
 
   function collectRoots() {
@@ -75,18 +123,28 @@
     ];
   }
 
-  function fitBox(box, yaw, pitch, margin=1.16, focused=false) {
-    if (!camera) return null;
+  function composedTarget(box, spec) {
     const size = box.getSize(new T.Vector3());
     const target = box.getCenter(new T.Vector3());
-    if (!focused) target.y -= size.y * .045;
+    const b = spec?.bias || {};
+    target.x += size.x * (b.x || 0);
+    target.y += size.y * (b.y || 0);
+    target.z += size.z * (b.z || 0);
+    return target;
+  }
 
+  // Calculate only the minimum safe distance. Artistic framing happens through the
+  // supplied target, lens and final distance multiplier instead of magic width/height.
+  function fitBox(box, yaw, pitch, fov, margin=1.08, targetOverride=null, focused=false) {
+    if (!camera) return null;
+    const size = box.getSize(new T.Vector3());
+    const target = targetOverride ? targetOverride.clone() : box.getCenter(new T.Vector3());
     const cp=Math.cos(pitch), sp=Math.sin(pitch);
     const back = new T.Vector3(Math.sin(yaw)*cp, sp, Math.cos(yaw)*cp);
     const forward = back.clone().multiplyScalar(-1);
     const right = new T.Vector3().crossVectors(forward,new T.Vector3(0,1,0)).normalize();
     const up = new T.Vector3().crossVectors(right,forward).normalize();
-    const vfov=T.MathUtils.degToRad(camera.fov);
+    const vfov=T.MathUtils.degToRad(fov);
     const hfov=2*Math.atan(Math.tan(vfov/2)*Math.max(.25,camera.aspect||1));
     const tanV=Math.tan(vfov/2), tanH=Math.tan(hfov/2);
     let distance=.1;
@@ -99,7 +157,7 @@
     }
 
     const diagonal=Math.max(.1,size.length());
-    distance=Math.max(distance, diagonal*(focused?.50:.40), focused?2.4:8.5);
+    distance=Math.max(distance, diagonal*(focused?.48:.38), focused?2.4:8.5);
     return {target,distance};
   }
 
@@ -110,6 +168,7 @@
   function applyPose() {
     if (!camera) return;
     const cp=Math.cos(state.pitch);
+    camera.fov=state.fov;
     camera.position.set(
       state.target.x + Math.sin(state.yaw)*cp*state.distance,
       Math.max(.18,state.target.y + Math.sin(state.pitch)*state.distance),
@@ -131,14 +190,15 @@
   function frame(now) {
     raf=0;
     const dt=Math.min(.05,Math.max(.001,(now-lastFrame)/1000));
-    const ease=1-Math.exp(-dt*10);
+    const ease=1-Math.exp(-dt*9.2);
     lastFrame=now;
     state.target.lerp(want.target,ease);
     state.yaw += (want.yaw-state.yaw)*ease;
     state.pitch += (want.pitch-state.pitch)*ease;
     state.distance += (want.distance-state.distance)*ease;
+    state.fov += (want.fov-state.fov)*ease;
     renderNow();
-    const moving=state.target.distanceTo(want.target)+Math.abs(state.yaw-want.yaw)+Math.abs(state.pitch-want.pitch)+Math.abs(state.distance-want.distance)>.0015;
+    const moving=state.target.distanceTo(want.target)+Math.abs(state.yaw-want.yaw)+Math.abs(state.pitch-want.pitch)+Math.abs(state.distance-want.distance)+Math.abs(state.fov-want.fov)*.02>.0015;
     if (moving) scheduleFrame();
   }
 
@@ -148,13 +208,14 @@
     raf=requestAnimationFrame(frame);
   }
 
-  function setDesired(target,yaw,pitch,distance,instant=false) {
+  function setDesired(target,yaw,pitch,distance,fov=30,instant=false) {
     want.target.copy(target);
     want.yaw=shortestYaw(state.yaw,yaw);
-    want.pitch=T.MathUtils.clamp(pitch,.10,1.22);
+    want.pitch=T.MathUtils.clamp(pitch,.08,1.12);
     want.distance=Math.max(.8,distance);
+    want.fov=T.MathUtils.clamp(fov,24,42);
     if (instant || reducedMotion) {
-      state.target.copy(want.target);state.yaw=want.yaw;state.pitch=want.pitch;state.distance=want.distance;
+      state.target.copy(want.target);state.yaw=want.yaw;state.pitch=want.pitch;state.distance=want.distance;state.fov=want.fov;
       renderNow();
     } else scheduleFrame();
   }
@@ -163,7 +224,7 @@
     document.querySelectorAll('#camera-menu [data-camera]').forEach(button=>
       button.setAttribute('aria-pressed',String(button.dataset.camera===activeView&&!focusedRoot)));
     const note=document.getElementById('camera-v2-note');
-    if (note) note.textContent=focusedRoot ? `聚焦 · ${rootLabel(focusedRoot)} · 双击空地返回全景` : '双击乐器聚焦 · 左拖旋转 · 右拖平移 · 滚轮缩放';
+    if (note) note.textContent=focusedRoot ? `聚焦 · ${rootLabel(focusedRoot)} · 双击空地返回全景` : '摄影机位 · 双击乐器聚焦 · 左拖旋转 · 右拖平移';
   }
 
   function goView(id='front',instant=false) {
@@ -171,28 +232,26 @@
     const objects=visibleRoots();
     const box=boundsFor(objects); if (!box) return false;
     const spec=VIEWS[id]||VIEWS.front;
-    const fit=fitBox(box,spec.yaw,spec.pitch,spec.margin,false); if (!fit) return false;
-    focusedRoot=null;activeView=id;baseDistance=fit.distance;
-    setDesired(fit.target,spec.yaw,spec.pitch,fit.distance,instant);updateUi();return true;
+    const target=composedTarget(box,spec);
+    const fit=fitBox(box,spec.yaw,spec.pitch,spec.fov,spec.margin,target,false); if (!fit) return false;
+    const distance=fit.distance*(spec.distanceScale||1);
+    focusedRoot=null;activeView=id;baseDistance=distance;
+    setDesired(fit.target,spec.yaw,spec.pitch,distance,spec.fov,instant);updateUi();return true;
   }
 
   function focusRoot(root,instant=false) {
     if (!root || !worldVisible(root)) return false;
     const box=boundsFor([root]); if (!box) return false;
-    const label=rootLabel(root);
-    let yaw=.03,pitch=.18;
-    if (label==='架子鼓') { yaw=.16; pitch=.22; }
-    else if (label.startsWith('电吉他')) yaw=.10;
-    else if (label.startsWith('木吉他')) yaw=-.08;
-    else if (label==='Bass') yaw=.08;
-    else if (label==='双层键盘') { yaw=.03; pitch=.16; }
-    const fit=fitBox(box,yaw,pitch,1.28,true); if (!fit) return false;
-    focusedRoot=root;activeView='focus';baseDistance=fit.distance;
-    setDesired(fit.target,yaw,pitch,fit.distance,instant);updateUi();return true;
+    const spec=FOCUS[focusType(root)]||FOCUS.acoustic;
+    const target=composedTarget(box,spec);
+    const fit=fitBox(box,spec.yaw,spec.pitch,spec.fov,spec.margin,target,true); if (!fit) return false;
+    const distance=fit.distance*(spec.distanceScale||1);
+    focusedRoot=root;activeView='focus';baseDistance=distance;
+    setDesired(fit.target,spec.yaw,spec.pitch,distance,spec.fov,instant);updateUi();return true;
   }
 
   function zoomLimits() {
-    return focusedRoot ? [Math.max(.9,baseDistance*.34),Math.max(7,baseDistance*2.7)] : [Math.max(5,baseDistance*.56),Math.max(20,baseDistance*2.4)];
+    return focusedRoot ? [Math.max(.9,baseDistance*.36),Math.max(7,baseDistance*2.7)] : [Math.max(5,baseDistance*.58),Math.max(20,baseDistance*2.35)];
   }
 
   function zoomBy(factor) {
@@ -202,8 +261,8 @@
   }
 
   function orbit(dx,dy) {
-    state.yaw=want.yaw=state.yaw-dx*.006;
-    state.pitch=want.pitch=T.MathUtils.clamp(state.pitch-dy*.0045,.10,1.22);
+    state.yaw=want.yaw=state.yaw-dx*.0056;
+    state.pitch=want.pitch=T.MathUtils.clamp(state.pitch-dy*.0042,.08,1.12);
     activeView=focusedRoot?'focus':'custom';updateUi();renderNow();
   }
 
@@ -269,12 +328,13 @@
   function setupUi() {
     const menu=document.getElementById('camera-menu');if(!menu)return;
     const controls=menu.querySelector('.controls');
-    if(controls)controls.innerHTML='<button class="view" data-camera="front" aria-pressed="true">正面</button><button class="view" data-camera="left" aria-pressed="false">左侧</button><button class="view" data-camera="right" aria-pressed="false">右侧</button><button class="view" data-camera="top" aria-pressed="false">俯视</button>';
+    if(controls)controls.innerHTML='<button class="view" data-camera="front" aria-pressed="true">正面</button><button class="view" data-camera="left" aria-pressed="false">左侧</button><button class="view" data-camera="right" aria-pressed="false">右侧</button><button class="view" data-camera="top" aria-pressed="false">高机位</button>';
     const tools=menu.querySelector('.right-tools');
     if(tools)tools.innerHTML='<button class="circle" id="zoom-in" type="button">＋</button><button class="circle" id="zoom-out" type="button">−</button><button class="circle" id="reset" type="button">⌂ 全景</button>';
     const panel=menu.querySelector('.camera-panel');
-    const note=document.createElement('div');note.id='camera-v2-note';note.className='camera-v2-note';note.textContent='双击乐器聚焦 · 左拖旋转 · 右拖平移 · 滚轮缩放';panel?.appendChild(note);
-    const style=document.createElement('style');style.textContent='.camera-panel{width:214px!important}.camera-v2-note{margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:9px;line-height:1.5;color:#73878e}#camera-menu #reset{font-size:10px;white-space:nowrap}';document.head.appendChild(style);
+    const oldNote=panel?.querySelector('#camera-v2-note');if(oldNote)oldNote.remove();
+    const note=document.createElement('div');note.id='camera-v2-note';note.className='camera-v2-note';note.textContent='摄影机位 · 双击乐器聚焦 · 左拖旋转 · 右拖平移';panel?.appendChild(note);
+    if(!document.getElementById('camera-v2-style')){const style=document.createElement('style');style.id='camera-v2-style';style.textContent='.camera-panel{width:214px!important}.camera-v2-note{margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:9px;line-height:1.5;color:#73878e}#camera-menu #reset{font-size:10px;white-space:nowrap}';document.head.appendChild(style);}
     menu.querySelectorAll('[data-camera]').forEach(button=>button.addEventListener('click',event=>{stop(event);goView(button.dataset.camera);stage?.focus({preventScroll:true});},true));
     menu.querySelector('#zoom-in')?.addEventListener('click',event=>{stop(event);zoomBy(.82);},true);
     menu.querySelector('#zoom-out')?.addEventListener('click',event=>{stop(event);zoomBy(1/.82);},true);
@@ -295,7 +355,8 @@
     for(const id of ['bp-song','bp-mode','bp-instrument','pr-target'])document.getElementById(id)?.addEventListener('change',refitSoon);
     window.addEventListener('resize',()=>requestAnimationFrame(()=>{if(focusedRoot)focusRoot(focusedRoot,true);else if(VIEWS[activeView])goView(activeView,true);else renderNow();}));
 
-    window.VirtualBandCamera={home:()=>goView('front'),view:id=>goView(id),focus:focusRoot,refit:refitSoon,get roots(){return [...roots]},get state(){return {view:activeView,focused:focusedRoot?.name||null,yaw:state.yaw,pitch:state.pitch,distance:state.distance,target:state.target.clone()}}};
+    window.VirtualBandCamera={home:()=>goView('front'),view:id=>goView(id),focus:focusRoot,refit:refitSoon,get roots(){return [...roots]},get state(){return {view:activeView,focused:focusedRoot?.name||null,yaw:state.yaw,pitch:state.pitch,distance:state.distance,fov:state.fov,target:state.target.clone()}}};
+    console.info('[Camera v2] composition controller attached');
     return true;
   }
 
