@@ -57,13 +57,20 @@
     });
   }
 
+  function syncStagePresentation() {
+    refreshAfterLayoutChange();
+    // Programmatic MIDI import changes the visible stage without necessarily firing
+    // a native <select> change event. Camera v2 exposes a deferred refit hook for it.
+    window.VirtualBandCamera?.refit?.();
+  }
+
   for (const id of ['bp-song', 'bp-mode', 'bp-instrument', 'pr-target']) {
     document.getElementById(id)?.addEventListener('change', refreshAfterLayoutChange);
   }
 
   const title = document.getElementById('bp-title');
   if (title) {
-    new MutationObserver(refreshAfterLayoutChange).observe(title, {
+    new MutationObserver(syncStagePresentation).observe(title, {
       childList: true,
       characterData: true,
       subtree: true,
