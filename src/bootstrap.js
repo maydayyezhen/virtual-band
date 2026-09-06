@@ -21,9 +21,8 @@ async function boot() {
     './src/instruments/keyboard.js',
     './src/instruments/drums.js',
     './src/instruments/electric-guitar.js',
-    // Capture the exact stage camera before app.js starts. The actual controls are
-    // attached only after app.js has installed its legacy handlers, so Camera v2 can
-    // replace those user-facing interactions cleanly instead of racing startup.
+    // Capture the actual stage Scene/Camera before app.js starts. This no longer hooks
+    // WebGLRenderer.render, because Three.js installs render on renderer instances.
     './src/runtime/camera-capture.js',
     './src/runtime/stage-layout.js',
     './src/runtime/shadow-sync.js',
@@ -33,6 +32,9 @@ async function boot() {
   for (const src of sourceOrder) await loadScript(src);
   await window.loadVirtualBandSongs();
   await loadScript('./src/runtime/app.js');
+  // app.js has now created the shared renderer. Bridge it with the captured Scene and
+  // Camera, then attach the new composition/controller layer.
+  await loadScript('./src/runtime/camera-runtime-bridge.js');
   await loadScript('./src/runtime/camera-controller.js');
 }
 
