@@ -33,9 +33,10 @@ async function boot() {
   await window.loadVirtualBandSongs();
   await loadScript('./src/runtime/app.js');
   // app.js has now created the shared renderer. Bridge it with the captured Scene and
-  // Camera, then attach the new composition/controller layer.
+  // Camera, attach the authored camera layer, then layer the MIDI-aware director on top.
   await loadScript('./src/runtime/camera-runtime-bridge.js');
   await loadScript('./src/runtime/camera-controller.js');
+  await loadScript('./src/runtime/auto-director.js');
 }
 
 boot().catch((error) => {
