@@ -1,9 +1,10 @@
 'use strict';
 
-// Agent-authored camera arrangements sit above the MIDI auto director.
-// Priority: user manual control > agent arrangement > MIDI auto director.
+// Agent camera layer. The Agent plan must be grounded in the loaded MIDI data.
+// Priority: user manual control > Agent arrangement > MIDI auto director.
 (() => {
   const $ = id => document.getElementById(id);
+  const songs = window.VIRTUAL_BAND_SONGS || {};
   const stage = $('stage');
   const menu = $('camera-menu');
   const songSelect = $('bp-song');
@@ -16,10 +17,11 @@
   const MANUAL_HOLD = 8000;
 
   const registry = new Map();
+  const analysisCache = new Map();
   let camera = null;
   let director = null;
   const storedArrangement = localStorage.getItem(STORE);
-  let selectedId = storedArrangement === null ? 'wish-demo' : storedArrangement;
+  let selectedId = storedArrangement === null || storedArrangement === 'wish-demo' ? 'wish-midi-demo' : storedArrangement;
   let activeRun = null;
   let cueIndex = 0;
   let lastProgress = 0;
@@ -30,43 +32,171 @@
   let tries = 0;
   let timer = 0;
 
-  const WISH_DEMO = {
-    id: 'wish-demo',
-    song: 'wish',
-    label: 'Wish You Were Here · Agent Demo',
-    cues: [
-      {p:0.000, kind:'stage', view:'front', label:'开场全景'},
-      {p:0.035, kind:'instrument', target:'acoustic 1', view:'overall', label:'木吉他 1'},
-      {p:0.075, kind:'instrument', target:'acoustic 1', view:'neck', label:'木吉他 1 指板'},
-      {p:0.115, kind:'stage', view:'left', label:'舞台左侧'},
-      {p:0.155, kind:'instrument', target:'acoustic 2', view:'overall', label:'木吉他 2'},
-      {p:0.195, kind:'instrument', target:'keyboard', view:'observeAll', label:'键盘演奏'},
-      {p:0.235, kind:'instrument', target:'drums', view:'observeAll', label:'鼓组演奏'},
-      {p:0.275, kind:'instrument', target:'bass', view:'overall', label:'Bass'},
-      {p:0.315, kind:'instrument', target:'electric 1', view:'overall', label:'电吉他 1'},
-      {p:0.355, kind:'stage', view:'front', label:'回全景'},
-      {p:0.395, kind:'instrument', target:'keyboard', view:'observeLower', label:'下层键盘'},
-      {p:0.435, kind:'instrument', target:'drums', view:'observeLeft', label:'鼓组左侧'},
-      {p:0.475, kind:'instrument', target:'acoustic 3', view:'overall', label:'木吉他 3'},
-      {p:0.515, kind:'instrument', target:'bass', view:'neck', label:'Bass 指板'},
-      {p:0.555, kind:'instrument', target:'electric 2', view:'overall', label:'电吉他 2'},
-      {p:0.595, kind:'stage', view:'right', label:'舞台右侧'},
-      {p:0.635, kind:'instrument', target:'keyboard', view:'observeUpper', label:'上层键盘'},
-      {p:0.675, kind:'instrument', target:'drums', view:'observeRight', label:'鼓组右侧'},
-      {p:0.715, kind:'instrument', target:'electric 3', view:'neck', label:'电吉他 3 指板'},
-      {p:0.755, kind:'instrument', target:'acoustic 1', view:'overall', label:'木吉他回访'},
-      {p:0.795, kind:'stage', view:'top', label:'高机位'},
-      {p:0.835, kind:'instrument', target:'bass', view:'overall', label:'Bass 回访'},
-      {p:0.875, kind:'instrument', target:'keyboard', view:'observeAll', label:'键盘回访'},
-      {p:0.915, kind:'instrument', target:'drums', view:'observeAll', label:'鼓组回访'},
-      {p:0.955, kind:'stage', view:'front', label:'收尾全景'},
-    ],
-  };
+  const clamp = (v,a,b) => Math.min(b, Math.max(a,v));
+
+  function describeEvent(ev) {
+    const i = ev?.i;
+    if (i === 'lower' || i === 'upper') return {id:'keyboard', type:'keyboard', target:'keyboard', label:'键盘', sub:i};
+    if (i === 'drums') return {id:'drums', type:'drums', target:'drums', label:'架子鼓', sub:'drums'};
+    if (i === 'bass') return {id:'bass', type:'bass', target:'bass', label:'Bass', sub:'bass'};
+    if (i === 'guitar') {
+      const index = Math.max(0, Number(ev.x) || 0);
+      if (index > 2) return null;
+      return {id:`acoustic:${index}`, type:'acoustic', target:`acoustic ${index + 1}`, label:`木吉他 ${index + 1}`, sub:'guitar'};
+    }
+    if (i === 'electric') {
+      const index = Math.max(0, Number(ev.x) || 0);
+      if (index > 2) return null;
+      return {id:`electric:${index}`, type:'electric', target:`electric ${index + 1}`, label:`电吉他 ${index + 1}`, sub:'electric'};
+    }
+    return null;
+  }
+
+  function analyzeSong(songId) {
+    if (analysisCache.has(songId)) return analysisCache.get(songId);
+    const song = songs[songId];
+    if (!song || !Array.isArray(song.events)) return null;
+    const groups = new Map();
+    let first = Infinity, last = 0;
+    for (const ev of song.events) {
+      const d = describeEvent(ev);
+      if (!d) continue;
+      let group = groups.get(d.id);
+      if (!group) {
+        group = {...d, events:[]};
+        groups.set(d.id, group);
+      }
+      const s = Number(ev.s ?? 0);
+      const rawEnd = Number(ev.e ?? ev.ve ?? s + .08);
+      const e = Number.isFinite(rawEnd) ? Math.max(s, rawEnd) : s + .08;
+      const v = clamp(Number(ev.v ?? 96), 1, 127) / 127;
+      group.events.push({s,e,v,sub:d.sub});
+      first = Math.min(first, s);
+      last = Math.max(last, e);
+    }
+    for (const group of groups.values()) group.events.sort((a,b) => a.s - b.s);
+    const result = {
+      song,
+      duration: Math.max(.001, Number(song.duration) || last || 1),
+      first: Number.isFinite(first) ? first : 0,
+      last,
+      groups:[...groups.values()],
+      byTarget:new Map([...groups.values()].map(group => [group.target, group])),
+    };
+    analysisCache.set(songId, result);
+    return result;
+  }
+
+  function statsAt(group, t, ahead=2.8, back=.25) {
+    const start = Math.max(0, t - back);
+    const end = t + ahead;
+    let hits = 0, onsets = 0, sustaining = 0, weight = 0, lower = 0, upper = 0;
+    for (const ev of group.events) {
+      if (ev.s > end) break;
+      if (ev.e < start) continue;
+      hits++;
+      if (ev.s >= t - .08 && ev.s <= t + 1.6) onsets++;
+      if (ev.s <= t && ev.e >= t) sustaining++;
+      const overlap = Math.max(0, Math.min(ev.e, end) - Math.max(ev.s, start));
+      const contribution = .45 + ev.v * .8 + Math.min(.65, overlap * .35);
+      weight += contribution;
+      if (ev.sub === 'lower') lower += contribution;
+      else if (ev.sub === 'upper') upper += contribution;
+    }
+    return {hits,onsets,sustaining,weight,lower,upper};
+  }
+
+  function quietBefore(group, t) {
+    let hits = 0;
+    for (const ev of group.events) {
+      if (ev.s >= t - .45) break;
+      if (ev.e >= t - 3.0 && ev.s <= t - .45) hits++;
+    }
+    return hits === 0;
+  }
+
+  function chooseView(candidate, serial) {
+    if (candidate.type === 'keyboard') {
+      if (candidate.stats.lower > candidate.stats.upper * 1.35) return 'observeLower';
+      if (candidate.stats.upper > candidate.stats.lower * 1.35) return 'observeUpper';
+      return 'observeAll';
+    }
+    if (candidate.type === 'drums') return ['observeAll','observeLeft','observeRight'][serial % 3];
+    if (candidate.type === 'electric' || candidate.type === 'acoustic' || candidate.type === 'bass') {
+      return serial % 3 === 1 ? 'neck' : 'overall';
+    }
+    return 'overall';
+  }
+
+  function buildMidiArrangement(songId, options={}) {
+    const analysis = analyzeSong(songId);
+    if (!analysis) return null;
+    const duration = analysis.duration;
+    const shotSeconds = clamp(Number(options.shotSeconds) || 5.4, 4.2, 8.0);
+    const id = options.id || `${songId}-midi-plan`;
+    const label = options.label || `${songId} · MIDI 分析编排`;
+    const cues = [{p:0, t:0, kind:'stage', view:'front', label:'开场全景'}];
+    const lastShown = new Map();
+    const shownCount = new Map();
+    let lastTarget = '';
+    let serial = 0;
+    let t = Math.max(2.0, analysis.first + .25);
+
+    while (t < Math.min(duration - 2.2, analysis.last + .8) && serial < 72) {
+      const candidates = [];
+      for (const group of analysis.groups) {
+        const stats = statsAt(group, t);
+        if (!stats.hits || (!stats.onsets && !stats.sustaining)) continue;
+        const since = t - (lastShown.get(group.target) ?? -999);
+        const count = shownCount.get(group.target) || 0;
+        const entrance = quietBefore(group, t) && stats.onsets > 0;
+        let score = stats.weight * (entrance ? 1.55 : 1);
+        score *= clamp(.72 + since / 18, .72, 1.45);
+        score /= 1 + count * .055;
+        if (group.target === lastTarget) score *= .48;
+        candidates.push({...group, stats, score, entrance});
+      }
+      candidates.sort((a,b) => b.score - a.score);
+
+      const activeCount = candidates.filter(c => c.stats.weight >= 1.1).length;
+      const stageSlot = serial > 0 && serial % 4 === 0 && activeCount >= 3;
+      if (stageSlot || !candidates.length) {
+        const stageViews = ['front','left','right','front','top'];
+        const view = stageViews[Math.floor(serial / 4) % stageViews.length];
+        cues.push({p:clamp(t / duration,0,1), t, kind:'stage', view, label:activeCount >= 4 ? '合奏全景' : '舞台关系'});
+        lastTarget = 'stage';
+      } else {
+        let chosen = candidates[0];
+        if (chosen.target === lastTarget && candidates[1] && candidates[1].score >= chosen.score * .55) chosen = candidates[1];
+        const view = chooseView(chosen, serial);
+        cues.push({
+          p:clamp(t / duration,0,1), t, kind:'instrument', target:chosen.target, view,
+          label:`${chosen.label}${chosen.entrance ? ' · 进入' : ''}`,
+          midi:{hits:chosen.stats.hits, weight:Number(chosen.stats.weight.toFixed(2))},
+        });
+        lastShown.set(chosen.target, t);
+        shownCount.set(chosen.target, (shownCount.get(chosen.target) || 0) + 1);
+        lastTarget = chosen.target;
+      }
+      serial++;
+      t += activeCount >= 4 ? shotSeconds * .92 : shotSeconds;
+    }
+
+    const endTime = Math.min(duration - .25, Math.max(0, analysis.last - 1.0));
+    if (endTime > 0) cues.push({p:clamp(endTime / duration,0,1), t:endTime, kind:'stage', view:'front', label:'收尾全景'});
+    return {id, song:songId, label, midiGrounded:true, midiGuard:true, generatedAt:Date.now(), cues};
+  }
 
   function register(arrangement) {
     if (!arrangement?.id || !arrangement?.song || !Array.isArray(arrangement.cues)) return false;
+    const analysis = analyzeSong(arrangement.song);
+    const duration = analysis?.duration || 1;
     const cues = arrangement.cues
-      .map(cue => ({...cue, p:Number(cue.p)}))
+      .map(cue => {
+        const t = Number(cue.t);
+        const p = Number.isFinite(Number(cue.p)) ? Number(cue.p) : (Number.isFinite(t) ? t / duration : NaN);
+        return {...cue, p, t:Number.isFinite(t) ? t : p * duration};
+      })
       .filter(cue => Number.isFinite(cue.p) && cue.p >= 0 && cue.p <= 1)
       .sort((a,b) => a.p - b.p);
     registry.set(arrangement.id, {...arrangement, cues});
@@ -80,7 +210,7 @@
 
   function progressRatio() {
     const p = parseFloat(progress?.style.width || '');
-    return Number.isFinite(p) ? Math.max(0, Math.min(1, p / 100)) : 0;
+    return Number.isFinite(p) ? clamp(p / 100, 0, 1) : 0;
   }
 
   function resolveRoot(target) {
@@ -110,6 +240,16 @@
     return view;
   }
 
+  function cueIsMidiValid(arrangement, cue) {
+    if (cue.kind !== 'instrument' || arrangement.midiGuard === false) return true;
+    const analysis = analyzeSong(arrangement.song);
+    const group = analysis?.byTarget.get(cue.target);
+    if (!group) return false;
+    const t = Number.isFinite(Number(cue.t)) ? Number(cue.t) : cue.p * analysis.duration;
+    const stats = statsAt(group, t, 2.3, .35);
+    return stats.hits > 0 && (stats.onsets > 0 || stats.sustaining > 0);
+  }
+
   function setStatus(text, active=false) {
     const status = $('camera-agent-status');
     const section = menu?.querySelector('.camera-agent-section');
@@ -122,7 +262,7 @@
     autoWasEnabled = !!director.state?.enabled;
     if (autoWasEnabled) {
       director.disable();
-      // Suspending auto for an Agent timeline is temporary; do not persist it as a user preference.
+      // This is a temporary override, not a user preference change.
       localStorage.setItem(AUTO_STORE, '1');
     }
     autoSuspended = true;
@@ -136,18 +276,22 @@
     if (restore) director.enable();
   }
 
-  function executeCue(cue) {
+  function executeCue(arrangement, cue) {
     if (!cue || performance.now() < manualUntil) return false;
+    if (!cueIsMidiValid(arrangement, cue)) {
+      setStatus(`跳过 · ${cue.label || cue.target} 未演奏`, true);
+      return false;
+    }
     if (cue.kind === 'stage') {
       camera.view(cue.view || 'front');
-      setStatus(`Agent · ${cue.label || cue.view || '舞台'}`, true);
+      setStatus(`Agent · ${cue.label || cue.view || '舞台'} · MIDI✓`, true);
       return true;
     }
     if (cue.kind === 'instrument') {
       const root = resolveRoot(cue.target);
       if (!root) return false;
       camera.focusView(root, normalizeView(root, cue.view || 'overall'));
-      setStatus(`Agent · ${cue.label || cue.target}`, true);
+      setStatus(`Agent · ${cue.label || cue.target} · MIDI✓`, true);
       return true;
     }
     return false;
@@ -163,7 +307,7 @@
     activeRun = arrangement;
     cueIndex = latestCueIndex(arrangement.cues, p);
     lastProgress = p;
-    if (executeLatest && cueIndex > 0) executeCue(arrangement.cues[cueIndex - 1]);
+    if (executeLatest && cueIndex > 0) executeCue(arrangement, arrangement.cues[cueIndex - 1]);
   }
 
   function tick() {
@@ -178,24 +322,35 @@
     if (!playing) {
       if (autoSuspended) restoreAuto();
       if (arrangement && !matches) setStatus(`仅 ${arrangement.label}`, false);
-      else if (arrangement) setStatus('等待播放', false);
+      else if (arrangement) setStatus(arrangement.midiGrounded ? `等待播放 · ${arrangement.cues.length} 镜头 · MIDI✓` : '等待播放', false);
       else setStatus('自动导播', false);
       activeRun = null;
       cueIndex = 0;
       lastProgress = 0;
+      manualUntil = 0;
       return;
     }
 
     suspendAuto();
     const p = progressRatio();
+    const now = performance.now();
 
     if (activeRun !== arrangement || p + .015 < lastProgress) {
       resetRun(arrangement, p, true);
       return;
     }
 
-    if (performance.now() < manualUntil) {
-      setStatus(`用户接管 ${Math.max(1, Math.ceil((manualUntil - performance.now()) / 1000))}s`, true);
+    if (now < manualUntil) {
+      setStatus(`用户接管 ${Math.max(1, Math.ceil((manualUntil - now) / 1000))}s`, true);
+      lastProgress = p;
+      return;
+    }
+
+    if (manualUntil) {
+      manualUntil = 0;
+      const currentIndex = latestCueIndex(arrangement.cues, p);
+      cueIndex = Math.max(cueIndex, currentIndex);
+      if (currentIndex > 0) executeCue(arrangement, arrangement.cues[currentIndex - 1]);
       lastProgress = p;
       return;
     }
@@ -204,7 +359,7 @@
     while (cueIndex < arrangement.cues.length && arrangement.cues[cueIndex].p <= p + 1e-6) {
       lastDue = arrangement.cues[cueIndex++];
     }
-    if (lastDue) executeCue(lastDue);
+    if (lastDue) executeCue(arrangement, lastDue);
     lastProgress = p;
   }
 
@@ -220,6 +375,7 @@
     activeRun = null;
     cueIndex = 0;
     lastProgress = 0;
+    manualUntil = 0;
     syncSelect();
     if (!selectedId) restoreAuto();
     return selectedId;
@@ -278,7 +434,12 @@
     director = window.VirtualBandDirector;
     if (!camera || !director || !stage || !menu || !songSelect || !modeSelect || !playButton || !progress) return false;
 
-    register(WISH_DEMO);
+    const wishPlan = buildMidiArrangement('wish', {
+      id:'wish-midi-demo',
+      label:'Wish You Were Here · MIDI 分析编排',
+      shotSeconds:5.4,
+    });
+    if (wishPlan) register(wishPlan);
     setupUi();
     installManualHooks();
     timer = setInterval(tick, TICK);
@@ -288,12 +449,18 @@
       activate,
       deactivate(){return activate('');},
       useAuto(){return activate('');},
+      buildFromMidi:buildMidiArrangement,
+      analyze(songId){
+        const a = analyzeSong(songId);
+        if (!a) return null;
+        return {duration:a.duration, first:a.first, last:a.last, instruments:a.groups.map(g => ({id:g.id,target:g.target,label:g.label,type:g.type,notes:g.events.length}))};
+      },
       get arrangements(){return [...registry.values()].map(a => ({...a, cues:a.cues.map(c => ({...c}))}));},
       get state(){return {selectedId, active:!!activeRun && isPlaying(), song:songSelect.value, cueIndex, autoSuspended, manualHoldMs:Math.max(0, manualUntil - performance.now())};},
     };
 
     attached = true;
-    console.info('[Agent Camera] arrangement layer attached · user > agent > auto');
+    console.info(`[Agent Camera] MIDI-grounded arrangement layer attached · Wish demo ${wishPlan?.cues.length || 0} cues · user > agent > auto`);
     return true;
   }
 
