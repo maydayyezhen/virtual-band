@@ -27,6 +27,7 @@ async function boot() {
   for (const src of sourceOrder) await loadScript(src);
   await window.loadVirtualBandSongs();
   await loadScript('./src/runtime/app.js');
+  await loadScript('./src/runtime/shadow-sync.js');
 }
 
 boot().catch((error) => {
