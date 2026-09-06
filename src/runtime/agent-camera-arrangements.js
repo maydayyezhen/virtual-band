@@ -11,13 +11,15 @@
   const playButton = $('bp-play');
   const progress = $('bp-progress');
   const STORE = 'vb-agent-camera-arrangement';
+  const AUTO_STORE = 'vb-director-enabled';
   const TICK = 120;
   const MANUAL_HOLD = 8000;
 
   const registry = new Map();
   let camera = null;
   let director = null;
-  let selectedId = localStorage.getItem(STORE) || 'wish-demo';
+  const storedArrangement = localStorage.getItem(STORE);
+  let selectedId = storedArrangement === null ? 'wish-demo' : storedArrangement;
   let activeRun = null;
   let cueIndex = 0;
   let lastProgress = 0;
@@ -118,7 +120,11 @@
   function suspendAuto() {
     if (autoSuspended || !director) return;
     autoWasEnabled = !!director.state?.enabled;
-    if (autoWasEnabled) director.disable();
+    if (autoWasEnabled) {
+      director.disable();
+      // Suspending auto for an Agent timeline is temporary; do not persist it as a user preference.
+      localStorage.setItem(AUTO_STORE, '1');
+    }
     autoSuspended = true;
   }
 
