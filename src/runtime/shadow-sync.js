@@ -35,9 +35,11 @@
     // Focused Free/Practice scenes rely on the real directional-light shadow.
     contactShadow.visible = mode === 'song';
     if (mode === 'song') {
-      // New band arrangement is wider and deeper than the old product-display row.
-      contactShadow.position.set(0, -0.004, -0.75);
-      contactShadow.scale.set(1.46, 1.63, 1);
+      // Wide-stage pass: cover the larger footprint but keep this synthetic shadow
+      // subtle so separate instruments still read as having their own floor space.
+      contactShadow.position.set(0.65, -0.004, -0.35);
+      contactShadow.scale.set(1.92, 2.05, 1);
+      contactShadow.material.opacity = 0.28;
     }
   }
 
