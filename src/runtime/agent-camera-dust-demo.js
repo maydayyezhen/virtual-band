@@ -205,12 +205,20 @@
   function attach() {
     const api = window.VirtualBandAgentCamera;
     const song = songs[SONG_ID];
-    if (!api || !song) return false;
+    const songSelect = document.getElementById('bp-song');
+    if (!api || !song || !songSelect) return false;
 
     const plan = buildPlan(song);
     if (!plan) return false;
     api.register(plan);
     api.activate(ARRANGEMENT_ID);
+
+    // This branch is currently testing the Queen arrangement, so boot directly into it.
+    // Users can still choose another song afterwards from the normal song library.
+    if (songSelect.value !== SONG_ID) {
+      songSelect.value = SONG_ID;
+      songSelect.dispatchEvent(new Event('change', {bubbles:true}));
+    }
 
     const distribution = {};
     for (const cue of plan.cues) {
