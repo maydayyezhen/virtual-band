@@ -21,9 +21,10 @@ async function boot() {
     './src/instruments/keyboard.js',
     './src/instruments/drums.js',
     './src/instruments/electric-guitar.js',
-    // Camera captures the renderer and instrument roots; stage/shadow hooks can then
-    // wrap Scene.add on top of it and restore back safely after startup.
-    './src/runtime/camera-controller.js',
+    // Capture the exact stage camera before app.js starts. The actual controls are
+    // attached only after app.js has installed its legacy handlers, so Camera v2 can
+    // replace those user-facing interactions cleanly instead of racing startup.
+    './src/runtime/camera-capture.js',
     './src/runtime/stage-layout.js',
     './src/runtime/shadow-sync.js',
     './src/data/song-library-loader.js',
@@ -32,6 +33,7 @@ async function boot() {
   for (const src of sourceOrder) await loadScript(src);
   await window.loadVirtualBandSongs();
   await loadScript('./src/runtime/app.js');
+  await loadScript('./src/runtime/camera-controller.js');
 }
 
 boot().catch((error) => {
