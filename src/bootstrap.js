@@ -89,6 +89,11 @@ async function boot() {
   // Prevent performance/detail cameras from slipping behind the main LED wall, where
   // keyboard/drum shots would be physically occluded by the screen hardware.
   await loadScript('./src/venues/nocturne-camera-clearance.js');
+
+  // Music-driven show layer: analyze each MIDI song by bar/beat, move the authored
+  // fixtures, react to drum accents, and sequence only NOCTURNE's existing LED presets.
+  await loadScript('./src/venues/nocturne-auto-show.js');
+
   await loadScript('./src/runtime/auto-director.js');
   // Agent-authored timelines sit above the automatic director and can temporarily own
   // the camera for a song while preserving the user's manual override priority.
