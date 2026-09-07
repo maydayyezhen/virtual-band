@@ -122,6 +122,10 @@ async function boot() {
   // Load the transport-level master last so FIXED can suppress both lower camera layers
   // from the first frame while leaving lighting/LED automation untouched.
   await loadScript('./src/runtime/playback-camera-toggle.js');
+  // User-facing NOCTURNE camera curation layer. The baked config is intentionally tiny;
+  // browser edits live in localStorage until exported as JSON and committed back here.
+  await loadScript('./src/data/camera-preset-config.js');
+  await loadScript('./src/runtime/camera-preset-editor.js');
 }
 
 boot().catch((error) => {
