@@ -1,8 +1,8 @@
 'use strict';
 
-// Keep temporary LED media tests above Auto LED without disabling the lighting director.
-// Image and video tests share this one priority guard: Auto LED may continue driving the
-// side screens, while the main screen stays owned by whichever local-media test is active.
+// Keep temporary LED content tests above Auto LED without disabling the lighting director.
+// Image, video and Canvas tests share this priority guard: Auto LED may continue driving
+// the side screens, while the main screen stays owned by the active content test.
 (() => {
   const venue=window.VirtualBandVenues;
   const controls=venue?.controls;
@@ -14,9 +14,10 @@
 
   const imageActive=()=>!!window.NocturneLedImageTest?.active;
   const videoActive=()=>!!window.NocturneLedVideoTest?.active;
-  const active=()=>imageActive()||videoActive();
+  const canvasActive=()=>!!window.NocturneLedCanvasTest?.active;
+  const active=()=>imageActive()||videoActive()||canvasActive();
   const isMainTarget=id=>id==='main'||id==null;
-  const activeState=()=>videoActive()?(window.NocturneLedVideoTest?.state||{}):(window.NocturneLedImageTest?.state||{});
+  const activeState=()=>videoActive()?(window.NocturneLedVideoTest?.state||{}):canvasActive()?(window.NocturneLedCanvasTest?.state||{}):(window.NocturneLedImageTest?.state||{});
   const expectedMode=source=>source?.tagName==='VIDEO'?'video':'media';
 
   controls.setScreenContent=function(id,content,options={}){
@@ -47,9 +48,9 @@
     const state=activeState();
     const brightness=Number.isFinite(state.brightness)?state.brightness:(held.options.brightness??.72);
     const fit=state.fit||held.options.fit||'cover';
-    const playing=held.mode==='video'?(state.playing!==false):false;
+    const playing=held.mode==='video'?(state.playing!==false):held.content?.getContext?true:false;
 
-    // Stage-mode changes can replace screen content below this wrapper. Reassert media
+    // Stage-mode changes can replace screen content below this wrapper. Reassert content
     // only when ownership was actually lost; otherwise let ScreenSurface update normally.
     if(main.patternName!==held.mode||main.source!==held.content){
       try{rawContent('main',held.content,{...held.options,fit,brightness,playing});}catch{}
@@ -63,6 +64,7 @@
   const clearIfIdle=()=>{if(!active())held=null;};
   window.addEventListener('nocturne-led-image-test-change',clearIfIdle);
   window.addEventListener('nocturne-led-video-test-change',clearIfIdle);
+  window.addEventListener('nocturne-led-canvas-test-change',clearIfIdle);
   requestAnimationFrame(tick);
-  console.info('[LED media test] main-screen image/video priority guard attached');
+  console.info('[LED content test] main-screen image/video/Canvas priority guard attached');
 })();
