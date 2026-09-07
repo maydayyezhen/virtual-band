@@ -13,6 +13,8 @@ function loadScript(src) {
   });
 }
 
+const nextPaint = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
 async function boot() {
   const sourceOrder = [
     './src/core/core.js',
@@ -41,6 +43,7 @@ async function boot() {
   // Paint a full-screen cover before fetching/decompressing/constructing NOCTURNE so a
   // heavy first mount reads as deliberate loading rather than a frozen page.
   await loadScript('./src/venues/venue-loading-overlay.js');
+  await nextPaint();
   await loadScript('./src/venues/nocturne-stage-source.js');
   for (let i = 1; i <= 7; i++) {
     await loadScript(`./src/venues/nocturne-stage-source-${String(i).padStart(2, '0')}.js`);
