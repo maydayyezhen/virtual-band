@@ -10,7 +10,7 @@ const uiRoot = document.getElementById('ui-root');
 if (!stageRoot || !uiRoot) throw new Error('Virtual Band V2 mount points are missing');
 
 const app = new VirtualBandApp({ mount: stageRoot });
-app.start();
+await app.start();
 
 createRoot(uiRoot).render(
   <StrictMode>
@@ -25,4 +25,4 @@ if (import.meta.env.DEV) {
   });
 }
 
-console.info('[Virtual Band V2] clean runtime started');
+console.info('[Virtual Band V2] runtime started with migrated donor assets');
