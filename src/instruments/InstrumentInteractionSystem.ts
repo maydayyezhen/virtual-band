@@ -1,11 +1,9 @@
 import * as THREE from 'three';
-import type { InstrumentRegistry } from './Instrument';
+import type { InstrumentInteractionPhase, InstrumentRegistry } from './Instrument';
 
-interface PointerPress {
-  id: number;
-  x: number;
-  y: number;
-  time: number;
+export interface InstrumentHit {
+  instrumentId: string;
+  partId: string;
 }
 
 export class InstrumentInteractionSystem {
@@ -14,7 +12,6 @@ export class InstrumentInteractionSystem {
   private readonly instruments: InstrumentRegistry;
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
-  private press: PointerPress | null = null;
 
   constructor(options: {
     element: HTMLCanvasElement;
@@ -24,82 +21,58 @@ export class InstrumentInteractionSystem {
     this.element = options.element;
     this.camera = options.camera;
     this.instruments = options.instruments;
-    this.element.addEventListener('pointerdown', this.onPointerDown);
-    this.element.addEventListener('pointerup', this.onPointerUp);
-    this.element.addEventListener('pointercancel', this.onPointerCancel);
   }
 
-  dispose(): void {
-    this.element.removeEventListener('pointerdown', this.onPointerDown);
-    this.element.removeEventListener('pointerup', this.onPointerUp);
-    this.element.removeEventListener('pointercancel', this.onPointerCancel);
-  }
-
-  private readonly onPointerDown = (event: PointerEvent): void => {
-    if (!event.isPrimary || event.button !== 0) return;
-    this.press = {
-      id: event.pointerId,
-      x: event.clientX,
-      y: event.clientY,
-      time: performance.now(),
-    };
-  };
-
-  private readonly onPointerCancel = (event: PointerEvent): void => {
-    if (this.press?.id === event.pointerId) this.press = null;
-  };
-
-  private readonly onPointerUp = (event: PointerEvent): void => {
-    const press = this.press;
-    this.press = null;
-    if (!press || press.id !== event.pointerId || !event.isPrimary || event.button !== 0) return;
-
-    const distance = Math.hypot(event.clientX - press.x, event.clientY - press.y);
-    const elapsed = performance.now() - press.time;
-    if (distance > 6 || elapsed > 700) return;
-
-    this.interactAt(event);
-  };
-
-  private interactAt(event: PointerEvent): void {
+  hitTest(clientX: number, clientY: number, instrumentId?: string): InstrumentHit | null {
     const rect = this.element.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
+    if (rect.width <= 0 || rect.height <= 0) return null;
 
     this.pointer.set(
-      ((event.clientX - rect.left) / rect.width) * 2 - 1,
-      -((event.clientY - rect.top) / rect.height) * 2 + 1,
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
     );
 
-    const roots = this.instruments.list().map((instrument) => instrument.root).filter((root) => root.visible);
+    const candidates = instrumentId
+      ? [this.instruments.get(instrumentId)].filter((instrument) => Boolean(instrument?.root.visible))
+      : this.instruments.list().filter((instrument) => instrument.root.visible);
+    const roots = candidates.map((instrument) => instrument!.root);
     for (const root of roots) root.updateWorldMatrix(true, true);
 
-    this.camera.updateMatrixWorld();
+    this.camera.updateMatrixWorld(true);
     this.raycaster.setFromCamera(this.pointer, this.camera);
 
     const intersections = this.raycaster.intersectObjects(roots, true);
     for (const intersection of intersections) {
       let node: THREE.Object3D | null = intersection.object;
       let partId: string | null = null;
-      let instrumentId: string | null = null;
+      let resolvedInstrumentId: string | null = null;
 
       while (node) {
         if (!partId && typeof node.userData.hit === 'string') partId = node.userData.hit;
         if (typeof node.userData.instrumentId === 'string') {
-          instrumentId = node.userData.instrumentId;
+          resolvedInstrumentId = node.userData.instrumentId;
           break;
         }
         node = node.parent;
       }
 
-      if (!instrumentId || !partId) continue;
-      const instrument = this.instruments.get(instrumentId);
-      if (!instrument?.interact) continue;
-
-      const intensity = event.pointerType === 'pen' && event.pressure > 0
-        ? Math.min(1, Math.max(0.15, event.pressure))
-        : 0.9;
-
-      if (instrument.interact({ partId, intensity })) return;
+      if (!resolvedInstrumentId || !partId) continue;
+      if (instrumentId && resolvedInstrumentId !== instrumentId) continue;
+      return { instrumentId: resolvedInstrumentId, partId };
     }
+
+    return null;
   }
+
+  dispatch(hit: InstrumentHit, phase: InstrumentInteractionPhase, velocity: number): boolean {
+    const instrument = this.instruments.get(hit.instrumentId);
+    if (!instrument?.interact) return false;
+    return instrument.interact({
+      partId: hit.partId,
+      velocity: Math.max(0, Math.min(127, Math.round(velocity))),
+      phase,
+    });
+  }
+
+  dispose(): void {}
 }
