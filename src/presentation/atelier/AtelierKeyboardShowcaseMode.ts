@@ -71,7 +71,7 @@ export class AtelierKeyboardShowcaseMode implements PresentationMode {
   private momentumX = 0;
   private momentumY = 0;
   private previousGesture: GestureState | null = null;
-  private sustainHeld = false;
+  private sustainTier: KeyboardTier | null = null;
 
   constructor(options: {
     element: HTMLCanvasElement;
@@ -303,22 +303,26 @@ export class AtelierKeyboardShowcaseMode implements PresentationMode {
     } else if (action?.kind === 'view') {
       this.selectView(action.view);
     } else if (action?.kind === 'sustain') {
-      if (!event.repeat && !this.sustainHeld) {
-        this.sustainHeld = true;
-        this.keyboard.setSustain(true, this.inputTier, 'computer:Space');
+      if (!event.repeat && this.sustainTier === null) {
+        this.sustainTier = this.inputTier;
+        this.keyboard.setSustain(true, this.sustainTier, 'computer:Space');
       }
     } else if (action?.kind === 'panic') {
       this.keyboard.reset();
       this.computerKeys.clear();
-      this.sustainHeld = false;
+      this.sustainTier = null;
     } else if (event.code === 'ArrowLeft') {
       this.want.yaw -= 0.10;
+      handled = true;
     } else if (event.code === 'ArrowRight') {
       this.want.yaw += 0.10;
+      handled = true;
     } else if (event.code === 'ArrowUp') {
       this.want.pitch = THREE.MathUtils.clamp(this.want.pitch + 0.08, 0.04, 1.43);
+      handled = true;
     } else if (event.code === 'ArrowDown') {
       this.want.pitch = THREE.MathUtils.clamp(this.want.pitch - 0.08, 0.04, 1.43);
+      handled = true;
     } else {
       handled = false;
     }
@@ -334,9 +338,10 @@ export class AtelierKeyboardShowcaseMode implements PresentationMode {
       event.preventDefault();
       return;
     }
-    if (event.code === 'Space' && this.sustainHeld) {
-      this.sustainHeld = false;
-      this.keyboard.setSustain(false, this.inputTier, 'computer:Space');
+    if (event.code === 'Space' && this.sustainTier !== null) {
+      const tier = this.sustainTier;
+      this.sustainTier = null;
+      this.keyboard.setSustain(false, tier, 'computer:Space');
       event.preventDefault();
     }
   };
@@ -375,9 +380,10 @@ export class AtelierKeyboardShowcaseMode implements PresentationMode {
     this.computerKeys.clear();
     this.pointers.clear();
     this.previousGesture = null;
-    if (this.sustainHeld) {
-      this.keyboard.setSustain(false, this.inputTier, 'computer:Space');
-      this.sustainHeld = false;
+    if (this.sustainTier !== null) {
+      const tier = this.sustainTier;
+      this.sustainTier = null;
+      this.keyboard.setSustain(false, tier, 'computer:Space');
     }
     this.element.classList.remove('dragging');
   }
