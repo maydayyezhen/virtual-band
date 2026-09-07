@@ -53,8 +53,8 @@ export class Engine {
     const dt = Math.min(0.05, Math.max(0, (now - this.lastFrame) / 1000));
     this.lastFrame = now;
 
-    const aspect = this.renderer.resizeIfNeeded();
-    this.camera.setAspect(aspect);
+    const viewport = this.renderer.resizeIfNeeded();
+    this.camera.setViewport(viewport.width, viewport.height);
 
     this.transport.update(dt);
     this.show.update(this.transport.snapshot.time);
