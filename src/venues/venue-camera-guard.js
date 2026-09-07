@@ -17,7 +17,7 @@
   const LOOK_DISTANCE=20;
   const pointers=new Map();
   const raycaster=new T.Raycaster(),ndc=new T.Vector2();
-  let gesture=null;
+  let gesture=null,desiredHead=null,lastDesiredAt=-Infinity;
 
   const active=()=>window.VirtualBandVenues?.current==='nocturne';
   const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
@@ -57,12 +57,10 @@
     if(note&&active()&&!cameraApi.state?.focused)
       note.textContent='NOCTURNE · 左拖原地环顾 · 右拖移动机位 · 滚轮改变视野';
   }
-  function pose(position,dir,fov=runtime.camera.fov){
-    const p=clampPosition(position.clone());
-    const d=dir.clone().normalize();
-    const target=p.clone().addScaledVector(d,LOOK_DISTANCE);
-    cameraApi.pose?.({position:p.toArray(),target:target.toArray(),fov:clamp(fov,28,100),durationMs:0},true);
-    syncNote();
+  function cloneHead(head){
+    return {
+      position:head.position.clone(),yaw:head.yaw,pitch:head.pitch,fov:head.fov,
+    };
   }
   function currentHead(){
     runtime.camera.updateMatrixWorld(true);
@@ -80,6 +78,29 @@
       Math.sin(pitch),
       Math.cos(yaw)*Math.cos(pitch),
     ).normalize();
+  }
+  function poseHead(head){
+    head.position=clampPosition(head.position.clone());
+    head.pitch=clamp(head.pitch,-Math.PI*.48,Math.PI*.48);
+    head.fov=clamp(head.fov,28,100);
+    const dir=dirFrom(head.yaw,head.pitch);
+    const target=head.position.clone().addScaledVector(dir,LOOK_DISTANCE);
+
+    // Camera v2 has an older instant-pose path that cancels its requested target before
+    // applying it. Use a 1 ms transition instead: visually immediate, but it travels
+    // through the normal state/update path and therefore cannot be discarded.
+    cameraApi.pose?.({
+      position:head.position.toArray(),
+      target:target.toArray(),
+      fov:head.fov,
+      durationMs:1,
+    },false);
+    desiredHead=cloneHead(head);lastDesiredAt=performance.now();syncNote();
+  }
+  function recentHead(maxAge=120){
+    return desiredHead&&performance.now()-lastDesiredAt<maxAge
+      ?cloneHead(desiredHead)
+      :currentHead();
   }
 
   // A renderer-level safety net catches automatic director PROGRAM cameras and future
@@ -125,9 +146,10 @@
     if(event.button===0&&!event.shiftKey&&isPlayable(event.clientX,event.clientY))return;
     stop(event);
     const head=currentHead();
+    desiredHead=cloneHead(head);lastDesiredAt=performance.now();
     pointers.set(event.pointerId,{
       x:event.clientX,y:event.clientY,button:event.button,shift:event.shiftKey,
-      type:event.pointerType,head,
+      type:event.pointerType,head:cloneHead(head),
     });
     try{event.target?.setPointerCapture?.(event.pointerId)}catch{}
     stage.classList.add('dragging');
@@ -145,33 +167,36 @@
       const two=[...pointers.values()].slice(0,2);
       const cx=(two[0].x+two[1].x)/2,cy=(two[0].y+two[1].y)/2;
       const dist=Math.hypot(two[0].x-two[1].x,two[0].y-two[1].y);
-      if(gesture){
-        const head=currentHead(),dir=dirFrom(head.yaw,head.pitch);
-        const right=new T.Vector3().crossVectors(dir,new T.Vector3(0,1,0)).normalize();
-        const up=new T.Vector3(0,1,0);
-        const move=right.multiplyScalar(-(cx-gesture.cx)*.024).add(up.multiplyScalar((cy-gesture.cy)*.024));
-        const next=head.position.clone().add(move);
-        const fov=clamp(head.fov+(gesture.dist-dist)*.10,28,100);
-        pose(next,dir,fov);
+      if(!gesture){
+        gesture={cx,cy,dist,head:recentHead(1000)};
+        return;
       }
-      gesture={cx,cy,dist};
+      const head=gesture.head;
+      const dir=dirFrom(head.yaw,head.pitch);
+      const right=new T.Vector3().crossVectors(dir,new T.Vector3(0,1,0)).normalize();
+      const up=new T.Vector3(0,1,0);
+      head.position.add(right.multiplyScalar(-(cx-gesture.cx)*.024)).add(up.multiplyScalar((cy-gesture.cy)*.024));
+      head.fov=clamp(head.fov+(gesture.dist-dist)*.10,28,100);
+      poseHead(head);
+      gesture.cx=cx;gesture.cy=cy;gesture.dist=dist;
       return;
     }
 
-    const head=currentHead();
+    const head=p.head;
     if(p.button===2||p.shift){
       const dir=dirFrom(head.yaw,head.pitch);
       const right=new T.Vector3().crossVectors(dir,new T.Vector3(0,1,0)).normalize();
       const up=new T.Vector3(0,1,0);
-      pose(head.position.clone().add(right.multiplyScalar(-dx*.024)).add(up.multiplyScalar(dy*.024)),dir,head.fov);
+      head.position.add(right.multiplyScalar(-dx*.024)).add(up.multiplyScalar(dy*.024));
+      poseHead(head);
       return;
     }
 
     // Match the authored CameraRig semantics: the eye does not orbit a target. Dragging
     // only changes the viewing direction, like turning your head inside the venue.
-    const yaw=head.yaw+dx*.0035;
-    const pitch=clamp(head.pitch+dy*.0035,-Math.PI*.48,Math.PI*.48);
-    pose(head.position,dirFrom(yaw,pitch),head.fov);
+    head.yaw+=dx*.0035;
+    head.pitch=clamp(head.pitch+dy*.0035,-Math.PI*.48,Math.PI*.48);
+    poseHead(head);
   },true);
 
   function end(event){
@@ -187,9 +212,10 @@
   stage.addEventListener('wheel',event=>{
     if(!active())return;
     stop(event);
-    const head=currentHead();
+    const head=recentHead();
     // In panorama mode the original scene zooms by FOV, so the eye remains stationary.
-    pose(head.position,dirFrom(head.yaw,head.pitch),clamp(head.fov+event.deltaY*.035,28,100));
+    head.fov=clamp(head.fov+event.deltaY*.035,28,100);
+    poseHead(head);
   },{capture:true,passive:false});
 
   stage.addEventListener('dblclick',event=>{
@@ -200,10 +226,11 @@
   },true);
 
   window.addEventListener('virtual-band-venue-change',event=>{
-    pointers.clear();gesture=null;stage.classList.remove('dragging');
+    pointers.clear();gesture=null;desiredHead=null;lastDesiredAt=-Infinity;
+    stage.classList.remove('dragging');
     if(event.detail?.id==='nocturne'){
       // If a previous scene left the eye outside the room, normalize it immediately.
-      const head=currentHead();pose(head.position,dirFrom(head.yaw,head.pitch),head.fov);
+      poseHead(currentHead());
     }
     syncNote();
   });
