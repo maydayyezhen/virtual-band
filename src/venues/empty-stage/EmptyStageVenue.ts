@@ -5,6 +5,23 @@ export class EmptyStageVenue implements Venue {
   readonly id = 'empty-stage';
   readonly label = 'Empty Stage';
   readonly root = new THREE.Group();
+  readonly sceneProfile = {
+    clearColor: 0x11191f,
+    clearAlpha: 1,
+    fog: null,
+    environment: null,
+    outputColorSpace: THREE.SRGBColorSpace,
+    toneMapping: THREE.ACESFilmicToneMapping,
+    toneMappingExposure: 1.02,
+    shadows: {
+      enabled: true,
+      type: THREE.PCFSoftShadowMap,
+      autoUpdate: true,
+    },
+    pixelRatio: {
+      desktopMax: 2,
+    },
+  };
   readonly layout = {
     'drums.main': {
       position: [2.75, 0, -6.35] as [number, number, number],
@@ -27,8 +44,6 @@ export class EmptyStageVenue implements Venue {
   constructor() {
     this.root.name = 'venue:empty-stage';
 
-    // Minimal host scene copied from the original application. No replacement grid or
-    // new V2 visual language is introduced here; migrated donor assets stay authoritative.
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(180, 180),
       new THREE.MeshStandardMaterial({ color: 0x17232c, roughness: 0.85, metalness: 0.11 }),
