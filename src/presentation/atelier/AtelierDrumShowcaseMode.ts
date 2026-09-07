@@ -1,19 +1,16 @@
 import * as THREE from 'three';
+import type { CameraRegistry, InstrumentOrbitCameraView } from '../../camera/CameraRegistry';
 import type { CameraSystem } from '../../camera/CameraSystem';
+import {
+  ATELIER_DRUM_VIEW_IDS,
+  type AtelierDrumViewName,
+} from '../../camera/presets/AtelierDrumViews';
 import type { DrumsInstrument } from '../../instruments/drums/DrumsInstrument';
 import type { InstrumentHit, InstrumentInteractionSystem } from '../../instruments/InstrumentInteractionSystem';
 import type { PresentationMode } from '../PresentationManager';
 import { AtelierDrumDemo } from './AtelierDrumDemo';
 
-export type AtelierViewId = 'whole' | 'drummer' | 'cymbals' | 'pedals';
-
-interface CameraPreset {
-  target: THREE.Vector3;
-  yaw: number;
-  pitch: number;
-  height: number;
-  width: number;
-}
+export type AtelierViewId = AtelierDrumViewName;
 
 interface CameraState {
   target: THREE.Vector3;
@@ -36,45 +33,6 @@ interface GestureState {
   y: number;
 }
 
-export interface AtelierShowcaseSnapshot {
-  view: AtelierViewId;
-  demoPlaying: boolean;
-}
-
-type Listener = () => void;
-
-const FOV = 34;
-const PRESETS: Record<AtelierViewId, CameraPreset> = {
-  whole: {
-    target: new THREE.Vector3(-0.10, 1.70, -0.36),
-    yaw: 0.36,
-    pitch: 0.32,
-    height: 5.30,
-    width: 8.5,
-  },
-  drummer: {
-    target: new THREE.Vector3(0, 1.46, -0.49),
-    yaw: Math.PI - 0.13,
-    pitch: 0.76,
-    height: 4.80,
-    width: 7.8,
-  },
-  cymbals: {
-    target: new THREE.Vector3(-0.15, 2.71, -0.2),
-    yaw: 0.12,
-    pitch: 0.70,
-    height: 3.8,
-    width: 7.8,
-  },
-  pedals: {
-    target: new THREE.Vector3(0.96, 0.70, -1.16),
-    yaw: Math.PI - 0.40,
-    pitch: 0.31,
-    height: 2.50,
-    width: 4.0,
-  },
-};
-
 const COMPUTER_MAP: Record<string, number> = {
   KeyA: 36,
   KeyS: 38,
@@ -93,31 +51,29 @@ const COMPUTER_MAP: Record<string, number> = {
 export class AtelierDrumShowcaseMode implements PresentationMode {
   readonly id = 'atelier-drums';
   readonly demo: AtelierDrumDemo;
-  readonly getSnapshot = (): AtelierShowcaseSnapshot => this.snapshot;
 
   private readonly element: HTMLCanvasElement;
   private readonly camera: CameraSystem;
+  private readonly cameraRegistry: CameraRegistry;
   private readonly drums: DrumsInstrument;
   private readonly interactions: InstrumentInteractionSystem;
   private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   private readonly pointers = new Map<number, PointerState>();
   private readonly computerKeys = new Map<string, number>();
-  private readonly listeners = new Set<Listener>();
   private readonly current: CameraState = {
-    target: PRESETS.whole.target.clone(),
-    yaw: PRESETS.whole.yaw,
-    pitch: PRESETS.whole.pitch,
+    target: new THREE.Vector3(),
+    yaw: 0,
+    pitch: 0,
     distance: 15,
   };
   private readonly want: CameraState = {
-    target: PRESETS.whole.target.clone(),
-    yaw: PRESETS.whole.yaw,
-    pitch: PRESETS.whole.pitch,
+    target: new THREE.Vector3(),
+    yaw: 0,
+    pitch: 0,
     distance: 15,
   };
 
   private active = false;
-  private keyboardBlocked = false;
   private preset: AtelierViewId = 'whole';
   private zoom = 1;
   private width = 1;
@@ -125,29 +81,27 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
   private momentumX = 0;
   private momentumY = 0;
   private previousGesture: GestureState | null = null;
-  private snapshot: AtelierShowcaseSnapshot = { view: 'whole', demoPlaying: false };
-  private readonly unsubscribeDemo: () => void;
   private readonly unsubscribePanic: () => void;
 
   constructor(options: {
     element: HTMLCanvasElement;
     camera: CameraSystem;
+    cameraRegistry: CameraRegistry;
     drums: DrumsInstrument;
     interactions: InstrumentInteractionSystem;
   }) {
     this.element = options.element;
     this.camera = options.camera;
+    this.cameraRegistry = options.cameraRegistry;
     this.drums = options.drums;
     this.interactions = options.interactions;
     this.demo = new AtelierDrumDemo(this.drums);
-    this.unsubscribeDemo = this.demo.subscribe(() => this.refreshSnapshot());
     this.unsubscribePanic = this.drums.subscribePanic(() => this.resetInputState());
   }
 
   activate(): void {
     if (this.active) return;
     this.active = true;
-    this.camera.setLens({ fov: FOV, near: 0.035, far: 90 });
     this.attachInput();
     this.syncViewport(true);
     this.selectView('whole', true);
@@ -157,7 +111,7 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
     if (!this.active) return;
     this.active = false;
     this.demo.stop();
-    this.resetInputState();
+    this.releaseInputState();
     this.detachInput();
     this.element.classList.remove('dragging', 'playable');
     this.camera.resetLens();
@@ -190,14 +144,15 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
   }
 
   selectView(id: AtelierViewId, instant = false): boolean {
-    const preset = PRESETS[id];
+    const preset = this.getPreset(id);
     if (!preset) return false;
 
     this.preset = id;
     this.zoom = 1;
     this.momentumX = 0;
     this.momentumY = 0;
-    this.want.target.copy(preset.target);
+    this.camera.setLens({ fov: preset.fov, near: preset.near, far: preset.far });
+    this.want.target.set(...preset.target);
     this.want.yaw = this.current.yaw + Math.atan2(
       Math.sin(preset.yaw - this.current.yaw),
       Math.cos(preset.yaw - this.current.yaw),
@@ -213,16 +168,7 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
       this.applyCamera();
     }
 
-    this.refreshSnapshot();
     return true;
-  }
-
-  zoomIn(): void {
-    this.changeZoom(0.82);
-  }
-
-  zoomOut(): void {
-    this.changeZoom(1 / 0.82);
   }
 
   resetView(): void {
@@ -238,21 +184,15 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
     this.drums.noteOff(note);
   }
 
-  setKeyboardBlocked(blocked: boolean): void {
-    this.keyboardBlocked = blocked;
-  }
-
-  subscribe(listener: Listener): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  }
-
   dispose(): void {
     this.deactivate();
-    this.unsubscribeDemo();
     this.unsubscribePanic();
     this.demo.dispose();
-    this.listeners.clear();
+  }
+
+  private getPreset(id: AtelierViewId): InstrumentOrbitCameraView | null {
+    const view = this.cameraRegistry.get(ATELIER_DRUM_VIEW_IDS[id]);
+    return view?.kind === 'instrument-orbit' ? view : null;
   }
 
   private attachInput(): void {
@@ -375,14 +315,13 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
   };
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
-    if (!this.active || this.keyboardBlocked || event.ctrlKey || event.altKey || event.metaKey) return;
+    if (!this.active || event.ctrlKey || event.altKey || event.metaKey) return;
     const targetTag = event.target instanceof HTMLElement ? event.target.tagName : '';
     if (/INPUT|TEXTAREA|SELECT/.test(targetTag)) return;
 
     let handled = true;
     const note = COMPUTER_MAP[event.code];
     if (note !== undefined) {
-      if (event.code === 'Space' && targetTag === 'BUTTON') return;
       if (!this.computerKeys.has(event.code) && !event.repeat) {
         this.computerKeys.set(event.code, note);
         this.drums.noteOn(note, 104);
@@ -465,13 +404,17 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
   }
 
   private changeZoom(factor: number): void {
+    const preset = this.getPreset(this.preset);
+    if (!preset) return;
     this.zoom = THREE.MathUtils.clamp(this.zoom * factor, 0.28, 1.75);
-    this.want.distance = this.distanceFor(PRESETS[this.preset]) * this.zoom;
+    this.want.distance = this.distanceFor(preset) * this.zoom;
   }
 
   private pan(dx: number, dy: number): void {
     if (this.height <= 0) return;
-    const scale = this.current.distance * 2 * Math.tan(THREE.MathUtils.degToRad(FOV / 2)) / this.height;
+    const preset = this.getPreset(this.preset);
+    const fov = preset?.fov ?? 34;
+    const scale = this.current.distance * 2 * Math.tan(THREE.MathUtils.degToRad(fov / 2)) / this.height;
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.output.quaternion);
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.output.quaternion);
     this.want.target.addScaledVector(right, -dx * scale);
@@ -485,38 +428,28 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
     if (!force && width === this.width && height === this.height) return;
     this.width = width;
     this.height = height;
-    const distance = this.distanceFor(PRESETS[this.preset]) * this.zoom;
+    const preset = this.getPreset(this.preset);
+    if (!preset) return;
+    const distance = this.distanceFor(preset) * this.zoom;
     this.want.distance = distance;
     this.current.distance = distance;
   }
 
-  private distanceFor(preset: CameraPreset): number {
-    const reserved = this.height < 500 ? 104 : 206;
-    const usableHeight = Math.max(this.height - reserved, this.height * 0.62);
-    const usableWidth = this.width < 600 ? this.width - 24 : this.width - 90;
-    return Math.max(
-      preset.height * this.height / usableHeight,
-      preset.width * this.height / Math.max(usableWidth, 200),
-    ) / (2 * Math.tan(THREE.MathUtils.degToRad(FOV / 2)));
+  private distanceFor(preset: InstrumentOrbitCameraView): number {
+    const aspect = Math.max(0.01, this.width / Math.max(1, this.height));
+    const framedSpan = Math.max(preset.height, preset.width / aspect);
+    return framedSpan / (2 * Math.tan(THREE.MathUtils.degToRad(preset.fov / 2)));
   }
 
   private applyCamera(): void {
+    const preset = this.getPreset(this.preset);
+    const fov = preset?.fov ?? 34;
     const cp = Math.cos(this.current.pitch);
     const position = new THREE.Vector3(
       this.current.target.x + Math.sin(this.current.yaw) * cp * this.current.distance,
       Math.max(0.13, this.current.target.y + Math.sin(this.current.pitch) * this.current.distance),
       this.current.target.z + Math.cos(this.current.yaw) * cp * this.current.distance,
     );
-    this.camera.setPose({ position, target: this.current.target, fov: FOV }, true);
-  }
-
-  private refreshSnapshot(): void {
-    const next: AtelierShowcaseSnapshot = {
-      view: this.preset,
-      demoPlaying: this.demo.playing,
-    };
-    if (next.view === this.snapshot.view && next.demoPlaying === this.snapshot.demoPlaying) return;
-    this.snapshot = next;
-    for (const listener of this.listeners) listener();
+    this.camera.setPose({ position, target: this.current.target, fov }, true);
   }
 }
