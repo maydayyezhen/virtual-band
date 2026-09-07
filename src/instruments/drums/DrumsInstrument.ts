@@ -1,7 +1,11 @@
 import * as THREE from 'three';
 import type { DrumSampler } from '../../audio/DrumSampler';
-import type { Instrument, InstrumentInteraction } from '../Instrument';
-import { buildLegacyDrumAsset, type LegacyDrumController } from './legacyDrumAsset';
+import type { Instrument, InstrumentFrameResult, InstrumentInteraction } from '../Instrument';
+import {
+  buildLegacyDrumAsset,
+  type LegacyDrumController,
+  type LegacyDrumHitEvent,
+} from './legacyDrumAsset';
 
 const PART_NOTE: Record<string, number> = {
   kick: 36,
@@ -10,11 +14,16 @@ const PART_NOTE: Record<string, number> = {
   floorTom: 43,
   tomMid: 47,
   tomHigh: 50,
+  hihat: 42,
+  hatPedal: 44,
   crashLeft: 49,
   crashRight: 57,
   ride: 51,
   splash: 55,
 };
+
+type HitListener = (event: LegacyDrumHitEvent) => void;
+type PanicListener = () => void;
 
 export class DrumsInstrument implements Instrument {
   readonly id = 'drums.main';
@@ -24,27 +33,41 @@ export class DrumsInstrument implements Instrument {
 
   private readonly controller: LegacyDrumController;
   private readonly sampler: DrumSampler;
-  private hiHatOpen = false;
+  private readonly hitListeners: Set<HitListener>;
+  private readonly panicListeners: Set<PanicListener>;
 
-  private constructor(root: THREE.Group, controller: LegacyDrumController, sampler: DrumSampler) {
+  private constructor(
+    root: THREE.Group,
+    controller: LegacyDrumController,
+    sampler: DrumSampler,
+    hitListeners: Set<HitListener>,
+    panicListeners: Set<PanicListener>,
+  ) {
     this.root = root;
     this.root.userData.instrumentId = this.id;
     this.controller = controller;
     this.sampler = sampler;
+    this.hitListeners = hitListeners;
+    this.panicListeners = panicListeners;
   }
 
   static async create(sampler: DrumSampler): Promise<DrumsInstrument> {
-    const { model, controller } = await buildLegacyDrumAsset();
-    return new DrumsInstrument(model.root, controller, sampler);
+    const hitListeners = new Set<HitListener>();
+    const panicListeners = new Set<PanicListener>();
+    const { model, controller } = await buildLegacyDrumAsset({
+      onHit: (event) => {
+        for (const listener of hitListeners) listener(event);
+      },
+      onPanic: () => {
+        for (const listener of panicListeners) listener();
+      },
+    });
+    return new DrumsInstrument(model.root, controller, sampler, hitListeners, panicListeners);
   }
 
   noteOn(note: number, velocity: number): void {
     const accepted = this.controller.noteOn(note, velocity);
     if (!accepted) return;
-
-    if (note === 42 || note === 44) this.hiHatOpen = false;
-    else if (note === 46) this.hiHatOpen = true;
-
     this.sampler.noteOn(note, velocity);
   }
 
@@ -52,37 +75,54 @@ export class DrumsInstrument implements Instrument {
     this.controller.noteOff(note);
   }
 
-  update(dt: number): void {
-    this.controller.tick(dt);
+  update(dt: number): InstrumentFrameResult {
+    return this.controller.tick(dt);
   }
 
   reset(): void {
-    this.hiHatOpen = false;
     this.controller.panic();
   }
 
-  interact({ partId, intensity }: InstrumentInteraction): boolean {
-    const velocity = Math.round(72 + Math.min(1, Math.max(0, intensity)) * 55);
+  setHiHat(openness: number): boolean {
+    return this.controller.setHiHat(openness);
+  }
 
-    if (partId === 'hatPedal') {
-      this.hiHatOpen = !this.hiHatOpen;
-      const changed = this.controller.setHiHat(this.hiHatOpen ? 1 : 0);
-      if (!changed) return false;
+  controlChange(cc: number, value: number): boolean {
+    return this.controller.controlChange(cc, value);
+  }
 
-      // Closing the real pedal produces the characteristic foot-chick (GM note 44).
-      if (!this.hiHatOpen) this.noteOn(44, velocity);
+  choke(id: string | number): boolean {
+    return this.controller.choke(id);
+  }
+
+  subscribeHit(listener: HitListener): () => void {
+    this.hitListeners.add(listener);
+    return () => this.hitListeners.delete(listener);
+  }
+
+  subscribePanic(listener: PanicListener): () => void {
+    this.panicListeners.add(listener);
+    return () => this.panicListeners.delete(listener);
+  }
+
+  interact({ partId, velocity, phase }: InstrumentInteraction): boolean {
+    const note = PART_NOTE[partId];
+    if (note === undefined) return false;
+
+    if (phase === 'start') {
+      this.noteOn(note, velocity);
       return true;
     }
 
-    const note = partId === 'hihat' ? (this.hiHatOpen ? 46 : 42) : PART_NOTE[partId];
-    if (note === undefined) return false;
-
-    this.noteOn(note, velocity);
+    this.noteOff(note);
+    if (partId === 'hatPedal') this.setHiHat(0.8);
     return true;
   }
 
   dispose(): void {
     this.controller.panic();
+    this.hitListeners.clear();
+    this.panicListeners.clear();
     this.root.removeFromParent();
 
     const geometries = new Set<THREE.BufferGeometry>();
