@@ -3,18 +3,22 @@ import { AppState } from './AppState';
 import { AudioEngine } from '../audio/AudioEngine';
 import { DrumSampler } from '../audio/DrumSampler';
 import { KeyboardSampler } from '../audio/KeyboardSampler';
+import { ViolinSampler } from '../audio/ViolinSampler';
 import { CameraRegistry } from '../camera/CameraRegistry';
 import { CameraSystem } from '../camera/CameraSystem';
 import { ATELIER_DRUM_VIEWS } from '../camera/presets/AtelierDrumViews';
 import { ATELIER_KEYBOARD_VIEWS } from '../camera/presets/AtelierKeyboardViews';
+import { ATELIER_VIOLIN_VIEWS } from '../camera/presets/AtelierViolinViews';
 import { Engine } from '../engine/Engine';
 import { RendererHost } from '../engine/RendererHost';
 import { InstrumentRegistry } from '../instruments/Instrument';
 import { InstrumentInteractionSystem } from '../instruments/InstrumentInteractionSystem';
 import { DrumsInstrument } from '../instruments/drums/DrumsInstrument';
 import { KeyboardInstrument } from '../instruments/keyboard/KeyboardInstrument';
+import { ViolinInstrument } from '../instruments/violin/ViolinInstrument';
 import { AtelierDrumShowcaseMode } from '../presentation/atelier/AtelierDrumShowcaseMode';
 import { AtelierKeyboardShowcaseMode } from '../presentation/atelier/AtelierKeyboardShowcaseMode';
+import { AtelierViolinShowcaseMode } from '../presentation/atelier/AtelierViolinShowcaseMode';
 import { PresentationManager } from '../presentation/PresentationManager';
 import { ShowcaseSwitchController } from '../presentation/ShowcaseSwitchController';
 import { ControlArbiter } from '../show/ControlArbiter';
@@ -30,6 +34,7 @@ export class VirtualBandApp {
   readonly audio = new AudioEngine();
   readonly drumSampler = new DrumSampler(this.audio);
   readonly keyboardSampler = new KeyboardSampler(this.audio);
+  readonly violinSampler = new ViolinSampler(this.audio);
   readonly instruments = new InstrumentRegistry();
   readonly cameraRegistry = new CameraRegistry();
   readonly control = new ControlArbiter();
@@ -44,8 +49,10 @@ export class VirtualBandApp {
   private readonly instrumentLayer = new THREE.Group();
   private drums: DrumsInstrument | null = null;
   private keyboard: KeyboardInstrument | null = null;
+  private violin: ViolinInstrument | null = null;
   private atelierMode: AtelierDrumShowcaseMode | null = null;
   private keyboardMode: AtelierKeyboardShowcaseMode | null = null;
+  private violinMode: AtelierViolinShowcaseMode | null = null;
   private showcaseSwitch: ShowcaseSwitchController | null = null;
   private started = false;
   private lastStateTime = -Infinity;
@@ -90,24 +97,29 @@ export class VirtualBandApp {
     this.state.patch({ error: null });
 
     try {
-      const [drums, keyboard] = await Promise.all([
+      const [drums, keyboard, violin] = await Promise.all([
         DrumsInstrument.create(this.drumSampler),
         KeyboardInstrument.create(this.keyboardSampler),
+        ViolinInstrument.create(this.violinSampler),
       ]);
       this.drums = drums;
       this.keyboard = keyboard;
+      this.violin = violin;
 
       this.instruments.register(drums);
       this.instruments.register(keyboard);
-      this.instrumentLayer.add(drums.root, keyboard.root);
+      this.instruments.register(violin);
+      this.instrumentLayer.add(drums.root, keyboard.root, violin.root);
 
       // Saved views are reusable camera assets, not presentation-mode data.
       this.cameraRegistry.setInstrumentViews(drums.id, ATELIER_DRUM_VIEWS);
       this.cameraRegistry.setInstrumentViews(keyboard.id, ATELIER_KEYBOARD_VIEWS);
+      this.cameraRegistry.setInstrumentViews(violin.id, ATELIER_VIOLIN_VIEWS);
 
       // Network sound loading never blocks the visual scene.
       void this.drumSampler.preload();
       void this.keyboardSampler.preloadCommon();
+      void this.violinSampler.preloadCommon();
 
       this.activateVenue('atelier-studio');
 
@@ -125,10 +137,19 @@ export class VirtualBandApp {
         keyboard,
         interactions: this.interactions,
       });
+      const violinMode = new AtelierViolinShowcaseMode({
+        element: this.renderer.renderer.domElement,
+        camera: this.camera,
+        cameraRegistry: this.cameraRegistry,
+        violin,
+        interactions: this.interactions,
+      });
       this.atelierMode = drumMode;
       this.keyboardMode = keyboardMode;
+      this.violinMode = violinMode;
       this.presentation.register(drumMode);
       this.presentation.register(keyboardMode);
+      this.presentation.register(violinMode);
 
       this.showcaseSwitch = new ShowcaseSwitchController({
         instruments: this.instruments,
@@ -136,6 +157,7 @@ export class VirtualBandApp {
         entries: [
           { instrumentId: drums.id, presentationId: drumMode.id },
           { instrumentId: keyboard.id, presentationId: keyboardMode.id },
+          { instrumentId: violin.id, presentationId: violinMode.id },
         ],
         initialInstrumentId: drums.id,
         onChanged: () => this.renderer.invalidateShadows(),
@@ -180,6 +202,11 @@ export class VirtualBandApp {
     return this.keyboard;
   }
 
+  requireViolin(): ViolinInstrument {
+    if (!this.violin) throw new Error('Atelier violin is not ready');
+    return this.violin;
+  }
+
   requireAtelierShowcase(): AtelierDrumShowcaseMode {
     if (!this.atelierMode) throw new Error('Atelier drum showcase is not ready');
     return this.atelierMode;
@@ -188,6 +215,11 @@ export class VirtualBandApp {
   requireKeyboardShowcase(): AtelierKeyboardShowcaseMode {
     if (!this.keyboardMode) throw new Error('Atelier keyboard showcase is not ready');
     return this.keyboardMode;
+  }
+
+  requireViolinShowcase(): AtelierViolinShowcaseMode {
+    if (!this.violinMode) throw new Error('Atelier violin showcase is not ready');
+    return this.violinMode;
   }
 
   dispose(): void {
@@ -199,13 +231,16 @@ export class VirtualBandApp {
     this.presentation.dispose();
     this.atelierMode = null;
     this.keyboardMode = null;
+    this.violinMode = null;
     if (this.drums) this.cameraRegistry.clearInstrumentViews(this.drums.id);
     if (this.keyboard) this.cameraRegistry.clearInstrumentViews(this.keyboard.id);
+    if (this.violin) this.cameraRegistry.clearInstrumentViews(this.violin.id);
     this.interactions.dispose();
     this.control.clear();
     this.instruments.dispose();
     this.drums = null;
     this.keyboard = null;
+    this.violin = null;
     this.audio.dispose();
     this.instrumentLayer.removeFromParent();
     this.venues.dispose();
