@@ -43,11 +43,12 @@ async function boot() {
     await loadScript(`./src/venues/nocturne-stage-source-${String(i).padStart(2, '0')}.js`);
   }
   await loadScript('./src/venues/nocturne-stage-source-finalize.js');
+  // Arm the balanced profile before StageEngine is constructed so it can reduce the
+  // expensive fixture/haze/LED work synchronously on the stage-ready event, before the
+  // first full venue frame is rendered.
+  await loadScript('./src/venues/nocturne-performance.js');
   await loadScript('./src/venues/venue-manager.js');
   await window.VirtualBandVenuesReady;
-  // Balanced keeps the full venue artwork but reduces expensive real-time lighting,
-  // shadow, bloom, haze and LED update work before playback/directing starts.
-  await loadScript('./src/venues/nocturne-performance.js');
   await loadScript('./src/runtime/auto-director.js');
   // Agent-authored timelines sit above the automatic director and can temporarily own
   // the camera for a song while preserving the user's manual override priority.
