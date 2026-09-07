@@ -138,6 +138,7 @@ export class VirtualBandApp {
           { instrumentId: keyboard.id, presentationId: keyboardMode.id },
         ],
         initialInstrumentId: drums.id,
+        onChanged: () => this.renderer.invalidateShadows(),
       });
       this.showcaseSwitch.activateInitial();
 
