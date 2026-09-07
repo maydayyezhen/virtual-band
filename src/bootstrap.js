@@ -40,8 +40,6 @@ async function boot() {
     './src/instruments/keyboard.js',
     './src/instruments/drums.js',
     './src/instruments/electric-guitar.js',
-    // Capture the actual stage Scene/Camera before app.js starts. This no longer hooks
-    // WebGLRenderer.render, because Three.js installs render on renderer instances.
     './src/runtime/camera-capture.js',
     './src/runtime/stage-layout.js',
     './src/runtime/shadow-sync.js',
@@ -51,14 +49,9 @@ async function boot() {
   for (const src of sourceOrder) await loadScript(src);
   await window.loadVirtualBandSongs();
   await loadScript('./src/runtime/app.js');
-  // app.js has now created the shared renderer. Bridge it with the captured Scene and
-  // Camera, attach the authored camera layer, then import the complete gifted venue
-  // before any automatic director starts choosing shots.
   await loadScript('./src/runtime/camera-runtime-bridge.js');
   await loadScript('./src/runtime/camera-controller.js');
   await loadScript('./src/venues/venue-ui.js');
-  // Paint a full-screen cover before fetching/decompressing/constructing NOCTURNE so a
-  // heavy first mount reads as deliberate loading rather than a frozen page.
   await loadScript('./src/venues/venue-loading-overlay.js');
   await nextPaint();
   await loadScript('./src/venues/nocturne-stage-source.js');
@@ -69,69 +62,36 @@ async function boot() {
   await loadScript('./src/venues/venue-manager.js');
   await window.VirtualBandVenuesReady;
 
-  // camera-controller.js attaches on requestAnimationFrame, so script.onload does not
-  // guarantee that window.VirtualBandCamera already exists. Wait for the actual Camera
-  // v2 API before installing the venue capture handlers; otherwise the guard exits once
-  // during startup and left-drag appears completely dead.
   await waitForRuntime(
     () => window.VirtualBandCamera?.pose && window.__VIRTUAL_BAND_CAMERA_RUNTIME__?.renderer,
     'Camera v2 runtime',
   );
 
-  // Re-fit the donated band assets to the actual NOCTURNE stage footprint. This module
-  // only applies in venue mode; switching to "无" still restores the original layout.
   await loadScript('./src/venues/nocturne-band-layout.js');
-
-  // Venue mode follows the original CameraRig interaction model: head-look instead of
-  // orbit, FOV zoom, and a renderer-level guarantee that every perspective eye stays
-  // inside the authored room bounds. Install before the PROGRAM director wraps render.
   await loadScript('./src/venues/venue-camera-guard.js');
-  // Prevent performance/detail cameras from slipping behind the main LED wall, where
-  // keyboard/drum shots would be physically occluded by the screen hardware.
   await loadScript('./src/venues/nocturne-camera-clearance.js');
-
-  // The authored venue used to advance its fixture/LED clock only when the real host
-  // camera reached its renderer bridge. Camera v3.2 often renders a cloned PROGRAM
-  // camera, so keep venue animation time alive independently of camera ownership.
   await loadScript('./src/venues/nocturne-independent-clock.js');
 
-  // Music-driven show layer: analyze each MIDI song by bar/beat, move the authored
-  // fixtures, react to drum accents, and sequence only NOCTURNE's existing LED presets.
   await loadScript('./src/venues/nocturne-auto-show.js');
-  // Temporary content test benches for the main LED. They use the donated ScreenSurface
-  // content path directly, while one shared guard keeps Auto LED off the main display.
   await loadScript('./src/venues/nocturne-led-image-test.js');
   await loadScript('./src/venues/nocturne-led-image-test-guard.js');
   await loadScript('./src/venues/nocturne-led-video-test.js');
   await loadScript('./src/venues/nocturne-led-canvas-examples.js');
-  // Link the two narrow wing LEDs to whichever temporary main-screen test is active.
-  // They can crop the main source, mirror it, or run their own vertical Canvas visual.
   await loadScript('./src/venues/nocturne-led-wing-link.js');
-  // Queen gets a song-specific Agent lighting layer above Auto Lighting. It reads the
-  // complete MIDI and owns fixtures / haze / stage key+fill.
   await loadScript('./src/venues/nocturne-agent-lighting-dust.js');
-  // Companion Queen LED arrangement consumes the lighting plan as its macro cue sheet,
-  // then owns all three authored LED surfaces unless a temporary media test is active.
   await loadScript('./src/venues/nocturne-agent-led-dust.js');
 
   await loadScript('./src/runtime/auto-director.js');
-  // Agent-authored timelines sit above the automatic director and can temporarily own
-  // the camera for a song while preserving the user's manual override priority.
   await loadScript('./src/runtime/agent-camera-arrangements.js');
   await loadScript('./src/runtime/agent-camera-dust-demo.js');
-  // Load the transport-level master last so FIXED can suppress both lower camera layers
-  // from the first frame while leaving lighting/LED automation untouched.
   await loadScript('./src/runtime/playback-camera-toggle.js');
-  // User-facing NOCTURNE camera curation layer. The baked config is intentionally tiny;
-  // browser edits live in localStorage until exported as JSON and committed back here.
+
+  // Camera unification boundary. Keep the old baked file loaded only as migration input;
+  // the new library owns one visible UI and one schema for every venue. Scene views stay
+  // scene-local, while instrument views use root-local anchors and therefore cross venues.
   await loadScript('./src/data/camera-preset-config.js');
-  await loadScript('./src/runtime/camera-preset-editor.js');
-  // Keep the editor itself out of the camera menu's document flow: entering edit mode
-  // opens a bounded floating inspector with its own scroll area instead of stretching UI.
-  await loadScript('./src/runtime/camera-preset-editor-layout.js');
-  // Replace the long editor lists with one context selector: stage/venue when nothing is
-  // focused, or only the currently focused instrument's camera family.
-  await loadScript('./src/runtime/camera-context-editor.js');
+  await loadScript('./src/data/camera-library-config.js');
+  await loadScript('./src/runtime/camera-library.js');
 }
 
 boot().catch((error) => {
