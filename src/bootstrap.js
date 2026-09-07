@@ -78,10 +78,17 @@ async function boot() {
     'Camera v2 runtime',
   );
 
+  // Re-fit the donated band assets to the actual NOCTURNE stage footprint. This module
+  // only applies in venue mode; switching to "无" still restores the original layout.
+  await loadScript('./src/venues/nocturne-band-layout.js');
+
   // Venue mode follows the original CameraRig interaction model: head-look instead of
   // orbit, FOV zoom, and a renderer-level guarantee that every perspective eye stays
   // inside the authored room bounds. Install before the PROGRAM director wraps render.
   await loadScript('./src/venues/venue-camera-guard.js');
+  // Prevent performance/detail cameras from slipping behind the main LED wall, where
+  // keyboard/drum shots would be physically occluded by the screen hardware.
+  await loadScript('./src/venues/nocturne-camera-clearance.js');
   await loadScript('./src/runtime/auto-director.js');
   // Agent-authored timelines sit above the automatic director and can temporarily own
   // the camera for a song while preserving the user's manual override priority.
