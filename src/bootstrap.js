@@ -38,6 +38,9 @@ async function boot() {
   await loadScript('./src/runtime/camera-runtime-bridge.js');
   await loadScript('./src/runtime/camera-controller.js');
   await loadScript('./src/venues/venue-ui.js');
+  // Paint a full-screen cover before fetching/decompressing/constructing NOCTURNE so a
+  // heavy first mount reads as deliberate loading rather than a frozen page.
+  await loadScript('./src/venues/venue-loading-overlay.js');
   await loadScript('./src/venues/nocturne-stage-source.js');
   for (let i = 1; i <= 7; i++) {
     await loadScript(`./src/venues/nocturne-stage-source-${String(i).padStart(2, '0')}.js`);
@@ -45,6 +48,10 @@ async function boot() {
   await loadScript('./src/venues/nocturne-stage-source-finalize.js');
   await loadScript('./src/venues/venue-manager.js');
   await window.VirtualBandVenuesReady;
+  // Venue mode follows the original CameraRig interaction model: head-look instead of
+  // orbit, FOV zoom, and a renderer-level guarantee that every perspective eye stays
+  // inside the authored room bounds. Install before the PROGRAM director wraps render.
+  await loadScript('./src/venues/venue-camera-guard.js');
   await loadScript('./src/runtime/auto-director.js');
   // Agent-authored timelines sit above the automatic director and can temporarily own
   // the camera for a song while preserving the user's manual override priority.
@@ -54,6 +61,7 @@ async function boot() {
 
 boot().catch((error) => {
   console.error('[Virtual Band bootstrap]', error);
+  window.VirtualBandVenueLoading?.fail?.(error);
   const loading = document.getElementById('loading');
   if (loading) loading.style.display = 'none';
   const panel = document.getElementById('error');
