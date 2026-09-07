@@ -15,9 +15,10 @@ export class RendererHost {
       alpha: false,
       powerPreference: 'high-performance',
     });
+    this.renderer.setClearColor(0x11191f, 1);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1;
+    this.renderer.toneMappingExposure = 1.02;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.mount.appendChild(this.renderer.domElement);
