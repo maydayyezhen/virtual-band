@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { DrumSampler } from '../../audio/DrumSampler';
+import { HI_HAT_NOTES, type DrumSampler } from '../../audio/DrumSampler';
 import type { Instrument, InstrumentFrameResult, InstrumentInteraction } from '../Instrument';
 import {
   buildLegacyDrumAsset,
@@ -14,13 +14,14 @@ const PART_NOTE: Record<string, number> = {
   floorTom: 43,
   tomMid: 47,
   tomHigh: 50,
-  hihat: 42,
-  hatPedal: 44,
+  hatPedal: HI_HAT_NOTES.pedal,
   crashLeft: 49,
   crashRight: 57,
   ride: 51,
   splash: 55,
 };
+
+const HI_HAT_CLOSED_MAX = 0.16;
 
 type HitListener = (event: LegacyDrumHitEvent) => void;
 type PanicListener = () => void;
@@ -35,6 +36,9 @@ export class DrumsInstrument implements Instrument {
   private readonly sampler: DrumSampler;
   private readonly hitListeners: Set<HitListener>;
   private readonly panicListeners: Set<PanicListener>;
+
+  private hiHatOpenness = 0;
+  private interactiveHiHatNote: number | null = null;
 
   private constructor(
     root: THREE.Group,
@@ -68,6 +72,15 @@ export class DrumsInstrument implements Instrument {
   noteOn(note: number, velocity: number): void {
     const accepted = this.controller.noteOn(note, velocity);
     if (!accepted) return;
+
+    if (note === HI_HAT_NOTES.closed || note === HI_HAT_NOTES.pedal) {
+      this.hiHatOpenness = 0;
+      this.sampler.setHiHatOpenness(0);
+    } else if (note === HI_HAT_NOTES.open) {
+      this.hiHatOpenness = Math.max(0.78, this.hiHatOpenness);
+      this.sampler.setHiHatOpenness(this.hiHatOpenness);
+    }
+
     this.sampler.noteOn(note, velocity);
   }
 
@@ -80,19 +93,49 @@ export class DrumsInstrument implements Instrument {
   }
 
   reset(): void {
+    this.hiHatOpenness = 0;
+    this.interactiveHiHatNote = null;
+    this.sampler.resetHiHat();
     this.controller.panic();
   }
 
   setHiHat(openness: number): boolean {
-    return this.controller.setHiHat(openness);
+    if (!Number.isFinite(openness)) return false;
+    const next = Math.max(0, Math.min(1, openness));
+    const accepted = this.controller.setHiHat(next);
+    if (!accepted) return false;
+
+    this.hiHatOpenness = next;
+    this.sampler.setHiHatOpenness(next);
+    return true;
   }
 
   controlChange(cc: number, value: number): boolean {
-    return this.controller.controlChange(cc, value);
+    if (cc === 4 && Number.isInteger(value) && value >= 0 && value <= 127) {
+      // GM/foot-controller convention used by the donor: 0=open, 127=closed.
+      return this.setHiHat(1 - value / 127);
+    }
+
+    const accepted = this.controller.controlChange(cc, value);
+    if (!accepted) return false;
+
+    if (cc === 120 || cc === 121) {
+      this.hiHatOpenness = 0;
+      this.interactiveHiHatNote = null;
+      this.sampler.resetHiHat();
+    }
+    return true;
   }
 
   choke(id: string | number): boolean {
-    return this.controller.choke(id);
+    const accepted = this.controller.choke(id);
+    if (
+      id === 'hihat'
+      || id === HI_HAT_NOTES.closed
+      || id === HI_HAT_NOTES.pedal
+      || id === HI_HAT_NOTES.open
+    ) this.sampler.chokeHiHat();
+    return accepted;
   }
 
   subscribeHit(listener: HitListener): () => void {
@@ -106,6 +149,13 @@ export class DrumsInstrument implements Instrument {
   }
 
   interact({ partId, velocity, phase }: InstrumentInteraction): boolean {
+    if (partId === 'hihat') {
+      if (phase === 'start') return this.strikePhysicalHiHat(velocity);
+      if (this.interactiveHiHatNote !== null) this.controller.noteOff(this.interactiveHiHatNote);
+      this.interactiveHiHatNote = null;
+      return true;
+    }
+
     const note = PART_NOTE[partId];
     if (note === undefined) return false;
 
@@ -120,6 +170,7 @@ export class DrumsInstrument implements Instrument {
   }
 
   dispose(): void {
+    this.sampler.resetHiHat();
     this.controller.panic();
     this.hitListeners.clear();
     this.panicListeners.clear();
@@ -146,5 +197,24 @@ export class DrumsInstrument implements Instrument {
     for (const texture of textures) texture.dispose();
     for (const material of materials) material.dispose();
     for (const geometry of geometries) geometry.dispose();
+  }
+
+  private strikePhysicalHiHat(velocity: number): boolean {
+    const openness = this.hiHatOpenness;
+    const visualNote = openness <= HI_HAT_CLOSED_MAX
+      ? HI_HAT_NOTES.closed
+      : HI_HAT_NOTES.open;
+
+    const accepted = this.controller.noteOn(visualNote, velocity);
+    if (!accepted) return false;
+
+    // The frozen donor uses note 42/46 both as articulation and as a state hint.
+    // A physical 3D strike must not move the pedal, so immediately restore the
+    // continuous pedal position after injecting the hit energy into the donor.
+    this.controller.setHiHat(openness);
+    this.sampler.setHiHatOpenness(openness);
+    this.sampler.hitHiHat(openness, velocity);
+    this.interactiveHiHatNote = visualNote;
+    return true;
   }
 }
