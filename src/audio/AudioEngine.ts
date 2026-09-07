@@ -1,3 +1,9 @@
+export interface AudioVoice {
+  setGain(value: number, rampSeconds?: number): void;
+  stop(fadeSeconds?: number, delaySeconds?: number): void;
+  onEnded(listener: () => void): () => void;
+}
+
 export class AudioEngine {
   private context: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -26,27 +32,78 @@ export class AudioEngine {
     return this.getContext().decodeAudioData(data.slice(0));
   }
 
-  playBuffer(buffer: AudioBuffer, gain = 1, when?: number): void {
+  playBuffer(buffer: AudioBuffer, gain = 1, when?: number): AudioVoice | null {
     const context = this.getContext();
     const master = this.master;
-    if (!master) return;
+    if (!master) return null;
 
     void this.resume();
 
     const source = context.createBufferSource();
     const voiceGain = context.createGain();
+    const endedListeners = new Set<() => void>();
+    const startAt = when ?? context.currentTime;
+    let cleaned = false;
+
     source.buffer = buffer;
-    voiceGain.gain.value = Math.max(0, Math.min(1, gain));
+    voiceGain.gain.value = clamp01(gain);
     source.connect(voiceGain).connect(master);
 
-    this.activeSources.add(source);
-    source.addEventListener('ended', () => {
+    const cleanup = (): void => {
+      if (cleaned) return;
+      cleaned = true;
       this.activeSources.delete(source);
       source.disconnect();
       voiceGain.disconnect();
-    }, { once: true });
+      for (const listener of endedListeners) listener();
+      endedListeners.clear();
+    };
 
-    source.start(when ?? context.currentTime);
+    const voice: AudioVoice = {
+      setGain: (value, rampSeconds = 0) => {
+        if (cleaned) return;
+        const now = context.currentTime;
+        const next = clamp01(value);
+        const ramp = Math.max(0, rampSeconds);
+        voiceGain.gain.cancelScheduledValues(now);
+        voiceGain.gain.setValueAtTime(voiceGain.gain.value, now);
+        if (ramp > 0) voiceGain.gain.linearRampToValueAtTime(next, now + ramp);
+        else voiceGain.gain.setValueAtTime(next, now);
+      },
+      stop: (fadeSeconds = 0, delaySeconds = 0) => {
+        if (cleaned) return;
+        const now = context.currentTime;
+        const delay = Math.max(0, delaySeconds);
+        const fade = Math.max(0, fadeSeconds);
+        const fadeStart = Math.max(now, startAt) + delay;
+        const stopAt = fadeStart + fade;
+
+        voiceGain.gain.cancelScheduledValues(now);
+        voiceGain.gain.setValueAtTime(voiceGain.gain.value, now);
+        if (fadeStart > now) voiceGain.gain.setValueAtTime(voiceGain.gain.value, fadeStart);
+        if (fade > 0) voiceGain.gain.linearRampToValueAtTime(0, stopAt);
+        else voiceGain.gain.setValueAtTime(0, fadeStart);
+
+        try {
+          // AudioBufferSourceNode.stop() may be rescheduled before the source ends.
+          // That lets a later hi-hat pedal close override a previously scheduled tail.
+          source.stop(stopAt + 0.005);
+        } catch {}
+      },
+      onEnded: (listener) => {
+        if (cleaned) {
+          listener();
+          return () => {};
+        }
+        endedListeners.add(listener);
+        return () => endedListeners.delete(listener);
+      },
+    };
+
+    this.activeSources.add(source);
+    source.addEventListener('ended', cleanup, { once: true });
+    source.start(startAt);
+    return voice;
   }
 
   stopAll(): void {
@@ -65,4 +122,8 @@ export class AudioEngine {
     this.context = null;
     if (context && context.state !== 'closed') void context.close();
   }
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
 }
