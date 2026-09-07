@@ -26,6 +26,7 @@ export class RendererHost {
     this.renderer.toneMappingExposure = 1.02;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.domElement.setAttribute('aria-hidden', 'true');
     this.mount.appendChild(this.renderer.domElement);
   }
 
@@ -78,10 +79,11 @@ export class RendererHost {
     return width / height;
   }
 
+  invalidateShadows(): void {
+    if (this.renderer.shadowMap.enabled) this.renderer.shadowMap.needsUpdate = true;
+  }
+
   render(camera: THREE.Camera): void {
-    if (!this.renderer.shadowMap.autoUpdate && this.renderer.shadowMap.enabled) {
-      this.renderer.shadowMap.needsUpdate = true;
-    }
     this.renderer.render(this.scene, camera);
   }
 
