@@ -18,6 +18,7 @@
 
   const STORE='vb-camera-instrument-draft-v1';
   const SCHEMA='virtual-band-camera-workbench/v1';
+  const INSTRUMENT_TRANSITION_MS=450;
   const STAGE_SYSTEM=[
     ['front','正面'],['left','左侧'],['right','右侧'],['top','高机位'],
     ['nocturne:panorama','场馆全景'],['nocturne:stage','舞台正面'],
@@ -114,7 +115,9 @@
     root.updateWorldMatrix(true,true);
     const p=root.localToWorld(new T.Vector3(...anchor.camera));
     const t=root.localToWorld(new T.Vector3(...anchor.target));
-    camera.pose?.({position:p.toArray(),target:t.toArray(),fov:anchor.fov||42,durationMs:120},false);
+    // Match Camera v2's normal same-instrument transition instead of the old 120 ms
+    // preview hop, which was effectively a cut and made newly saved views look broken.
+    camera.pose?.({position:p.toArray(),target:t.toArray(),fov:anchor.fov||42,durationMs:INSTRUMENT_TRANSITION_MS},false);
     return true;
   }
 
