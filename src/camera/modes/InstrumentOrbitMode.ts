@@ -124,6 +124,6 @@ export class InstrumentOrbitMode {
       this.target.z + this.radius * sinPolar * Math.cos(this.azimuth),
     );
 
-    this.camera.setPose({ position, target: this.target, fov: 42 }, instant);
+    this.camera.setPose({ position, target: this.target, fov: 34 }, instant);
   }
 }
