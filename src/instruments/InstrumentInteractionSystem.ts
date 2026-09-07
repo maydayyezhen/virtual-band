@@ -41,9 +41,12 @@ export class InstrumentInteractionSystem {
     this.camera.updateMatrixWorld(true);
     this.raycaster.setFromCamera(this.pointer, this.camera);
 
-    // Preserve donor behavior: only the nearest rendered surface may resolve as a
-    // playable hit. An unplayable front surface blocks playable geometry behind it.
-    const intersection = this.raycaster.intersectObjects(roots, true)[0];
+    // Preserve donor behavior: only the nearest *rendered* surface may resolve as a
+    // playable hit. Hidden markers/helper meshes do not block picking, while a visible
+    // unplayable front surface still blocks playable geometry behind it.
+    const intersection = this.raycaster
+      .intersectObjects(roots, true)
+      .find((hit) => isRenderedVisible(hit.object));
     if (!intersection) return null;
 
     let node: THREE.Object3D | null = intersection.object;
@@ -81,4 +84,13 @@ export class InstrumentInteractionSystem {
   }
 
   dispose(): void {}
+}
+
+function isRenderedVisible(object: THREE.Object3D): boolean {
+  let node: THREE.Object3D | null = object;
+  while (node) {
+    if (!node.visible) return false;
+    node = node.parent;
+  }
+  return true;
 }
