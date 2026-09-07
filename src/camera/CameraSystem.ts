@@ -2,6 +2,12 @@ import * as THREE from 'three';
 import type { InstrumentRegistry } from '../instruments/Instrument';
 import type { CameraRegistry, CameraView } from './CameraRegistry';
 
+export interface CameraPoseInput {
+  position: THREE.Vector3;
+  target: THREE.Vector3;
+  fov: number;
+}
+
 interface CameraPose {
   position: THREE.Vector3;
   target: THREE.Vector3;
@@ -30,17 +36,28 @@ export class CameraSystem {
     this.output.updateProjectionMatrix();
   }
 
+  setPose(input: CameraPoseInput, instant = false): void {
+    const pose: CameraPose = {
+      position: input.position.clone(),
+      target: input.target.clone(),
+      fov: input.fov,
+    };
+
+    if (instant) {
+      this.applyPose(pose);
+      this.desired = null;
+      return;
+    }
+
+    this.desired = pose;
+  }
+
   goToView(id: string, instant = false): boolean {
     const view = this.registry.get(id);
     if (!view) return false;
     const pose = this.resolve(view);
     if (!pose) return false;
-    if (instant) {
-      this.applyPose(pose);
-      this.desired = null;
-      return true;
-    }
-    this.desired = pose;
+    this.setPose(pose, instant);
     return true;
   }
 
