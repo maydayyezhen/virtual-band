@@ -10,6 +10,7 @@ export class ShowcaseSwitchController {
   private readonly instruments: InstrumentRegistry;
   private readonly presentation: PresentationManager;
   private readonly entries: ShowcaseEntry[];
+  private readonly onChanged?: (instrumentId: string) => void;
   private activeIndex = 0;
   private disposed = false;
 
@@ -18,10 +19,12 @@ export class ShowcaseSwitchController {
     presentation: PresentationManager;
     entries: ShowcaseEntry[];
     initialInstrumentId?: string;
+    onChanged?: (instrumentId: string) => void;
   }) {
     this.instruments = options.instruments;
     this.presentation = options.presentation;
     this.entries = [...options.entries];
+    this.onChanged = options.onChanged;
     if (!this.entries.length) throw new Error('Showcase switcher requires at least one entry');
 
     const initialIndex = options.initialInstrumentId
@@ -68,6 +71,7 @@ export class ShowcaseSwitchController {
       if (instrument) instrument.root.visible = entry.instrumentId === active.instrumentId;
     }
     this.presentation.activate(active.presentationId);
+    this.onChanged?.(active.instrumentId);
   }
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
