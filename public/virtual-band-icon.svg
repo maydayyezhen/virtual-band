@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 268 268" fill="none" role="img" aria-labelledby="vb-title vb-desc">
+  <title id="vb-title">Virtual Band symbol</title>
+  <desc id="vb-desc">Six separated rhythm bars arranged as a V. Teal blue with one amber beat.</desc>
+  <!-- Original vector artwork. Transparent background. All visible lettering is outlined. -->
+  <g id="signal-v">
+    <path id="voice-1" fill="#238895" d="M14 25 Q14 20 17.536 23.536 L40.464 46.464 Q44 50 44 55 L44 159 Q44 164 40.464 160.464 L17.536 137.536 Q14 134 14 129 L14 25 Z"/>
+    <path id="voice-2" fill="#238895" d="M56 67 Q56 62 59.536 65.536 L82.464 88.464 Q86 92 86 97 L86 201 Q86 206 82.464 202.464 L59.536 179.536 Q56 176 56 171 L56 67 Z"/>
+    <path id="voice-3" fill="#238895" d="M98 109 Q98 104 101.536 107.536 L124.464 130.464 Q128 134 128 139 L128 243 Q128 248 124.464 244.464 L101.536 221.536 Q98 218 98 213 L98 109 Z"/>
+    <path id="voice-4" fill="#238895" d="M140 139 Q140 134 143.536 130.464 L166.464 107.536 Q170 104 170 109 L170 213 Q170 218 166.464 221.536 L143.536 244.464 Q140 248 140 243 L140 139 Z"/>
+    <path id="voice-5" fill="#238895" d="M182 97 Q182 92 185.536 88.464 L208.464 65.536 Q212 62 212 67 L212 171 Q212 176 208.464 179.536 L185.536 202.464 Q182 206 182 201 L182 97 Z"/>
+    <path id="voice-6" fill="#C79A5C" d="M224 55 Q224 50 227.536 46.464 L250.464 23.536 Q254 20 254 25 L254 129 Q254 134 250.464 137.536 L227.536 160.464 Q224 164 224 159 L224 55 Z"/>
+  </g>
+</svg>
