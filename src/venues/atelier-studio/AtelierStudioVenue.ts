@@ -48,6 +48,14 @@ export class AtelierStudioVenue implements Venue {
       rotation: [0, 0, 0] as [number, number, number],
       scale: 0.44,
     },
+    // The violin donor's original studio floor was y=-2.225. Translate only at
+    // the Venue boundary so its cradle meets the common Atelier floor (-0.012)
+    // while preserving all authored instrument/bow geometry and local camera views.
+    'violin.main': {
+      position: [0, 2.213, 0] as [number, number, number],
+      rotation: [0, 0, 0] as [number, number, number],
+      scale: 1,
+    },
   };
 
   readonly cameraViews = [
