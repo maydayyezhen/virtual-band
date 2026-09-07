@@ -59,6 +59,7 @@ export class VenueManager {
       if (!transform) continue;
       applyTransform(instrument.root, transform);
     }
+    this.renderer.invalidateShadows();
   }
 }
 
