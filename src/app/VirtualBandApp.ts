@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { AppState } from './AppState';
 import { CameraRegistry } from '../camera/CameraRegistry';
 import { CameraSystem } from '../camera/CameraSystem';
+import { InstrumentOrbitMode } from '../camera/modes/InstrumentOrbitMode';
 import { Engine } from '../engine/Engine';
 import { RendererHost } from '../engine/RendererHost';
 import { InstrumentRegistry } from '../instruments/Instrument';
@@ -23,6 +24,7 @@ export class VirtualBandApp {
   readonly renderer: RendererHost;
   readonly camera: CameraSystem;
   readonly interactions: InstrumentInteractionSystem;
+  readonly showcase: InstrumentOrbitMode;
   readonly venues: VenueManager;
   readonly engine: Engine;
 
@@ -39,6 +41,11 @@ export class VirtualBandApp {
     this.interactions = new InstrumentInteractionSystem({
       element: this.renderer.renderer.domElement,
       camera: this.camera.output,
+      instruments: this.instruments,
+    });
+    this.showcase = new InstrumentOrbitMode({
+      element: this.renderer.renderer.domElement,
+      camera: this.camera,
       instruments: this.instruments,
     });
     this.venues = new VenueManager(this.renderer.scene, this.instruments);
@@ -72,6 +79,7 @@ export class VirtualBandApp {
       this.instrumentLayer.add(drums.root);
 
       this.activateVenue('empty-stage');
+      this.showcase.enter(drums.id);
       this.engine.start();
       this.state.patch({ running: true });
     } catch (error) {
@@ -100,6 +108,7 @@ export class VirtualBandApp {
     if (!this.started) return;
     this.started = false;
     this.engine.stop();
+    this.showcase.dispose();
     this.interactions.dispose();
     this.control.clear();
     this.instruments.dispose();
