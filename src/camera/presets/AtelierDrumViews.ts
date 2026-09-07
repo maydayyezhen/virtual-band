@@ -1,4 +1,4 @@
-import type { InstrumentOrbitCameraView } from '../CameraRegistry';
+import type { CameraViewportFraming, InstrumentOrbitCameraView } from '../CameraRegistry';
 
 export const ATELIER_DRUM_VIEW_IDS = {
   whole: 'drums.main:whole',
@@ -8,6 +8,17 @@ export const ATELIER_DRUM_VIEW_IDS = {
 } as const;
 
 export type AtelierDrumViewName = keyof typeof ATELIER_DRUM_VIEW_IDS;
+
+const DONOR_VIEWPORT_FRAMING: CameraViewportFraming = {
+  reservedHeight: 206,
+  compactReservedHeight: 104,
+  compactHeightBreakpoint: 500,
+  minUsableHeightRatio: 0.62,
+  horizontalMargin: 90,
+  mobileHorizontalMargin: 24,
+  mobileWidthBreakpoint: 600,
+  minUsableWidth: 200,
+};
 
 export const ATELIER_DRUM_VIEWS: InstrumentOrbitCameraView[] = [
   {
@@ -23,6 +34,7 @@ export const ATELIER_DRUM_VIEWS: InstrumentOrbitCameraView[] = [
     fov: 34,
     near: 0.035,
     far: 90,
+    viewportFraming: DONOR_VIEWPORT_FRAMING,
   },
   {
     kind: 'instrument-orbit',
@@ -37,6 +49,7 @@ export const ATELIER_DRUM_VIEWS: InstrumentOrbitCameraView[] = [
     fov: 34,
     near: 0.035,
     far: 90,
+    viewportFraming: DONOR_VIEWPORT_FRAMING,
   },
   {
     kind: 'instrument-orbit',
@@ -51,6 +64,7 @@ export const ATELIER_DRUM_VIEWS: InstrumentOrbitCameraView[] = [
     fov: 34,
     near: 0.035,
     far: 90,
+    viewportFraming: DONOR_VIEWPORT_FRAMING,
   },
   {
     kind: 'instrument-orbit',
@@ -65,5 +79,6 @@ export const ATELIER_DRUM_VIEWS: InstrumentOrbitCameraView[] = [
     fov: 34,
     near: 0.035,
     far: 90,
+    viewportFraming: DONOR_VIEWPORT_FRAMING,
   },
 ];
