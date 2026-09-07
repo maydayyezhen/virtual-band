@@ -13,6 +13,7 @@ import { DrumsInstrument } from '../instruments/drums/DrumsInstrument';
 import { ControlArbiter } from '../show/ControlArbiter';
 import { ShowScheduler } from '../show/ShowScheduler';
 import { Transport } from '../transport/Transport';
+import { AtelierStudioVenue } from '../venues/atelier-studio/AtelierStudioVenue';
 import { EmptyStageVenue } from '../venues/empty-stage/EmptyStageVenue';
 import { VenueManager } from '../venues/VenueManager';
 
@@ -52,7 +53,7 @@ export class VirtualBandApp {
       camera: this.camera,
       instruments: this.instruments,
     });
-    this.venues = new VenueManager(this.renderer.scene, this.instruments);
+    this.venues = new VenueManager(this.renderer, this.instruments);
     this.engine = new Engine({
       renderer: this.renderer,
       camera: this.camera,
@@ -63,6 +64,7 @@ export class VirtualBandApp {
     });
 
     this.venues.register(new EmptyStageVenue());
+    this.venues.register(new AtelierStudioVenue());
 
     this.transport.subscribe((snapshot) => {
       const statusChanged = snapshot.status !== this.state.getSnapshot().transport.status;
@@ -83,7 +85,7 @@ export class VirtualBandApp {
       this.instrumentLayer.add(drums.root);
       void this.drumSampler.preload();
 
-      this.activateVenue('empty-stage');
+      this.activateVenue('atelier-studio');
       this.showcase.enter(drums.id);
       this.engine.start();
       this.state.patch({ running: true });
