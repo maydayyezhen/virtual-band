@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import type { InstrumentRegistry } from '../../instruments/Instrument';
 import type { CameraSystem } from '../CameraSystem';
 
+const DEFAULT_AZIMUTH = 0.36;
+const DEFAULT_POLAR = Math.PI / 2 - 0.32;
+
 export class InstrumentOrbitMode {
   private readonly element: HTMLCanvasElement;
   private readonly camera: CameraSystem;
@@ -12,8 +15,8 @@ export class InstrumentOrbitMode {
   private radius = 8;
   private minRadius = 2;
   private maxRadius = 20;
-  private azimuth = 0;
-  private polar = Math.PI * 0.38;
+  private azimuth = DEFAULT_AZIMUTH;
+  private polar = DEFAULT_POLAR;
   private pointerId: number | null = null;
   private lastX = 0;
   private lastY = 0;
@@ -50,8 +53,8 @@ export class InstrumentOrbitMode {
     this.minRadius = baseRadius * 1.25;
     this.maxRadius = baseRadius * 5.5;
     this.radius = THREE.MathUtils.clamp(baseRadius * 2.65, this.minRadius, this.maxRadius);
-    this.azimuth = 0;
-    this.polar = Math.PI * 0.38;
+    this.azimuth = DEFAULT_AZIMUTH;
+    this.polar = DEFAULT_POLAR;
     this.applyCamera(true);
     return true;
   }
