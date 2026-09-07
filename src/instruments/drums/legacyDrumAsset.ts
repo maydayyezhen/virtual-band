@@ -91,74 +91,55 @@ function woodTexture(kind: WoodKind, size = 1024): THREE.CanvasTexture {
   });
 }
 
-const legacyWindow = window as typeof window & Record<string, unknown>;
 let factoriesPromise: Promise<LegacyDrumFactories> | null = null;
 
-function installModelGlobals(): () => void {
-  legacyWindow.T = THREE;
-  legacyWindow.V = V;
-  legacyWindow.TAU = TAU;
-  legacyWindow.canvasTexture = canvasTexture;
-  legacyWindow.woodTexture = woodTexture;
-
-  return () => {
-    delete legacyWindow.T;
-    delete legacyWindow.V;
-    delete legacyWindow.TAU;
-    delete legacyWindow.canvasTexture;
-    delete legacyWindow.woodTexture;
-  };
-}
-
-function loadFactories(): Promise<LegacyDrumFactories> {
+async function loadFactories(): Promise<LegacyDrumFactories> {
   if (factoriesPromise) return factoriesPromise;
 
-  factoriesPromise = new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = '/legacy-assets/drums.js';
-    script.async = false;
-    script.onload = () => {
-      const createModel = legacyWindow.createDrumModel;
-      const createController = legacyWindow.createDrumController;
-      script.remove();
-      delete legacyWindow.createDrumModel;
-      delete legacyWindow.createDrumController;
+  factoriesPromise = (async () => {
+    const response = await fetch('/legacy-assets/drums.js');
+    if (!response.ok) throw new Error(`Failed to load frozen drum donor: ${response.status}`);
+    const source = await response.text();
 
-      if (typeof createModel !== 'function' || typeof createController !== 'function') {
-        reject(new Error('Legacy drum factories were not exported by the donor asset'));
-        return;
-      }
-      resolve({
-        createModel: createModel as LegacyDrumFactories['createModel'],
-        createController: createController as LegacyDrumFactories['createController'],
-      });
-    };
-    script.onerror = () => {
-      script.remove();
-      reject(new Error('Failed to load the frozen legacy drum asset'));
-    };
-    document.head.appendChild(script);
-  });
+    // Execute the frozen donor source inside a function scope instead of as a classic
+    // script. Its original function declarations remain local to this adapter, so V2
+    // does not create or delete non-configurable Window globals such as createDrumModel.
+    const compile = new Function(
+      'T',
+      'V',
+      'TAU',
+      'canvasTexture',
+      'woodTexture',
+      `${source}\nreturn { createModel: createDrumModel, createController: createDrumController };`,
+    ) as (
+      T: typeof THREE,
+      vectorFactory: typeof V,
+      tau: number,
+      canvasTextureFactory: typeof canvasTexture,
+      woodTextureFactory: typeof woodTexture,
+    ) => LegacyDrumFactories;
+
+    const factories = compile(THREE, V, TAU, canvasTexture, woodTexture);
+    if (typeof factories.createModel !== 'function' || typeof factories.createController !== 'function') {
+      throw new Error('Frozen drum donor did not expose the expected factories');
+    }
+    return factories;
+  })();
 
   return factoriesPromise;
 }
 
 /**
  * Builds the exact donor drum model/controller from nocturne-integrated-fix behind a
- * narrow compatibility boundary. The legacy script is frozen source; V2 runtime code
- * never depends on its globals, DOM, renderer or frame loop.
+ * narrow compatibility boundary. The donor source stays frozen and V2 runtime code
+ * receives only the model/controller factories.
  */
 export async function buildLegacyDrumAsset(): Promise<{
   model: LegacyDrumModel;
   controller: LegacyDrumController;
 }> {
   const factories = await loadFactories();
-  const cleanup = installModelGlobals();
-  try {
-    const model = factories.createModel();
-    const controller = factories.createController(model, {});
-    return { model, controller };
-  } finally {
-    cleanup();
-  }
+  const model = factories.createModel();
+  const controller = factories.createController(model, {});
+  return { model, controller };
 }
