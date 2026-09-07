@@ -1,9 +1,11 @@
+import * as THREE from 'three';
 import { AppState } from './AppState';
 import { CameraRegistry } from '../camera/CameraRegistry';
 import { CameraSystem } from '../camera/CameraSystem';
 import { Engine } from '../engine/Engine';
 import { RendererHost } from '../engine/RendererHost';
 import { InstrumentRegistry } from '../instruments/Instrument';
+import { DrumsInstrument } from '../instruments/drums/DrumsInstrument';
 import { ControlArbiter } from '../show/ControlArbiter';
 import { ShowScheduler } from '../show/ShowScheduler';
 import { Transport } from '../transport/Transport';
@@ -22,13 +24,17 @@ export class VirtualBandApp {
   readonly venues: VenueManager;
   readonly engine: Engine;
 
+  private readonly instrumentLayer = new THREE.Group();
   private started = false;
   private lastStateTime = -Infinity;
 
   constructor(options: { mount: HTMLElement }) {
     this.renderer = new RendererHost(options.mount);
+    this.instrumentLayer.name = 'virtual-band:instruments';
+    this.renderer.scene.add(this.instrumentLayer);
+
     this.camera = new CameraSystem(this.cameraRegistry, this.instruments);
-    this.venues = new VenueManager(this.renderer.scene);
+    this.venues = new VenueManager(this.renderer.scene, this.instruments);
     this.engine = new Engine({
       renderer: this.renderer,
       camera: this.camera,
@@ -49,12 +55,22 @@ export class VirtualBandApp {
     });
   }
 
-  start(): void {
+  async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
-    this.activateVenue('empty-stage');
-    this.engine.start();
-    this.state.patch({ running: true });
+
+    try {
+      const drums = await DrumsInstrument.create();
+      this.instruments.register(drums);
+      this.instrumentLayer.add(drums.root);
+
+      this.activateVenue('empty-stage');
+      this.engine.start();
+      this.state.patch({ running: true });
+    } catch (error) {
+      this.started = false;
+      throw error;
+    }
   }
 
   activateVenue(id: string): void {
@@ -79,6 +95,7 @@ export class VirtualBandApp {
     this.engine.stop();
     this.control.clear();
     this.instruments.dispose();
+    this.instrumentLayer.removeFromParent();
     this.venues.dispose();
     this.renderer.dispose();
     this.state.patch({ running: false, venueId: null });
