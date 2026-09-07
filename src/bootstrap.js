@@ -104,6 +104,9 @@ async function boot() {
   await loadScript('./src/venues/nocturne-led-image-test-guard.js');
   await loadScript('./src/venues/nocturne-led-video-test.js');
   await loadScript('./src/venues/nocturne-led-canvas-examples.js');
+  // Link the two narrow wing LEDs to whichever temporary main-screen test is active.
+  // They can crop the main source, mirror it, or run their own vertical Canvas visual.
+  await loadScript('./src/venues/nocturne-led-wing-link.js');
   // Queen gets a song-specific Agent lighting layer above Auto Lighting. It reads the
   // complete MIDI and owns fixtures / haze / stage key+fill while leaving LED on Auto.
   await loadScript('./src/venues/nocturne-agent-lighting-dust.js');
