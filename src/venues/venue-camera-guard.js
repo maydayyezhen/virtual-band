@@ -28,14 +28,41 @@
     return v;
   }
   function same(a,b){return a.distanceToSquared(b)<1e-10;}
+
+  // Camera v2 computes its physical camera from target/yaw/pitch/distance immediately
+  // before drawing. Clamp the actual position vector at that write boundary, so even a
+  // generated fit/transition cannot put the real eye outside the room for one frame.
+  const hostPosition=runtime.camera.position;
+  const nativeSet=hostPosition.set.bind(hostPosition);
+  const nativeCopy=hostPosition.copy.bind(hostPosition);
+  const copyScratch=new T.Vector3();
+  hostPosition.set=function(x,y,z){
+    if(active()){
+      x=clamp(x,SAFE.minX,SAFE.maxX);
+      y=clamp(y,SAFE.minY,SAFE.maxY);
+      z=clamp(z,SAFE.minZ,SAFE.maxZ);
+    }
+    return nativeSet(x,y,z);
+  };
+  hostPosition.copy=function(v){
+    if(!active())return nativeCopy(v);
+    copyScratch.set(v.x,v.y,v.z);clampPosition(copyScratch);return nativeCopy(copyScratch);
+  };
+
   function direction(cam=runtime.camera){
     return cam.getWorldDirection(new T.Vector3()).normalize();
+  }
+  function syncNote(){
+    const note=document.getElementById('camera-v2-note');
+    if(note&&active()&&!cameraApi.state?.focused)
+      note.textContent='NOCTURNE · 左拖原地环顾 · 右拖移动机位 · 滚轮改变视野';
   }
   function pose(position,dir,fov=runtime.camera.fov){
     const p=clampPosition(position.clone());
     const d=dir.clone().normalize();
     const target=p.clone().addScaledVector(d,LOOK_DISTANCE);
     cameraApi.pose?.({position:p.toArray(),target:target.toArray(),fov:clamp(fov,28,100),durationMs:0},true);
+    syncNote();
   }
   function currentHead(){
     runtime.camera.updateMatrixWorld(true);
@@ -55,11 +82,11 @@
     ).normalize();
   }
 
-  // A renderer-level safety net also catches automatic director PROGRAM cameras and any
-  // future custom camera. Orthographic post-processing cameras are intentionally ignored.
+  // A renderer-level safety net catches automatic director PROGRAM cameras and future
+  // custom perspective cameras. Orthographic post-processing cameras are ignored.
   const priorRender=runtime.renderer.render.bind(runtime.renderer);
   runtime.renderer.render=function(scene,cam){
-    if(active()&&cam?.isPerspectiveCamera){
+    if(active()&&cam?.isPerspectiveCamera&&cam!==runtime.camera){
       const before=cam.position.clone();
       clampPosition(cam.position);
       if(!same(before,cam.position))cam.updateMatrixWorld(true);
@@ -178,6 +205,7 @@
       // If a previous scene left the eye outside the room, normalize it immediately.
       const head=currentHead();pose(head.position,dirFrom(head.yaw,head.pitch),head.fov);
     }
+    syncNote();
   });
 
   window.NocturneCameraSafety={
@@ -188,5 +216,6 @@
       return p.x>=SAFE.minX&&p.x<=SAFE.maxX&&p.y>=SAFE.minY&&p.y<=SAFE.maxY&&p.z>=SAFE.minZ&&p.z<=SAFE.maxZ;
     },
   };
+  syncNote();
   console.info('[Venue camera] NOCTURNE head-look + in-room camera guard attached',SAFE);
 })();
