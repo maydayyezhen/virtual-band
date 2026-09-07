@@ -108,8 +108,11 @@ async function boot() {
   // They can crop the main source, mirror it, or run their own vertical Canvas visual.
   await loadScript('./src/venues/nocturne-led-wing-link.js');
   // Queen gets a song-specific Agent lighting layer above Auto Lighting. It reads the
-  // complete MIDI and owns fixtures / haze / stage key+fill while leaving LED on Auto.
+  // complete MIDI and owns fixtures / haze / stage key+fill.
   await loadScript('./src/venues/nocturne-agent-lighting-dust.js');
+  // Companion Queen LED arrangement consumes the lighting plan as its macro cue sheet,
+  // then owns all three authored LED surfaces unless a temporary media test is active.
+  await loadScript('./src/venues/nocturne-agent-led-dust.js');
 
   await loadScript('./src/runtime/auto-director.js');
   // Agent-authored timelines sit above the automatic director and can temporarily own
