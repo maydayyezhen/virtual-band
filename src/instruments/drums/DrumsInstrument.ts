@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Instrument } from '../Instrument';
+import type { Instrument, InstrumentInteraction } from '../Instrument';
 import { buildLegacyDrumAsset, type LegacyDrumController } from './legacyDrumAsset';
 
 export class DrumsInstrument implements Instrument {
@@ -35,6 +35,12 @@ export class DrumsInstrument implements Instrument {
 
   reset(): void {
     this.controller.panic();
+  }
+
+  interact({ partId, intensity }: InstrumentInteraction): boolean {
+    const resolvedPart = partId === 'kickPedal' ? 'kick' : partId === 'hatPedal' ? 'hihat' : partId;
+    const velocity = Math.round(72 + Math.min(1, Math.max(0, intensity)) * 55);
+    return this.controller.hit(resolvedPart, velocity);
   }
 
   dispose(): void {
