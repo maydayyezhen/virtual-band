@@ -1,8 +1,7 @@
 'use strict';
 
-// Camera v2 · phase 2.4
-// Stage composition, instrument detail views, performance-observation shots,
-// playback-aware transitions and venue-native camera registration.
+// Camera v2 · phase 2.3
+// Stage composition, instrument detail views, performance-observation shots and playback-aware transitions.
 (() => {
   const T = THREE;
   const stage = document.getElementById('stage');
@@ -82,7 +81,6 @@
   const state={target:new T.Vector3(0,4,0),yaw:0,pitch:.13,distance:30,fov:30};
   const want={target:state.target.clone(),yaw:0,pitch:.13,distance:30,fov:30};
   const roots=[];
-  const registeredViews=new Map();
 
   function isBandRoot(object){
     const n=object?.name||'';
@@ -226,9 +224,9 @@
   function setDesired(target,yaw,pitch,distance,fov=30,instant=false,duration=TRANSITION_MS.focus){
     want.target.copy(target);
     want.yaw=shortestYaw(state.yaw,yaw);
-    want.pitch=T.MathUtils.clamp(pitch,-1.12,1.12);
+    want.pitch=T.MathUtils.clamp(pitch,.08,1.12);
     want.distance=Math.max(.8,distance);
-    want.fov=T.MathUtils.clamp(fov,24,105);
+    want.fov=T.MathUtils.clamp(fov,24,42);
     if(instant||reducedMotion){
       cancelTransition();
       state.target.copy(want.target);state.yaw=want.yaw;state.pitch=want.pitch;
@@ -295,34 +293,7 @@
       :'摄影机位 · 双击乐器聚焦 · 左拖旋转 · 右拖平移';
   }
 
-  function vector(value){
-    if(value?.isVector3)return value.clone();
-    if(Array.isArray(value)&&value.length>=3)return new T.Vector3(Number(value[0])||0,Number(value[1])||0,Number(value[2])||0);
-    return null;
-  }
-  function poseDuration(options){
-    if(Number.isFinite(options?.durationMs))return Math.max(0,options.durationMs);
-    if(Number.isFinite(options?.duration))return options.duration<=10?Math.max(0,options.duration*1000):Math.max(0,options.duration);
-    return TRANSITION_MS.stage;
-  }
-  function goPose(options={},instant=false){
-    const position=vector(options.position),target=vector(options.target);
-    if(!position||!target)return false;
-    const back=position.clone().sub(target),distance=Math.max(.8,back.length());
-    const horizontal=Math.max(1e-5,Math.hypot(back.x,back.z));
-    const yaw=Math.atan2(back.x,back.z),pitch=Math.atan2(back.y,horizontal);
-    focusedRoot=null;focusedView='overall';activeView=options.id||'custom';baseDistance=distance;focusUiType='';
-    setDesired(target,yaw,pitch,distance,options.fov??state.fov,instant,poseDuration(options));
-    updateUi();return true;
-  }
-  function registerView(id,spec){
-    if(!id||!vector(spec?.position)||!vector(spec?.target))return false;
-    registeredViews.set(String(id),{...spec,id:String(id)});return true;
-  }
-  function unregisterView(id){return registeredViews.delete(String(id));}
   function goView(id='front',instant=false){
-    const registered=registeredViews.get(id);
-    if(registered)return goPose(registered,instant);
     collectRoots();
     const box=boundsFor(visibleRoots());if(!box)return false;
     const spec=VIEWS[id]||VIEWS.front,target=composedTarget(box,spec);
@@ -541,7 +512,6 @@
       '.camera-view-group+.camera-view-group{margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}'+
       '.camera-view-group-label{margin:0 0 5px;font-size:8px;letter-spacing:.12em;color:#71858d}'+
       '.camera-subviews-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px}.camera-subviews-grid .view{height:32px}'+
-      '.camera-venue-section{margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}.instrument-focus .camera-venue-section{display:none}'+
       '.instrument-focus .controls{display:none}.camera-pref-section{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}'+
       '.camera-pref-section label{display:grid;gap:4px;font-size:8px;color:#73878e}.camera-pref-section select{width:100%;height:29px;border:1px solid var(--line);border-radius:7px;background:#ffffff05;color:#b8c5c6;padding:0 6px;font-size:9px}'+
       '.camera-v2-note{margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:9px;line-height:1.5;color:#73878e}'+
@@ -573,11 +543,7 @@
   }
 
   function refitSoon(){
-    requestAnimationFrame(()=>requestAnimationFrame(()=>{
-      if(!ready)return;
-      if(!focusedRoot&&registeredViews.has(activeView))goView(activeView,true);
-      else goView('front');
-    }));
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{if(ready)goView('front');}));
   }
   function attach(runtime){
     renderer=runtime.renderer;scene=runtime.scene;camera=runtime.camera;
@@ -595,7 +561,6 @@
       document.getElementById(id)?.addEventListener('change',refitSoon);
     window.addEventListener('resize',()=>requestAnimationFrame(()=>{
       if(focusedRoot&&focusedView!=='custom')focusView(focusedRoot,focusedView,true);
-      else if(!focusedRoot&&registeredViews.has(activeView))goView(activeView,true);
       else if(!focusedRoot&&VIEWS[activeView])goView(activeView,true);
       else fallbackRender();
     }));
@@ -603,9 +568,6 @@
     window.VirtualBandCamera={
       home:()=>goView('front'),
       view:id=>goView(id),
-      pose:(options,instant=false)=>goPose(options,instant),
-      registerView,
-      unregisterView,
       focus:focusRoot,
       focusView:(root,id)=>focusView(root,id),
       refit:refitSoon,
@@ -616,7 +578,6 @@
         cameraPrefs.sensitivity=SENSITIVITY[value]?value:'medium';savePrefs();updateUi();
       },
       get roots(){return [...roots]},
-      get registeredViews(){return Object.fromEntries([...registeredViews].map(([id,spec])=>[id,{...spec}]));},
       get state(){
         return {
           view:activeView,focused:focusedRoot?.name||null,focusedView,
@@ -625,7 +586,7 @@
         };
       },
     };
-    console.info('[Camera v2] phase 2.4 venue-native views + performance observation attached');
+    console.info('[Camera v2] phase 2.3 performance observation views attached');
     return true;
   }
 
