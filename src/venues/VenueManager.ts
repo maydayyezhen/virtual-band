@@ -1,15 +1,18 @@
 import type * as THREE from 'three';
+import type { RendererHost } from '../engine/RendererHost';
 import type { InstrumentRegistry } from '../instruments/Instrument';
 import type { InstrumentTransform, Venue } from './Venue';
 
 export class VenueManager {
+  private readonly renderer: RendererHost;
   private readonly scene: THREE.Scene;
   private readonly instruments: InstrumentRegistry;
   private readonly venues = new Map<string, Venue>();
   private activeVenue: Venue | null = null;
 
-  constructor(scene: THREE.Scene, instruments: InstrumentRegistry) {
-    this.scene = scene;
+  constructor(renderer: RendererHost, instruments: InstrumentRegistry) {
+    this.renderer = renderer;
+    this.scene = renderer.scene;
     this.instruments = instruments;
   }
 
@@ -22,11 +25,13 @@ export class VenueManager {
     const next = this.venues.get(id);
     if (!next) throw new Error(`Unknown venue: ${id}`);
     if (this.activeVenue === next) {
+      this.renderer.applySceneProfile(next.sceneProfile);
       this.applyLayout(next);
       return next;
     }
     if (this.activeVenue?.root.parent === this.scene) this.scene.remove(this.activeVenue.root);
     this.activeVenue = next;
+    this.renderer.applySceneProfile(next.sceneProfile);
     this.scene.add(next.root);
     this.applyLayout(next);
     return next;
