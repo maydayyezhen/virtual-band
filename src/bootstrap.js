@@ -39,7 +39,12 @@ async function boot() {
   await loadScript('./src/runtime/camera-controller.js');
   await loadScript('./src/venues/venue-ui.js');
   await loadScript('./src/venues/nocturne-stage-source.js');
+  for (let i = 1; i <= 7; i++) {
+    await loadScript(`./src/venues/nocturne-stage-source-${String(i).padStart(2, '0')}.js`);
+  }
+  await loadScript('./src/venues/nocturne-stage-source-finalize.js');
   await loadScript('./src/venues/venue-manager.js');
+  await window.VirtualBandVenuesReady;
   await loadScript('./src/runtime/auto-director.js');
   // Agent-authored timelines sit above the automatic director and can temporarily own
   // the camera for a song while preserving the user's manual override priority.
