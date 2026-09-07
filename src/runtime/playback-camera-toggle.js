@@ -1,21 +1,30 @@
 'use strict';
 
-// Compact transport-level switch for the existing Camera v3.2 director.
-// AUTO keeps the MIDI-driven live camera running; FIXED leaves the camera where the
-// user places it. The camera menu's existing director toggle remains the same source of
-// truth, so both controls stay synchronized.
+// Transport-level master gate for playback camera automation.
+// This is intentionally separate from the camera menu's MIDI director toggle: FIXED
+// suppresses both Agent-authored cues and the automatic director without touching the
+// lighting/LED show layer. AUTO restores whichever camera arrangement/director state the
+// user had before entering FIXED mode.
 (() => {
   const transport=document.querySelector('.bp-transport');
   const timeline=transport?.querySelector('.transport-timeline');
   const mode=document.getElementById('bp-mode');
   if(!transport||!timeline)return;
 
+  const STORE='vb-playback-camera-enabled';
+  const AGENT_BACKUP='vb-playback-camera-agent-backup';
+  const LONG_HOLD=24*60*60*1000;
+  let automatic=localStorage.getItem(STORE)!=='0';
+  let savedAgentId='';
+  let savedDirectorPreference=true;
+  let captured=false;
+
   const button=document.createElement('button');
   button.id='bp-camera-auto';
   button.type='button';
   button.className='transport-camera-mode';
-  button.title='播放镜头：自动导播 / 固定手动机位';
-  button.setAttribute('aria-label','切换播放镜头模式');
+  button.title='播放镜头：自动运镜 / 固定手动机位';
+  button.setAttribute('aria-label','切换播放镜头自动运转');
   transport.insertBefore(button,timeline);
 
   const style=document.createElement('style');
@@ -33,43 +42,92 @@
   `;
   document.head.appendChild(style);
 
-  function director(){return window.VirtualBandDirector;}
+  const director=()=>window.VirtualBandDirector;
+  const agent=()=>window.VirtualBandAgentCamera;
+
   function sync(){
-    const d=director();
-    const enabled=d?.state?.enabled ?? localStorage.getItem('vb-director-enabled')!=='0';
-    button.setAttribute('aria-pressed',String(enabled));
-    button.innerHTML=enabled
+    button.setAttribute('aria-pressed',String(automatic));
+    button.innerHTML=automatic
       ? '<span class="cam-word">镜头</span><span class="cam-mode">AUTO</span>'
       : '<span class="cam-word">镜头</span><span class="cam-mode">固定</span>';
-    button.title=enabled
-      ? '播放镜头：自动导播开启；点击切换为固定手动机位'
-      : '播放镜头：固定手动机位；点击开启自动导播';
+    button.title=automatic
+      ? '播放镜头会按当前自动/Agent 编排运行；点击固定镜头'
+      : '播放时不执行任何自动/Agent 镜头；灯光和 LED 继续运行';
+  }
+
+  function captureCameraState(){
+    if(captured)return;
+    const a=agent(),d=director();
+    savedAgentId=a?.state?.selectedId||localStorage.getItem(AGENT_BACKUP)||'';
+    savedDirectorPreference=localStorage.getItem('vb-director-enabled')!=='0';
+    if(savedAgentId)localStorage.setItem(AGENT_BACKUP,savedAgentId);
+    captured=true;
+  }
+
+  function applyFixed(){
+    captureCameraState();
+    const a=agent(),d=director();
+    // Agent cues call Camera v2 directly, so they must be suspended as well as the MIDI
+    // director. Deactivate only the camera arrangement; the MIDI player/show keeps going.
+    if(a?.state?.selectedId)a.deactivate?.();
+    // HOLD keeps the director/render bridge alive while pinning it to the current manual
+    // camera. Do not call disable(): this master switch must not affect the show renderer.
+    if(d?.state?.enabled)d.hold?.(LONG_HOLD);
+    window.dispatchEvent(new CustomEvent('virtual-band-playback-camera-change',{detail:{enabled:false}}));
+  }
+
+  function applyAutomatic(){
+    const d=director(),a=agent();
+    const restoreAgent=savedAgentId||localStorage.getItem(AGENT_BACKUP)||'';
+    if(savedDirectorPreference)d?.enable?.();
+    else d?.disable?.();
+    if(restoreAgent)a?.activate?.(restoreAgent);
+    captured=false;
+    window.dispatchEvent(new CustomEvent('virtual-band-playback-camera-change',{detail:{enabled:true}}));
+  }
+
+  function setAutomatic(value){
+    automatic=!!value;
+    localStorage.setItem(STORE,automatic?'1':'0');
+    if(automatic)applyAutomatic();else applyFixed();
+    sync();
+    return automatic;
   }
 
   button.addEventListener('click',event=>{
     event.preventDefault();
     event.stopPropagation();
-    const d=director();
-    if(d?.toggle)d.toggle();
-    else localStorage.setItem('vb-director-enabled',localStorage.getItem('vb-director-enabled')==='0'?'1':'0');
+    setAutomatic(!automatic);
+  });
+
+  // If someone changes the lower-level director while FIXED is active, immediately
+  // re-assert the master hold. FIXED always wins over individual camera subsystems.
+  document.getElementById('camera-director-toggle')?.addEventListener('click',()=>{
+    if(!automatic)queueMicrotask(applyFixed);
+  });
+  document.getElementById('camera-agent-select')?.addEventListener('change',event=>{
+    if(automatic)return;
+    const value=event.target.value||'';
+    if(value){savedAgentId=value;localStorage.setItem(AGENT_BACKUP,value);}
+    queueMicrotask(applyFixed);
+  });
+
+  mode?.addEventListener('change',()=>{if(!automatic)applyFixed();sync();});
+  window.addEventListener('storage',event=>{
+    if(event.key!==STORE)return;
+    automatic=event.newValue!=='0';
+    if(automatic)applyAutomatic();else applyFixed();
     sync();
   });
 
-  // Mirror the existing toggle inside the camera menu.
-  const connectMenuToggle=()=>{
-    const other=document.getElementById('camera-director-toggle');
-    if(!other)return false;
-    new MutationObserver(sync).observe(other,{attributes:true,attributeFilter:['aria-pressed']});
-    other.addEventListener('click',()=>queueMicrotask(sync));
-    return true;
+  window.VirtualBandPlaybackCamera={
+    enable(){return setAutomatic(true);},
+    disable(){return setAutomatic(false);},
+    toggle(){return setAutomatic(!automatic);},
+    get enabled(){return automatic;},
   };
-  if(!connectMenuToggle()){
-    const observer=new MutationObserver(()=>{if(connectMenuToggle())observer.disconnect();});
-    observer.observe(document.body,{childList:true,subtree:true});
-  }
 
-  mode?.addEventListener('change',sync);
-  window.addEventListener('storage',event=>{if(event.key==='vb-director-enabled')sync();});
+  if(!automatic)applyFixed();
   sync();
-  console.info('[Player] playback camera AUTO/FIXED switch attached');
+  console.info('[Player] playback camera master AUTO/FIXED switch attached',automatic?'AUTO':'FIXED');
 })();
