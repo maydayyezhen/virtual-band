@@ -12,7 +12,7 @@ export class DrumsInstrument implements Instrument {
 
   private constructor(root: THREE.Group, controller: LegacyDrumController) {
     this.root = root;
-    this.root.name = this.id;
+    this.root.userData.instrumentId = this.id;
     this.controller = controller;
   }
 
