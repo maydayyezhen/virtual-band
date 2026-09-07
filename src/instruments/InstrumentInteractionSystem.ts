@@ -41,27 +41,24 @@ export class InstrumentInteractionSystem {
     this.camera.updateMatrixWorld(true);
     this.raycaster.setFromCamera(this.pointer, this.camera);
 
-    const intersections = this.raycaster.intersectObjects(roots, true);
-    for (const intersection of intersections) {
-      let node: THREE.Object3D | null = intersection.object;
-      let partId: string | null = null;
-      let resolvedInstrumentId: string | null = null;
+    // The donor viewer intentionally considers only the nearest rendered surface.
+    // If that first surface is not marked playable, it blocks objects behind it.
+    let node: THREE.Object3D | null = this.raycaster.intersectObjects(roots, true)[0]?.object ?? null;
+    let partId: string | null = null;
+    let resolvedInstrumentId: string | null = null;
 
-      while (node) {
-        if (!partId && typeof node.userData.hit === 'string') partId = node.userData.hit;
-        if (typeof node.userData.instrumentId === 'string') {
-          resolvedInstrumentId = node.userData.instrumentId;
-          break;
-        }
-        node = node.parent;
+    while (node) {
+      if (!partId && typeof node.userData.hit === 'string') partId = node.userData.hit;
+      if (typeof node.userData.instrumentId === 'string') {
+        resolvedInstrumentId = node.userData.instrumentId;
+        break;
       }
-
-      if (!resolvedInstrumentId || !partId) continue;
-      if (instrumentId && resolvedInstrumentId !== instrumentId) continue;
-      return { instrumentId: resolvedInstrumentId, partId };
+      node = node.parent;
     }
 
-    return null;
+    if (!resolvedInstrumentId || !partId) return null;
+    if (instrumentId && resolvedInstrumentId !== instrumentId) return null;
+    return { instrumentId: resolvedInstrumentId, partId };
   }
 
   dispatch(hit: InstrumentHit, phase: InstrumentInteractionPhase, velocity: number): boolean {
