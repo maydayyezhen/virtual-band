@@ -5,7 +5,13 @@ export class EmptyStageVenue implements Venue {
   readonly id = 'empty-stage';
   readonly label = 'Empty Stage';
   readonly root = new THREE.Group();
-  readonly layout = {};
+  readonly layout = {
+    'drums.main': {
+      position: [2.75, 0, -6.35] as [number, number, number],
+      rotation: [0, -0.1, 0] as [number, number, number],
+      scale: 2.08,
+    },
+  };
   readonly cameraViews = [
     {
       kind: 'world' as const,
@@ -13,50 +19,43 @@ export class EmptyStageVenue implements Venue {
       label: 'Front',
       venueId: this.id,
       position: [0, 7.5, 18] as [number, number, number],
-      target: [0, 2.4, 0] as [number, number, number],
+      target: [0, 2.4, -2] as [number, number, number],
       fov: 42,
-    },
-    {
-      kind: 'world' as const,
-      id: 'empty-stage:left',
-      label: 'Left',
-      venueId: this.id,
-      position: [-14, 7, 12] as [number, number, number],
-      target: [0, 2.2, 0] as [number, number, number],
-      fov: 44,
-    },
-    {
-      kind: 'world' as const,
-      id: 'empty-stage:top',
-      label: 'Top',
-      venueId: this.id,
-      position: [0, 18, 10] as [number, number, number],
-      target: [0, 0, 0] as [number, number, number],
-      fov: 48,
     },
   ];
 
   constructor() {
     this.root.name = 'venue:empty-stage';
 
+    // Minimal host scene copied from the original application. No replacement grid or
+    // new V2 visual language is introduced here; migrated donor assets stay authoritative.
     const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(60, 60),
-      new THREE.MeshStandardMaterial({ color: 0x111820, roughness: 0.96, metalness: 0.04 }),
+      new THREE.PlaneGeometry(180, 180),
+      new THREE.MeshStandardMaterial({ color: 0x17232c, roughness: 0.85, metalness: 0.11 }),
     );
     floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -0.012;
     floor.receiveShadow = true;
-    this.root.add(floor);
 
-    const grid = new THREE.GridHelper(40, 40, 0x33434c, 0x1b2730);
-    grid.position.y = 0.005;
-    this.root.add(grid);
-
-    const hemisphere = new THREE.HemisphereLight(0xddeaf0, 0x1a2028, 1.25);
-    const key = new THREE.DirectionalLight(0xf2e8d8, 2.4);
-    key.position.set(-8, 14, 9);
+    const hemisphere = new THREE.HemisphereLight(0xd8e8ee, 0x363b43, 0.95);
+    const key = new THREE.DirectionalLight(0xffebd4, 3.1);
+    key.position.set(-7, 16, 10);
     key.castShadow = true;
-    key.shadow.mapSize.set(1024, 1024);
-    this.root.add(hemisphere, key);
+    key.target.position.set(0, 5, 0);
+    key.shadow.mapSize.set(2048, 2048);
+    Object.assign(key.shadow.camera, { left: -11, right: 11, top: 12, bottom: -9, near: 1, far: 40 });
+    key.shadow.bias = -0.00018;
+    key.shadow.normalBias = 0.013;
+    key.shadow.radius = 3;
+
+    const fill = new THREE.DirectionalLight(0xabcfe7, 1.25);
+    fill.position.set(9, 11, 4);
+    const rim = new THREE.DirectionalLight(0xffe2c8, 2.9);
+    rim.position.set(4, 14, -7);
+    const rear = new THREE.DirectionalLight(0xbedbe9, 1.6);
+    rear.position.set(-6, 9, -11);
+
+    this.root.add(floor, hemisphere, key, key.target, fill, rim, rear);
   }
 
   update(_dt: number): void {}
