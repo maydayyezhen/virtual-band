@@ -29,6 +29,8 @@ src/instruments/
   electric-guitar.js
 src/data/song-library-loader.js
 src/runtime/app.js
+src/runtime/stage-layout.js    # full-band stage art direction / placement
+src/runtime/shadow-sync.js     # shadow invalidation for layout changes
 docs/stage-rig-api.txt
 THIRD_PARTY_NOTICES.md
 ```

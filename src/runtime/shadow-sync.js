@@ -1,0 +1,84 @@
+'use strict';
+
+(() => {
+  let contactShadow = null;
+
+  function looksLikeStageContactShadow(object) {
+    const p = object?.geometry?.parameters;
+    return !!(
+      object?.isMesh &&
+      object.material?.isMeshBasicMaterial &&
+      object.material.transparent === true &&
+      object.material.depthWrite === false &&
+      Math.abs((p?.width || 0) - 12.3) < 0.01 &&
+      Math.abs((p?.height || 0) - 7.2) < 0.01
+    );
+  }
+
+  // app.js creates the broad painted contact shadow inside start(), so it is not
+  // directly exposed. Capture that mesh while the scene is being assembled.
+  const sceneAdd = THREE.Scene.prototype.add;
+  THREE.Scene.prototype.add = function (...objects) {
+    const result = sceneAdd.apply(this, objects);
+    if (!contactShadow) {
+      contactShadow = objects.find(looksLikeStageContactShadow) || null;
+      if (contactShadow) THREE.Scene.prototype.add = sceneAdd;
+    }
+    return result;
+  };
+
+  function syncContactShadow() {
+    if (!contactShadow) return;
+    const mode = document.getElementById('bp-mode')?.value || 'song';
+
+    // The painted patch is only useful as broad grounding for the full ensemble.
+    // Focused Free/Practice scenes rely on the real directional-light shadow.
+    contactShadow.visible = mode === 'song';
+    if (mode === 'song') {
+      // Wide-stage pass: cover the larger footprint but keep this synthetic shadow
+      // subtle so separate instruments still read as having their own floor space.
+      contactShadow.position.set(0.65, -0.004, -0.35);
+      contactShadow.scale.set(1.92, 2.05, 1);
+      contactShadow.material.opacity = 0.28;
+    }
+  }
+
+  function refreshShadows() {
+    if (typeof renderer === 'undefined' || !renderer?.shadowMap) return;
+    renderer.shadowMap.needsUpdate = true;
+  }
+
+  function refreshAfterLayoutChange() {
+    syncContactShadow();
+    refreshShadows();
+    queueMicrotask(() => {
+      syncContactShadow();
+      refreshShadows();
+    });
+  }
+
+  function syncStagePresentation() {
+    refreshAfterLayoutChange();
+    // Programmatic MIDI import changes the visible stage without necessarily firing
+    // a native <select> change event. Camera v2 exposes a deferred refit hook for it.
+    window.VirtualBandCamera?.refit?.();
+  }
+
+  for (const id of ['bp-song', 'bp-mode', 'bp-instrument', 'pr-target']) {
+    document.getElementById(id)?.addEventListener('change', refreshAfterLayoutChange);
+  }
+
+  const title = document.getElementById('bp-title');
+  if (title) {
+    new MutationObserver(syncStagePresentation).observe(title, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+  }
+
+  // Initial scene assembly also needs one sync after app.js has created everything.
+  requestAnimationFrame(() => requestAnimationFrame(refreshAfterLayoutChange));
+
+  window.refreshVirtualBandShadows = refreshAfterLayoutChange;
+})();
