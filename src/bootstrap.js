@@ -92,6 +92,9 @@ async function boot() {
   await loadScript('./src/data/camera-preset-config.js');
   await loadScript('./src/data/camera-library-config.js');
   await loadScript('./src/runtime/camera-library.js');
+  // Camera v2 still renders its legacy instrument quick-view grid. Mirror that grid from
+  // Camera Library so edit mode and normal display always show the same curated views.
+  await loadScript('./src/runtime/camera-library-display-sync.js');
 }
 
 boot().catch((error) => {
