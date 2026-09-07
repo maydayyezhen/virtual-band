@@ -9,6 +9,7 @@ import type { DrumsInstrument } from '../../instruments/drums/DrumsInstrument';
 import type { InstrumentHit, InstrumentInteractionSystem } from '../../instruments/InstrumentInteractionSystem';
 import type { PresentationMode } from '../PresentationManager';
 import { AtelierDrumDemo } from './AtelierDrumDemo';
+import { ATELIER_DRUM_KEYMAP, type AtelierDrumKeyAction } from './AtelierDrumKeymap';
 
 export type AtelierViewId = AtelierDrumViewName;
 
@@ -33,21 +34,6 @@ interface GestureState {
   y: number;
 }
 
-const COMPUTER_MAP: Record<string, number> = {
-  KeyA: 36,
-  KeyS: 38,
-  KeyD: 42,
-  KeyF: 46,
-  KeyJ: 50,
-  KeyK: 47,
-  KeyL: 43,
-  KeyQ: 49,
-  KeyW: 57,
-  KeyE: 51,
-  KeyT: 55,
-  Space: 44,
-};
-
 export class AtelierDrumShowcaseMode implements PresentationMode {
   readonly id = 'atelier-drums';
   readonly demo: AtelierDrumDemo;
@@ -59,7 +45,7 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
   private readonly interactions: InstrumentInteractionSystem;
   private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   private readonly pointers = new Map<number, PointerState>();
-  private readonly computerKeys = new Map<string, number>();
+  private readonly computerKeys = new Map<string, AtelierDrumKeyAction>();
   private readonly current: CameraState = {
     target: new THREE.Vector3(),
     yaw: 0,
@@ -320,14 +306,9 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
     if (/INPUT|TEXTAREA|SELECT/.test(targetTag)) return;
 
     let handled = true;
-    const note = COMPUTER_MAP[event.code];
-    if (note !== undefined) {
-      if (!this.computerKeys.has(event.code) && !event.repeat) {
-        this.computerKeys.set(event.code, note);
-        this.drums.noteOn(note, 104);
-      }
-    } else if (event.code === 'Escape') {
-      this.drums.reset();
+    const binding = ATELIER_DRUM_KEYMAP[event.code];
+    if (binding) {
+      this.pressKeyboardBinding(event.code, binding, event.repeat);
     } else if (event.code === 'ArrowLeft') {
       this.want.yaw -= 0.10;
     } else if (event.code === 'ArrowRight') {
@@ -336,8 +317,6 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
       this.want.pitch = THREE.MathUtils.clamp(this.want.pitch + 0.08, 0.04, 1.43);
     } else if (event.code === 'ArrowDown') {
       this.want.pitch = THREE.MathUtils.clamp(this.want.pitch - 0.08, 0.04, 1.43);
-    } else if (event.code === 'KeyR') {
-      this.selectView('whole');
     } else {
       handled = false;
     }
@@ -346,11 +325,11 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
   };
 
   private readonly onKeyUp = (event: KeyboardEvent): void => {
-    const note = this.computerKeys.get(event.code);
-    if (note === undefined) return;
-    this.drums.noteOff(note);
+    const binding = this.computerKeys.get(event.code);
+    if (!binding) return;
+    this.releaseKeyboardBinding(binding);
     this.computerKeys.delete(event.code);
-    if (event.code === 'Space') this.drums.setHiHat(0.8);
+    event.preventDefault();
   };
 
   private readonly onBlur = (): void => {
@@ -367,6 +346,40 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
     this.demo.stop();
     this.releaseInputState();
   };
+
+  private pressKeyboardBinding(code: string, binding: AtelierDrumKeyAction, repeat: boolean): void {
+    if (binding.kind === 'view') {
+      if (!repeat) this.selectView(binding.view);
+      return;
+    }
+
+    if (binding.kind === 'panic') {
+      if (!repeat) this.drums.reset();
+      return;
+    }
+
+    if (repeat || this.computerKeys.has(code)) return;
+    this.computerKeys.set(code, binding);
+
+    if (binding.kind === 'note') {
+      this.drums.noteOn(binding.note, 104);
+    } else if (binding.kind === 'hihat-strike') {
+      this.drums.interact?.({ partId: 'hihat', velocity: 104, phase: 'start' });
+    } else if (binding.kind === 'hihat-pedal') {
+      this.drums.noteOn(44, 104);
+    }
+  }
+
+  private releaseKeyboardBinding(binding: AtelierDrumKeyAction): void {
+    if (binding.kind === 'note') {
+      this.drums.noteOff(binding.note);
+    } else if (binding.kind === 'hihat-strike') {
+      this.drums.interact?.({ partId: 'hihat', velocity: 104, phase: 'end' });
+    } else if (binding.kind === 'hihat-pedal') {
+      this.drums.noteOff(44);
+      this.drums.setHiHat(binding.releaseOpenness);
+    }
+  }
 
   private playHit(pointer: PointerState, hit: InstrumentHit | null): void {
     if (
@@ -387,7 +400,7 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
 
   private releaseInputState(): void {
     for (const pointer of this.pointers.values()) this.releaseHit(pointer);
-    for (const note of this.computerKeys.values()) this.drums.noteOff(note);
+    for (const binding of this.computerKeys.values()) this.releaseKeyboardBinding(binding);
     this.computerKeys.clear();
     this.pointers.clear();
     this.previousGesture = null;
