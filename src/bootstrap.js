@@ -90,6 +90,11 @@ async function boot() {
   // keyboard/drum shots would be physically occluded by the screen hardware.
   await loadScript('./src/venues/nocturne-camera-clearance.js');
 
+  // The authored venue used to advance its fixture/LED clock only when the real host
+  // camera reached its renderer bridge. Camera v3.2 often renders a cloned PROGRAM
+  // camera, so keep venue animation time alive independently of camera ownership.
+  await loadScript('./src/venues/nocturne-independent-clock.js');
+
   // Music-driven show layer: analyze each MIDI song by bar/beat, move the authored
   // fixtures, react to drum accents, and sequence only NOCTURNE's existing LED presets.
   await loadScript('./src/venues/nocturne-auto-show.js');
