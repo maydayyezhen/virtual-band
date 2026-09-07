@@ -1,6 +1,20 @@
 import * as THREE from 'three';
+import type { DrumSampler } from '../../audio/DrumSampler';
 import type { Instrument, InstrumentInteraction } from '../Instrument';
 import { buildLegacyDrumAsset, type LegacyDrumController } from './legacyDrumAsset';
+
+const PART_NOTE: Record<string, number> = {
+  kick: 36,
+  kickPedal: 36,
+  snare: 38,
+  floorTom: 43,
+  tomMid: 47,
+  tomHigh: 50,
+  crashLeft: 49,
+  crashRight: 57,
+  ride: 51,
+  splash: 55,
+};
 
 export class DrumsInstrument implements Instrument {
   readonly id = 'drums.main';
@@ -9,21 +23,29 @@ export class DrumsInstrument implements Instrument {
   readonly root: THREE.Group;
 
   private readonly controller: LegacyDrumController;
+  private readonly sampler: DrumSampler;
   private hiHatOpen = false;
 
-  private constructor(root: THREE.Group, controller: LegacyDrumController) {
+  private constructor(root: THREE.Group, controller: LegacyDrumController, sampler: DrumSampler) {
     this.root = root;
     this.root.userData.instrumentId = this.id;
     this.controller = controller;
+    this.sampler = sampler;
   }
 
-  static async create(): Promise<DrumsInstrument> {
+  static async create(sampler: DrumSampler): Promise<DrumsInstrument> {
     const { model, controller } = await buildLegacyDrumAsset();
-    return new DrumsInstrument(model.root, controller);
+    return new DrumsInstrument(model.root, controller, sampler);
   }
 
   noteOn(note: number, velocity: number): void {
-    this.controller.noteOn(note, velocity);
+    const accepted = this.controller.noteOn(note, velocity);
+    if (!accepted) return;
+
+    if (note === 42 || note === 44) this.hiHatOpen = false;
+    else if (note === 46) this.hiHatOpen = true;
+
+    this.sampler.noteOn(note, velocity);
   }
 
   noteOff(note: number): void {
@@ -40,14 +62,23 @@ export class DrumsInstrument implements Instrument {
   }
 
   interact({ partId, intensity }: InstrumentInteraction): boolean {
+    const velocity = Math.round(72 + Math.min(1, Math.max(0, intensity)) * 55);
+
     if (partId === 'hatPedal') {
       this.hiHatOpen = !this.hiHatOpen;
-      return this.controller.setHiHat(this.hiHatOpen ? 1 : 0);
+      const changed = this.controller.setHiHat(this.hiHatOpen ? 1 : 0);
+      if (!changed) return false;
+
+      // Closing the real pedal produces the characteristic foot-chick (GM note 44).
+      if (!this.hiHatOpen) this.noteOn(44, velocity);
+      return true;
     }
 
-    const resolvedPart = partId === 'kickPedal' ? 'kick' : partId;
-    const velocity = Math.round(72 + Math.min(1, Math.max(0, intensity)) * 55);
-    return this.controller.hit(resolvedPart, velocity);
+    const note = partId === 'hihat' ? (this.hiHatOpen ? 46 : 42) : PART_NOTE[partId];
+    if (note === undefined) return false;
+
+    this.noteOn(note, velocity);
+    return true;
   }
 
   dispose(): void {
