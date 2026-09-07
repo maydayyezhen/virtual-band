@@ -40,6 +40,14 @@ export class AtelierStudioVenue implements Venue {
       rotation: [0, 0, 0] as [number, number, number],
       scale: 1,
     },
+    // The donor keyboard rig is authored at a much larger real-world unit scale.
+    // Keep its geometry untouched and normalize only at the Venue boundary so it
+    // shares the same fixed Atelier lighting/floor/contact-shadow environment.
+    'keyboard.main': {
+      position: [0, 0, 0] as [number, number, number],
+      rotation: [0, 0, 0] as [number, number, number],
+      scale: 0.44,
+    },
   };
 
   readonly cameraViews = [
