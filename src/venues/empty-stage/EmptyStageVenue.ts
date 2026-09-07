@@ -18,8 +18,8 @@ export class EmptyStageVenue implements Venue {
       id: 'empty-stage:front',
       label: 'Front',
       venueId: this.id,
-      position: [0, 7.5, 18] as [number, number, number],
-      target: [0, 2.4, -2] as [number, number, number],
+      position: [2.75, 8, 18] as [number, number, number],
+      target: [2.75, 3, -6.35] as [number, number, number],
       fov: 42,
     },
   ];
