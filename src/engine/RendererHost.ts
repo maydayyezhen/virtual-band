@@ -1,6 +1,12 @@
 import * as THREE from 'three';
 import type { VenueSceneProfile } from '../venues/Venue';
 
+export interface RendererViewport {
+  width: number;
+  height: number;
+  aspect: number;
+}
+
 export class RendererHost {
   readonly scene = new THREE.Scene();
   readonly renderer: THREE.WebGLRenderer;
@@ -67,7 +73,7 @@ export class RendererHost {
     this.updatePixelRatio(true);
   }
 
-  resizeIfNeeded(): number {
+  resizeIfNeeded(): RendererViewport {
     const width = Math.max(1, this.mount.clientWidth);
     const height = Math.max(1, this.mount.clientHeight);
     this.updatePixelRatio(false);
@@ -76,7 +82,7 @@ export class RendererHost {
       this.height = height;
       this.renderer.setSize(width, height, false);
     }
-    return width / height;
+    return { width, height, aspect: width / height };
   }
 
   invalidateShadows(): void {
