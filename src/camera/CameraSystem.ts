@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { InstrumentRegistry } from '../instruments/Instrument';
+import { distanceForOrbitView } from './CameraFraming';
 import type { CameraRegistry, CameraView } from './CameraRegistry';
 
 export interface CameraPoseInput {
@@ -35,6 +36,8 @@ export class CameraSystem {
   private target = new THREE.Vector3(0, 2.4, 0);
   private desired: CameraPose | null = null;
   private transitionSpeed = 7;
+  private viewportWidth = 1;
+  private viewportHeight = 1;
 
   constructor(registry: CameraRegistry, instruments: InstrumentRegistry) {
     this.registry = registry;
@@ -43,10 +46,19 @@ export class CameraSystem {
     this.output.lookAt(this.target);
   }
 
-  setAspect(aspect: number): void {
-    if (!Number.isFinite(aspect) || aspect <= 0 || Math.abs(this.output.aspect - aspect) < 1e-4) return;
+  setViewport(width: number, height: number): void {
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return;
+    this.viewportWidth = width;
+    this.viewportHeight = height;
+    const aspect = width / height;
+    if (Math.abs(this.output.aspect - aspect) < 1e-4) return;
     this.output.aspect = aspect;
     this.output.updateProjectionMatrix();
+  }
+
+  setAspect(aspect: number): void {
+    if (!Number.isFinite(aspect) || aspect <= 0) return;
+    this.setViewport(aspect, 1);
   }
 
   setLens(input: CameraLensInput): void {
@@ -137,10 +149,7 @@ export class CameraSystem {
     }
 
     const localTarget = new THREE.Vector3(...view.target);
-    const halfFov = THREE.MathUtils.degToRad(view.fov / 2);
-    const aspect = Math.max(0.01, this.output.aspect || 1);
-    const framedSpan = Math.max(view.height, view.width / aspect);
-    const distance = framedSpan / (2 * Math.tan(halfFov));
+    const distance = distanceForOrbitView(view, this.viewportWidth, this.viewportHeight);
     const cp = Math.cos(view.pitch);
     const localPosition = new THREE.Vector3(
       localTarget.x + Math.sin(view.yaw) * cp * distance,
