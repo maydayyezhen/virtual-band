@@ -1,9 +1,8 @@
 'use strict';
 
-// Keep the temporary image-test layer above Auto LED without disabling the lighting
-// director. This wrapper captures whichever image the test panel puts on the main screen,
-// blocks lower-priority main-screen pattern writes, and reasserts the image if a stage-mode
-// change replaces it internally.
+// Keep temporary LED media tests above Auto LED without disabling the lighting director.
+// Image and video tests share this one priority guard: Auto LED may continue driving the
+// side screens, while the main screen stays owned by whichever local-media test is active.
 (() => {
   const venue=window.VirtualBandVenues;
   const controls=venue?.controls;
@@ -13,8 +12,12 @@
   const rawPattern=controls.setScreenPattern.bind(controls);
   let held=null;
 
-  const active=()=>!!window.NocturneLedImageTest?.active;
+  const imageActive=()=>!!window.NocturneLedImageTest?.active;
+  const videoActive=()=>!!window.NocturneLedVideoTest?.active;
+  const active=()=>imageActive()||videoActive();
   const isMainTarget=id=>id==='main'||id==null;
+  const activeState=()=>videoActive()?(window.NocturneLedVideoTest?.state||{}):(window.NocturneLedImageTest?.state||{});
+  const expectedMode=source=>source?.tagName==='VIDEO'?'video':'media';
 
   controls.setScreenContent=function(id,content,options={}){
     let target=id,source=content,opts=options;
@@ -22,13 +25,11 @@
       opts=content??{};source=id;target='main';
     }
     const result=rawContent(target,source,opts);
-    if(active()&&isMainTarget(target))held={content:source,options:{...opts}};
+    if(active()&&isMainTarget(target))held={content:source,options:{...opts},mode:expectedMode(source)};
     return result;
   };
 
   controls.setScreenPattern=function(id,pattern,options={}){
-    // Auto LED only needs to yield the main display. Side screens keep their normal
-    // animated patterns so the image test still sits inside a live venue.
     if(active()&&id==='main')return [venue.stage?.screens?.get('main')].filter(Boolean);
     if(active()&&id==='all'){
       const out=[];
@@ -43,13 +44,15 @@
     requestAnimationFrame(tick);
     if(!active()||!held||venue.current!=='nocturne')return;
     const main=venue.stage?.screens?.get('main');if(!main)return;
-    const state=window.NocturneLedImageTest?.state||{};
+    const state=activeState();
     const brightness=Number.isFinite(state.brightness)?state.brightness:(held.options.brightness??.72);
     const fit=state.fit||held.options.fit||'cover';
-    // setStageMode() can touch screens through the underlying StageEngine directly.
-    // Reassert only when ownership was actually lost; otherwise do not redraw the image.
-    if(main.patternName!=='media'||main.source!==held.content){
-      try{rawContent('main',held.content,{...held.options,fit,brightness,playing:false});}catch{}
+    const playing=held.mode==='video'?(state.playing!==false):false;
+
+    // Stage-mode changes can replace screen content below this wrapper. Reassert media
+    // only when ownership was actually lost; otherwise let ScreenSurface update normally.
+    if(main.patternName!==held.mode||main.source!==held.content){
+      try{rawContent('main',held.content,{...held.options,fit,brightness,playing});}catch{}
       return;
     }
     if(Math.abs((main.brightness??brightness)-brightness)>.006){
@@ -57,9 +60,9 @@
     }
   }
 
-  window.addEventListener('nocturne-led-image-test-change',event=>{
-    if(event.detail?.active===false)held=null;
-  });
+  const clearIfIdle=()=>{if(!active())held=null;};
+  window.addEventListener('nocturne-led-image-test-change',clearIfIdle);
+  window.addEventListener('nocturne-led-video-test-change',clearIfIdle);
   requestAnimationFrame(tick);
-  console.info('[LED image test] main-screen priority guard attached');
+  console.info('[LED media test] main-screen image/video priority guard attached');
 })();
