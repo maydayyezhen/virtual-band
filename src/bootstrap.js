@@ -92,9 +92,10 @@ async function boot() {
   await loadScript('./src/data/camera-preset-config.js');
   await loadScript('./src/data/camera-library-config.js');
   await loadScript('./src/runtime/camera-library.js');
-  // Camera v2 still renders its legacy instrument quick-view grid. Mirror that grid from
-  // Camera Library so edit mode and normal display always show the same curated views.
+  // Compatibility bridge keeps Camera v2's old UI in sync; the product-facing surface
+  // loaded after it replaces the native select/button presentation with one custom picker.
   await loadScript('./src/runtime/camera-library-display-sync.js');
+  await loadScript('./src/runtime/camera-ui-polish.js');
 }
 
 boot().catch((error) => {
