@@ -1,0 +1,229 @@
+import * as THREE from 'three';
+import type { ViolinSampler } from '../../audio/ViolinSampler';
+import type { Instrument, InstrumentFrameResult, InstrumentInteraction } from '../Instrument';
+import {
+  buildLegacyViolinAsset,
+  type LegacyViolinController,
+  type LegacyViolinHitEvent,
+  type LegacyViolinModel,
+  type ViolinArticulation,
+} from './legacyViolinAsset';
+
+interface InteractionVoice {
+  note: number;
+  stringNumber: number;
+}
+
+export class ViolinInstrument implements Instrument {
+  readonly id = 'violin.main';
+  readonly role = 'violin';
+  readonly label = 'Atelier · Arco Violin';
+  readonly root: THREE.Group;
+
+  private readonly model: LegacyViolinModel;
+  private readonly controller: LegacyViolinController;
+  private readonly sampler: ViolinSampler;
+  private readonly interactionVoices = new Map<string, InteractionVoice>();
+
+  private constructor(
+    model: LegacyViolinModel,
+    controller: LegacyViolinController,
+    sampler: ViolinSampler,
+  ) {
+    this.model = model;
+    this.controller = controller;
+    this.sampler = sampler;
+    this.root = model.root;
+    this.root.userData.instrumentId = this.id;
+  }
+
+  static async create(sampler: ViolinSampler): Promise<ViolinInstrument> {
+    const { model, controller } = await buildLegacyViolinAsset();
+    return new ViolinInstrument(model, controller, sampler);
+  }
+
+  noteOn(note: number, velocity: number): void {
+    const result = this.controller.api.noteOn(note, velocity);
+    if (result) this.playAudio(result);
+  }
+
+  noteOff(note: number): void {
+    const affectedStrings = [...this.model.strings.values()]
+      .filter((string) => string.held && string.note === note)
+      .map((string) => string.number);
+    if (!this.controller.api.noteOff(note)) return;
+    for (const stringNumber of affectedStrings) this.sampler.noteOff(stringNumber);
+  }
+
+  playString(stringNumber: number, velocity = 100, semitones = 0): LegacyViolinHitEvent | false {
+    const result = this.controller.api.playString(stringNumber, velocity, semitones);
+    if (result) this.playAudio(result);
+    return result;
+  }
+
+  setArticulation(value: ViolinArticulation): boolean {
+    if (!this.controller.api.setArticulation(value)) return false;
+
+    // Audio is an adapter around the donor performance state. If articulation is
+    // changed while notes are held, replace the sounding sample on each physical
+    // string without touching the donor fingering/bow state.
+    this.sampler.reset();
+    for (const string of this.model.strings.values()) {
+      if (!string.held || string.note === null) continue;
+      this.sampler.noteOn(
+        string.number,
+        string.note,
+        Math.round(string.velocity * 127),
+        value,
+      );
+    }
+    return true;
+  }
+
+  setVibrato(value: number): boolean {
+    return this.controller.api.setVibrato(value);
+  }
+
+  setBow(options: { speed?: number; pressure?: number }): boolean {
+    return this.controller.api.setBow(options);
+  }
+
+  setPitchBend(value: number): boolean {
+    return this.controller.api.setPitchBend(value);
+  }
+
+  controlChange(cc: number, value: number): boolean {
+    const handled = this.controller.api.controlChange(cc, value);
+    if (!handled) return false;
+    if (cc === 120 || cc === 123) this.sampler.reset();
+    return true;
+  }
+
+  get articulation(): ViolinArticulation {
+    return this.controller.api.articulation;
+  }
+
+  get activeNotes(): number[] {
+    return this.controller.api.activeNotes;
+  }
+
+  update(dt: number): InstrumentFrameResult {
+    return this.controller.tick(dt);
+  }
+
+  reset(): void {
+    this.controller.api.panic();
+    this.sampler.reset();
+    this.interactionVoices.clear();
+  }
+
+  resolveHit(intersection: THREE.Intersection): string | null {
+    let node: THREE.Object3D | null = intersection.object;
+    while (node && node !== this.root) {
+      if (node === this.model.bow) return null;
+      node = node.parent;
+    }
+
+    const point = this.root.worldToLocal(intersection.point.clone());
+    if (
+      point.z < 0.375
+      || point.y < this.model.bridgeY - 0.04
+      || point.y > this.model.nutY + 0.055
+    ) return null;
+
+    const t = THREE.MathUtils.clamp(
+      (point.y - this.model.bridgeY) / this.model.scale,
+      0,
+      1,
+    );
+    const strings = [...this.model.strings.values()].sort((a, b) => {
+      const ax = THREE.MathUtils.lerp(a.saddle.x, a.nut.x, t);
+      const bx = THREE.MathUtils.lerp(b.saddle.x, b.nut.x, t);
+      return Math.abs(point.x - ax) - Math.abs(point.x - bx);
+    });
+    const string = strings[0];
+    if (!string) return null;
+
+    const stringX = THREE.MathUtils.lerp(string.saddle.x, string.nut.x, t);
+    if (Math.abs(point.x - stringX) > 0.051) return null;
+
+    let semitones = 0;
+    if (point.y >= this.model.boardEnd && point.y < this.model.nutY - 0.05) {
+      semitones = THREE.MathUtils.clamp(
+        Math.round(-12 * Math.log2((point.y - this.model.bridgeY) / this.model.scale)),
+        0,
+        24,
+      );
+    } else if (point.y < this.model.boardEnd) {
+      semitones = string.held ? string.interval : 0;
+    }
+
+    return `string:${string.number}:${semitones}`;
+  }
+
+  interact({ partId, velocity, phase }: InstrumentInteraction): boolean {
+    const match = /^string:([1-4]):(\d{1,2})$/.exec(partId);
+    if (!match) return false;
+
+    if (phase === 'end') {
+      const voice = this.interactionVoices.get(partId);
+      if (!voice) return true;
+      this.interactionVoices.delete(partId);
+      this.controller.api.noteOff(voice.note);
+      this.sampler.noteOff(voice.stringNumber);
+      return true;
+    }
+
+    const stringNumber = Number(match[1]);
+    const semitones = Number(match[2]);
+    if (semitones < 0 || semitones > 24) return false;
+
+    const previous = this.interactionVoices.get(partId);
+    if (previous) {
+      this.controller.api.noteOff(previous.note);
+      this.sampler.noteOff(previous.stringNumber);
+    }
+
+    const result = this.playString(stringNumber, velocity, semitones);
+    if (!result) return false;
+    this.interactionVoices.set(partId, {
+      note: result.note,
+      stringNumber: result.string,
+    });
+    return true;
+  }
+
+  dispose(): void {
+    this.reset();
+    this.root.removeFromParent();
+
+    const geometries = new Set<THREE.BufferGeometry>();
+    const materials = new Set<THREE.Material>();
+    const textures = new Set<THREE.Texture>();
+    this.root.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      if (mesh.geometry) geometries.add(mesh.geometry);
+      const materialList = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const material of materialList) {
+        if (!material) continue;
+        materials.add(material);
+        for (const value of Object.values(material)) {
+          if (value instanceof THREE.Texture) textures.add(value);
+        }
+      }
+    });
+    for (const texture of textures) texture.dispose();
+    for (const material of materials) material.dispose();
+    for (const geometry of geometries) geometry.dispose();
+  }
+
+  private playAudio(result: LegacyViolinHitEvent): void {
+    this.sampler.noteOn(
+      result.string,
+      result.note,
+      result.velocity,
+      this.controller.api.articulation,
+    );
+  }
+}
