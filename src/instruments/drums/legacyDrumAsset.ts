@@ -1,8 +1,21 @@
 import * as THREE from 'three';
 
+export interface LegacyDrumHitEvent {
+  note: number;
+  velocity: number;
+  id: string;
+  label: string;
+}
+
+export interface LegacyDrumControllerHooks {
+  wake?: () => void;
+  onHit?: (event: LegacyDrumHitEvent) => void;
+  onPanic?: () => void;
+}
+
 interface LegacyDrumFactories {
   createModel: () => LegacyDrumModel;
-  createController: (model: LegacyDrumModel, hooks?: Record<string, unknown>) => LegacyDrumController;
+  createController: (model: LegacyDrumModel, hooks?: LegacyDrumControllerHooks) => LegacyDrumController;
 }
 
 export interface LegacyDrumModel {
@@ -16,6 +29,9 @@ export interface LegacyDrumController {
   noteOff(note: number): boolean;
   hit(id: string, velocity?: number): boolean;
   setHiHat(value: number): boolean;
+  choke(id: string | number): boolean;
+  allNotesOff(): boolean;
+  controlChange(cc: number, value: number): boolean;
   panic(): boolean;
   tick(dt: number): { moved: boolean; animating: boolean };
 }
@@ -130,16 +146,15 @@ async function loadFactories(): Promise<LegacyDrumFactories> {
 }
 
 /**
- * Builds the exact donor drum model/controller from nocturne-integrated-fix behind a
- * narrow compatibility boundary. The donor source stays frozen and V2 runtime code
- * receives only the model/controller factories.
+ * Builds the exact donor drum model/controller behind a narrow V2 compatibility
+ * boundary. The donor source stays frozen; hooks are the only event bridge back out.
  */
-export async function buildLegacyDrumAsset(): Promise<{
+export async function buildLegacyDrumAsset(hooks: LegacyDrumControllerHooks = {}): Promise<{
   model: LegacyDrumModel;
   controller: LegacyDrumController;
 }> {
   const factories = await loadFactories();
   const model = factories.createModel();
-  const controller = factories.createController(model, {});
+  const controller = factories.createController(model, hooks);
   return { model, controller };
 }
