@@ -98,6 +98,10 @@ async function boot() {
   // Music-driven show layer: analyze each MIDI song by bar/beat, move the authored
   // fixtures, react to drum accents, and sequence only NOCTURNE's existing LED presets.
   await loadScript('./src/venues/nocturne-auto-show.js');
+  // Temporary image test bench for the main LED. It uses the donated ScreenSurface API
+  // directly, includes the user's Earth-at-Night sample, and can also open local images.
+  await loadScript('./src/venues/nocturne-led-image-test.js');
+  await loadScript('./src/venues/nocturne-led-image-test-guard.js');
   // Queen gets a song-specific Agent lighting layer above Auto Lighting. It reads the
   // complete MIDI and owns fixtures / haze / stage key+fill while leaving LED on Auto.
   await loadScript('./src/venues/nocturne-agent-lighting-dust.js');
