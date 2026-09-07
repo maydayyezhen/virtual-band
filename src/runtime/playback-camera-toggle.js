@@ -1,10 +1,7 @@
 'use strict';
 
-// Transport-level master gate for playback camera automation.
-// This is intentionally separate from the camera menu's MIDI director toggle: FIXED
-// suppresses both Agent-authored cues and the automatic director without touching the
-// lighting/LED show layer. AUTO restores whichever camera arrangement/director state the
-// user had before entering FIXED mode.
+// Playback camera master switch. FIXED disables every automatic camera owner while
+// leaving the MIDI player and NOCTURNE lighting/LED show completely untouched.
 (() => {
   const transport=document.querySelector('.bp-transport');
   const timeline=transport?.querySelector('.transport-timeline');
@@ -13,10 +10,10 @@
 
   const STORE='vb-playback-camera-enabled';
   const AGENT_BACKUP='vb-playback-camera-agent-backup';
-  const LONG_HOLD=24*60*60*1000;
+  const DIRECTOR_BACKUP='vb-playback-camera-director-backup';
   let automatic=localStorage.getItem(STORE)!=='0';
-  let savedAgentId='';
-  let savedDirectorPreference=true;
+  let savedAgentId=localStorage.getItem(AGENT_BACKUP)||'';
+  let savedDirectorPreference=localStorage.getItem(DIRECTOR_BACKUP)!=='0';
   let captured=false;
 
   const button=document.createElement('button');
@@ -51,45 +48,58 @@
       ? '<span class="cam-word">镜头</span><span class="cam-mode">AUTO</span>'
       : '<span class="cam-word">镜头</span><span class="cam-mode">固定</span>';
     button.title=automatic
-      ? '播放镜头会按当前自动/Agent 编排运行；点击固定镜头'
-      : '播放时不执行任何自动/Agent 镜头；灯光和 LED 继续运行';
+      ? '播放时允许 Auto Director / Agent 镜头运行；点击固定镜头'
+      : '播放时禁用所有自动镜头；灯光和 LED 独立继续运行';
   }
 
-  function captureCameraState(){
+  function capturePreferences(){
     if(captured)return;
     const a=agent(),d=director();
-    savedAgentId=a?.state?.selectedId||localStorage.getItem(AGENT_BACKUP)||'';
-    savedDirectorPreference=localStorage.getItem('vb-director-enabled')!=='0';
-    if(savedAgentId)localStorage.setItem(AGENT_BACKUP,savedAgentId);
+    savedAgentId=a?.state?.selectedId||savedAgentId||'';
+    savedDirectorPreference=!!(d?.state?.enabled ?? (localStorage.getItem('vb-director-enabled')!=='0'));
+    localStorage.setItem(AGENT_BACKUP,savedAgentId);
+    localStorage.setItem(DIRECTOR_BACKUP,savedDirectorPreference?'1':'0');
     captured=true;
   }
 
-  function applyFixed(){
-    captureCameraState();
+  function applyFixed({capture=true}={}){
+    if(capture)capturePreferences();
     const a=agent(),d=director();
-    // Agent cues call Camera v2 directly, so they must be suspended as well as the MIDI
-    // director. Deactivate only the camera arrangement; the MIDI player/show keeps going.
-    if(a?.state?.selectedId)a.deactivate?.();
-    // HOLD keeps the director/render bridge alive while pinning it to the current manual
-    // camera. Do not call disable(): this master switch must not affect the show renderer.
-    if(d?.state?.enabled)d.hold?.(LONG_HOLD);
+
+    // Agent cues move the real Camera v2 object directly, so remove the active plan.
+    // Keep its id in our own backup so AUTO can restore it later.
+    if(a?.state?.selectedId){
+      savedAgentId=a.state.selectedId;
+      localStorage.setItem(AGENT_BACKUP,savedAgentId);
+      a.deactivate?.();
+    }
+
+    // Disable Camera v3.2 outright. Do not HOLD it: HOLD still renders through the
+    // cloned PROGRAM camera and therefore is not a true fixed-camera mode.
+    d?.disable?.();
+
     window.dispatchEvent(new CustomEvent('virtual-band-playback-camera-change',{detail:{enabled:false}}));
   }
 
   function applyAutomatic(){
     const d=director(),a=agent();
-    const restoreAgent=savedAgentId||localStorage.getItem(AGENT_BACKUP)||'';
     if(savedDirectorPreference)d?.enable?.();
     else d?.disable?.();
-    if(restoreAgent)a?.activate?.(restoreAgent);
+    if(savedAgentId)a?.activate?.(savedAgentId);
     captured=false;
     window.dispatchEvent(new CustomEvent('virtual-band-playback-camera-change',{detail:{enabled:true}}));
   }
 
   function setAutomatic(value){
-    automatic=!!value;
+    const next=!!value;
+    if(next===automatic){
+      if(!next)applyFixed({capture:false});
+      sync();
+      return automatic;
+    }
+    automatic=next;
     localStorage.setItem(STORE,automatic?'1':'0');
-    if(automatic)applyAutomatic();else applyFixed();
+    if(automatic)applyAutomatic();else applyFixed({capture:true});
     sync();
     return automatic;
   }
@@ -100,23 +110,28 @@
     setAutomatic(!automatic);
   });
 
-  // If someone changes the lower-level director while FIXED is active, immediately
-  // re-assert the master hold. FIXED always wins over individual camera subsystems.
+  // FIXED is the master gate. If a lower camera control is changed while fixed, remember
+  // the user's choice but immediately suppress it again.
   document.getElementById('camera-director-toggle')?.addEventListener('click',()=>{
-    if(!automatic)queueMicrotask(applyFixed);
+    if(automatic)return;
+    queueMicrotask(()=>{
+      savedDirectorPreference=!!director()?.state?.enabled;
+      localStorage.setItem(DIRECTOR_BACKUP,savedDirectorPreference?'1':'0');
+      applyFixed({capture:false});
+    });
   });
   document.getElementById('camera-agent-select')?.addEventListener('change',event=>{
     if(automatic)return;
     const value=event.target.value||'';
     if(value){savedAgentId=value;localStorage.setItem(AGENT_BACKUP,value);}
-    queueMicrotask(applyFixed);
+    queueMicrotask(()=>applyFixed({capture:false}));
   });
 
-  mode?.addEventListener('change',()=>{if(!automatic)applyFixed();sync();});
+  mode?.addEventListener('change',()=>{if(!automatic)applyFixed({capture:false});sync();});
   window.addEventListener('storage',event=>{
     if(event.key!==STORE)return;
     automatic=event.newValue!=='0';
-    if(automatic)applyAutomatic();else applyFixed();
+    if(automatic)applyAutomatic();else applyFixed({capture:false});
     sync();
   });
 
@@ -127,7 +142,7 @@
     get enabled(){return automatic;},
   };
 
-  if(!automatic)applyFixed();
+  if(!automatic)applyFixed({capture:false});
   sync();
-  console.info('[Player] playback camera master AUTO/FIXED switch attached',automatic?'AUTO':'FIXED');
+  console.info('[Player] playback camera master attached',automatic?'AUTO':'FIXED');
 })();
