@@ -4,6 +4,7 @@ import { AudioEngine } from '../audio/AudioEngine';
 import { DrumSampler } from '../audio/DrumSampler';
 import { CameraRegistry } from '../camera/CameraRegistry';
 import { CameraSystem } from '../camera/CameraSystem';
+import { ATELIER_DRUM_VIEWS } from '../camera/presets/AtelierDrumViews';
 import { Engine } from '../engine/Engine';
 import { RendererHost } from '../engine/RendererHost';
 import { InstrumentRegistry } from '../instruments/Instrument';
@@ -85,14 +86,18 @@ export class VirtualBandApp {
       this.instruments.register(drums);
       this.instrumentLayer.add(drums.root);
 
-      // Keep the donor loading veil up until the added online drum samples are ready.
-      await this.drumSampler.preload();
+      // Camera presets are reusable camera assets, not presentation-mode data.
+      this.cameraRegistry.setInstrumentViews(drums.id, ATELIER_DRUM_VIEWS);
+
+      // Do not hold the visual scene behind network audio loading now that the UI veil is gone.
+      void this.drumSampler.preload();
 
       this.activateVenue('atelier-studio');
 
       const mode = new AtelierDrumShowcaseMode({
         element: this.renderer.renderer.domElement,
         camera: this.camera,
+        cameraRegistry: this.cameraRegistry,
         drums,
         interactions: this.interactions,
       });
@@ -144,6 +149,7 @@ export class VirtualBandApp {
     this.engine.stop();
     this.presentation.dispose();
     this.atelierMode = null;
+    if (this.drums) this.cameraRegistry.clearInstrumentViews(this.drums.id);
     this.interactions.dispose();
     this.control.clear();
     this.instruments.dispose();
