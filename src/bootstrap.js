@@ -98,6 +98,9 @@ async function boot() {
   // Music-driven show layer: analyze each MIDI song by bar/beat, move the authored
   // fixtures, react to drum accents, and sequence only NOCTURNE's existing LED presets.
   await loadScript('./src/venues/nocturne-auto-show.js');
+  // Queen gets a song-specific Agent lighting layer above Auto Lighting. It reads the
+  // complete MIDI and owns fixtures / haze / stage key+fill while leaving LED on Auto.
+  await loadScript('./src/venues/nocturne-agent-lighting-dust.js');
 
   await loadScript('./src/runtime/auto-director.js');
   // Agent-authored timelines sit above the automatic director and can temporarily own
