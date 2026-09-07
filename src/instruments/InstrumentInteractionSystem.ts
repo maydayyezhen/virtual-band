@@ -41,9 +41,12 @@ export class InstrumentInteractionSystem {
     this.camera.updateMatrixWorld(true);
     this.raycaster.setFromCamera(this.pointer, this.camera);
 
-    // The donor viewer intentionally considers only the nearest rendered surface.
-    // If that first surface is not marked playable, it blocks objects behind it.
-    let node: THREE.Object3D | null = this.raycaster.intersectObjects(roots, true)[0]?.object ?? null;
+    // Preserve donor behavior: only the nearest rendered surface may resolve as a
+    // playable hit. An unplayable front surface blocks playable geometry behind it.
+    const intersection = this.raycaster.intersectObjects(roots, true)[0];
+    if (!intersection) return null;
+
+    let node: THREE.Object3D | null = intersection.object;
     let partId: string | null = null;
     let resolvedInstrumentId: string | null = null;
 
@@ -56,8 +59,14 @@ export class InstrumentInteractionSystem {
       node = node.parent;
     }
 
-    if (!resolvedInstrumentId || !partId) return null;
+    if (!resolvedInstrumentId) return null;
     if (instrumentId && resolvedInstrumentId !== instrumentId) return null;
+
+    const instrument = this.instruments.get(resolvedInstrumentId);
+    if (!instrument) return null;
+    if (!partId && instrument.resolveHit) partId = instrument.resolveHit(intersection);
+    if (!partId) return null;
+
     return { instrumentId: resolvedInstrumentId, partId };
   }
 
