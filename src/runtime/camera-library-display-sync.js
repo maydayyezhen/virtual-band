@@ -1,129 +1,170 @@
 'use strict';
 
-// Compatibility UI bridge for Camera Library v1.
-// Camera v2 still owns the old instrument "展示 / 演奏观察" button grid. Rebuild that
-// grid from the unified Camera Library so user-created / hidden / overridden views use
-// the same data source as the editor instead of leaving a stale second camera catalog.
+// Compact presentation layer for Camera Library v1.
+// The editor remains a floating workbench; normal use gets one subject, one grouped
+// selector and one preview button. Legacy Camera v2 grids stay hidden so there is only
+// one visible camera catalog in every venue.
 (() => {
   const library = window.VirtualBandCameraLibrary;
+  const camera = window.VirtualBandCamera;
   const menu = document.getElementById('camera-menu');
   const panel = menu?.querySelector('.camera-panel');
-  const section = menu?.querySelector('.camera-focus-section');
-  const title = menu?.querySelector('#camera-focus-title');
-  const views = menu?.querySelector('#camera-focus-views');
-  const mainSelect = document.getElementById('camera-library-select');
-  const goButton = document.getElementById('camera-library-go');
-  if (!library || !menu || !panel || !section || !views || !mainSelect || !goButton) return;
+  const section = panel?.querySelector('.camera-library-section');
+  const subject = document.getElementById('camera-library-subject');
+  const select = document.getElementById('camera-library-select');
+  const go = document.getElementById('camera-library-go');
+  const edit = document.getElementById('camera-library-edit');
+  if (!library || !camera || !menu || !panel || !section || !subject || !select || !go || !edit) return;
 
   const style = document.createElement('style');
   style.id = 'camera-library-display-sync-style';
   style.textContent = `
-    /* Camera Library is the stage-view catalog now; remove the legacy duplicate row. */
-    #camera-menu .controls{display:none!important}
-    #camera-menu .camera-venue-section{display:none!important}
-    #camera-menu .camera-focus-section.camera-library-synced{display:block}
-    #camera-menu .camera-library-custom-label{color:#9fb8b2}
+    /* One normal camera UI. The old quick-view grids still exist for compatibility only. */
+    #camera-menu .controls,
+    #camera-menu .camera-venue-section,
+    #camera-menu .camera-focus-section,
+    #camera-menu #camera-v2-note{display:none!important}
+
+    #camera-menu .camera-library-section{
+      margin:0!important;padding:0 0 9px!important;border-top:0!important;gap:8px!important
+    }
+    #camera-menu .camera-library-head{align-items:flex-end!important}
+    #camera-menu .camera-library-head>div{gap:3px!important;min-width:0}
+    #camera-menu .camera-library-head span{
+      font-size:7px!important;letter-spacing:.14em!important;text-transform:uppercase;color:#71858d!important
+    }
+    #camera-menu .camera-library-head strong{
+      max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+      font-size:12px!important;line-height:1.15;color:#e4ece9!important
+    }
+    #camera-menu .camera-library-head-actions{display:flex;align-items:center;gap:5px;flex:0 0 auto}
+    #camera-menu .camera-library-back,
+    #camera-menu #camera-library-edit{
+      height:25px!important;padding:0 8px!important;border:1px solid #cad9e01e!important;
+      border-radius:7px!important;background:#ffffff04!important;color:#8fa1a4!important;
+      font-size:8px!important;white-space:nowrap
+    }
+    #camera-menu .camera-library-back:hover,
+    #camera-menu #camera-library-edit:hover{background:#ffffff09!important;color:#d7e2df!important}
+    #camera-menu .camera-library-row{
+      grid-template-columns:minmax(0,1fr) 34px!important;gap:6px!important
+    }
+    #camera-menu #camera-library-select{
+      height:34px!important;border-radius:9px!important;background:#17262d!important;
+      border-color:#cad9e024!important;color:#dce6e3!important;padding:0 9px!important;font-size:10px!important
+    }
+    #camera-menu #camera-library-go{
+      width:34px;height:34px!important;border-radius:9px!important;padding:0!important;
+      background:#ffffff06!important;color:#d5e0dd!important;font-size:11px!important
+    }
+    #camera-menu #camera-library-go:hover{background:#ffffff0d!important}
   `;
   document.head.appendChild(style);
 
+  // Turn the existing header into a compact two-level title without changing the editor.
+  const kicker = section.querySelector('.camera-library-head span');
+  if (kicker) kicker.textContent = '镜头';
+  edit.textContent = '编辑镜头';
+  go.textContent = '▶';
+  go.title = '切换到所选镜头';
+  go.setAttribute('aria-label', '切换到所选镜头');
+
+  const head = section.querySelector('.camera-library-head');
+  const actions = document.createElement('div');
+  actions.className = 'camera-library-head-actions';
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.className = 'camera-library-back';
+  back.textContent = '← 整体';
+  back.hidden = true;
+  head?.appendChild(actions);
+  actions.append(back, edit);
+
   let syncing = false;
   let queued = false;
+  let lastSignature = '';
 
-  const isSceneSubject = subject => String(subject || '').startsWith('scene:');
-  const visibleEntries = () => library.entries().filter(item => !item.hidden);
+  const isScene = () => String(library.subject || '').startsWith('scene:');
 
-  function expectedGroups(entries) {
-    const display = entries.filter(item => item.system && !String(item.id).startsWith('observe'));
-    const perform = entries.filter(item => item.system && String(item.id).startsWith('observe'));
-    const custom = entries.filter(item => !item.system);
-    return [
-      {label:'展示', items:display},
-      {label:'演奏观察', items:perform},
-      {label:'自定义', items:custom, custom:true},
-    ].filter(group => group.items.length);
-  }
-
-  function domMatches(entries) {
-    const actual = [...views.querySelectorAll('[data-library-view]')].map(button => button.dataset.libraryView);
-    const expected = entries.map(item => item.id);
-    return actual.length === expected.length && actual.every((id, index) => id === expected[index]);
-  }
-
-  function makeButton(item) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'view camera-subview';
-    button.dataset.libraryView = item.id;
-    button.textContent = item.label;
-    button.setAttribute('aria-pressed', String(mainSelect.value === item.id));
-    button.addEventListener('click', event => {
-      event.preventDefault();
-      event.stopPropagation();
-      mainSelect.value = item.id;
-      goButton.click();
-      queueSync();
-    });
-    return button;
-  }
-
-  function rebuild(entries) {
-    views.innerHTML = '';
-    for (const group of expectedGroups(entries)) {
-      const block = document.createElement('div');
-      block.className = 'camera-view-group';
-      const label = document.createElement('div');
-      label.className = `camera-view-group-label${group.custom ? ' camera-library-custom-label' : ''}`;
-      label.textContent = group.label;
-      block.appendChild(label);
-      const grid = document.createElement('div');
-      grid.className = 'camera-subviews-grid';
-      for (const item of group.items) grid.appendChild(makeButton(item));
-      block.appendChild(grid);
-      views.appendChild(block);
+  function groups(entries) {
+    if (isScene()) {
+      return [
+        ['场景机位', entries.filter(item => item.system)],
+        ['我的镜头', entries.filter(item => !item.system)],
+      ].filter(([, items]) => items.length);
     }
+    return [
+      ['展示', entries.filter(item => item.system && !String(item.id).startsWith('observe'))],
+      ['演奏', entries.filter(item => item.system && String(item.id).startsWith('observe'))],
+      ['我的镜头', entries.filter(item => !item.system)],
+    ].filter(([, items]) => items.length);
   }
 
-  function sync() {
-    queued = false;
-    if (syncing) return;
+  function rebuild() {
+    const entries = library.entries().filter(item => !item.hidden);
+    const previous = select.value;
     syncing = true;
     try {
-      const subject = library.subject;
-      if (isSceneSubject(subject)) {
-        section.classList.remove('camera-library-synced');
-        section.hidden = true;
-        menu.classList.remove('instrument-focus');
-        return;
+      select.innerHTML = '';
+      for (const [label, items] of groups(entries)) {
+        const group = document.createElement('optgroup');
+        group.label = label;
+        for (const item of items) {
+          const option = document.createElement('option');
+          option.value = item.id;
+          option.textContent = item.label;
+          group.appendChild(option);
+        }
+        select.appendChild(group);
       }
-
-      const entries = visibleEntries();
-      section.hidden = false;
-      section.classList.add('camera-library-synced');
-      menu.classList.add('instrument-focus');
-      if (title) title.textContent = document.getElementById('camera-library-subject')?.textContent || subject;
-
-      if (!domMatches(entries)) rebuild(entries);
-      for (const button of views.querySelectorAll('[data-library-view]')) {
-        button.setAttribute('aria-pressed', String(button.dataset.libraryView === mainSelect.value));
-      }
+      if (entries.some(item => item.id === previous)) select.value = previous;
+      else if (entries.length) select.value = entries[0].id;
+      back.hidden = isScene();
     } finally {
       syncing = false;
     }
   }
 
+  function signature() {
+    const entries = library.entries().filter(item => !item.hidden);
+    return `${library.subject}|${entries.map(item => `${item.id}:${item.label}:${item.system ? 1 : 0}`).join('|')}`;
+  }
+
+  function sync() {
+    queued = false;
+    const sig = signature();
+    if (sig === lastSignature) {
+      back.hidden = isScene();
+      return;
+    }
+    lastSignature = sig;
+    rebuild();
+  }
+
   function queueSync() {
-    if (queued) return;
+    if (syncing || queued) return;
     queued = true;
     queueMicrotask(sync);
   }
 
-  new MutationObserver(queueSync).observe(mainSelect, {childList:true, subtree:true});
-  new MutationObserver(() => { if (!syncing) queueSync(); }).observe(views, {childList:true, subtree:true});
-  mainSelect.addEventListener('change', queueSync);
-  menu.addEventListener('click', queueSync, true);
-  window.addEventListener('virtual-band-camera-library-change', queueSync);
-  window.addEventListener('virtual-band-venue-change', () => requestAnimationFrame(sync));
+  back.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    camera.home?.();
+    requestAnimationFrame(() => {
+      lastSignature = '';
+      sync();
+    });
+  });
 
-  sync();
-  console.info('[Camera Library] legacy instrument display now mirrors unified library');
+  // Camera Library itself refreshes this select whenever focus/scene/config changes.
+  // Regroup those flat options immediately, but do not maintain a second button catalog.
+  new MutationObserver(queueSync).observe(select, {childList:true, subtree:true});
+  window.addEventListener('virtual-band-camera-library-change', () => { lastSignature = ''; queueSync(); });
+  window.addEventListener('virtual-band-venue-change', () => requestAnimationFrame(() => { lastSignature = ''; sync(); }));
+  menu.addEventListener('toggle', queueSync);
+
+  rebuild();
+  lastSignature = signature();
+  console.info('[Camera Library] compact single-selector presentation attached');
 })();
