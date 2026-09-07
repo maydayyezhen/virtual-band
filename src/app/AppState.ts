@@ -2,6 +2,7 @@ export type TransportStatus = 'stopped' | 'playing' | 'paused';
 
 export interface AppSnapshot {
   running: boolean;
+  error: string | null;
   venueId: string | null;
   transport: {
     status: TransportStatus;
@@ -20,6 +21,7 @@ type Listener = () => void;
 export class AppState {
   private snapshot: AppSnapshot = {
     running: false,
+    error: null,
     venueId: null,
     transport: { status: 'stopped', time: 0, duration: 0 },
     counts: { instruments: 0, cameraViews: 0, showCues: 0 },
