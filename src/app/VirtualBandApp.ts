@@ -5,6 +5,7 @@ import { CameraSystem } from '../camera/CameraSystem';
 import { Engine } from '../engine/Engine';
 import { RendererHost } from '../engine/RendererHost';
 import { InstrumentRegistry } from '../instruments/Instrument';
+import { InstrumentInteractionSystem } from '../instruments/InstrumentInteractionSystem';
 import { DrumsInstrument } from '../instruments/drums/DrumsInstrument';
 import { ControlArbiter } from '../show/ControlArbiter';
 import { ShowScheduler } from '../show/ShowScheduler';
@@ -21,6 +22,7 @@ export class VirtualBandApp {
   readonly show = new ShowScheduler();
   readonly renderer: RendererHost;
   readonly camera: CameraSystem;
+  readonly interactions: InstrumentInteractionSystem;
   readonly venues: VenueManager;
   readonly engine: Engine;
 
@@ -34,6 +36,11 @@ export class VirtualBandApp {
     this.renderer.scene.add(this.instrumentLayer);
 
     this.camera = new CameraSystem(this.cameraRegistry, this.instruments);
+    this.interactions = new InstrumentInteractionSystem({
+      element: this.renderer.renderer.domElement,
+      camera: this.camera.output,
+      instruments: this.instruments,
+    });
     this.venues = new VenueManager(this.renderer.scene, this.instruments);
     this.engine = new Engine({
       renderer: this.renderer,
@@ -93,6 +100,7 @@ export class VirtualBandApp {
     if (!this.started) return;
     this.started = false;
     this.engine.stop();
+    this.interactions.dispose();
     this.control.clear();
     this.instruments.dispose();
     this.instrumentLayer.removeFromParent();
