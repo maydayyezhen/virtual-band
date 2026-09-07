@@ -1,8 +1,9 @@
 'use strict';
 
 // Venue-specific ensemble layout. The base stage layout remains untouched for the
-// "none" scene; NOCTURNE gets a tighter, smaller arrangement with guaranteed clearance
-// from the main LED plane at z=-8.17.
+// "none" scene; NOCTURNE gets a smaller live-stage arrangement that preserves the
+// 24m x 7.5m main LED as the dominant visual element instead of letting instrument
+// showcase models fill the screen.
 (() => {
   const T=THREE;
   const camera=window.VirtualBandCamera;
@@ -10,22 +11,25 @@
   if(!camera||!venue)return;
 
   const MAIN_LED_Z=-8.17;
-  const LED_CLEARANCE=.85;
+  const LED_CLEARANCE=.95;
   const MIN_GEOMETRY_Z=MAIN_LED_Z+LED_CLEARANCE;
 
+  // Art-direction pass 2: keep a clear centre corridor for the LED/logo and any future
+  // performer, while pushing the back-line rigs outward. Scales are deliberately closer
+  // to real stage proportions than the original showcase layout.
   const LAYOUT={
-    keyboard:{x:-6.6,z:-2.8,scale:.62},
-    drums:{x:3.0,z:-2.8,scale:1.58},
+    keyboard:{x:-7.4,z:-3.7,scale:.51},
+    drums:{x:3.7,z:-3.5,scale:1.22},
     acoustics:[
-      {x:-8.0,z:3.3,scale:.44},
-      {x:-4.7,z:5.1,scale:.45},
-      {x:-1.4,z:4.1,scale:.44},
+      {x:-8.8,z:2.0,scale:.34},
+      {x:-5.7,z:3.8,scale:.35},
+      {x:-2.8,z:2.5,scale:.34},
     ],
-    bass:{x:2.1,z:5.0,scale:.43},
+    bass:{x:4.4,z:3.6,scale:.31},
     electrics:[
-      {x:5.3,z:3.5,scale:.45},
-      {x:7.8,z:1.1,scale:.44},
-      {x:9.4,z:-1.4,scale:.43},
+      {x:6.7,z:2.1,scale:.34},
+      {x:8.8,z:.2,scale:.33},
+      {x:10.2,z:-2.0,scale:.32},
     ],
   };
 
@@ -54,21 +58,25 @@
   function apply(){
     if(venue.current!=='nocturne')return;
     let pushed=0;
+    const report=[];
     for(const root of camera.roots||[]){
       const spec=specFor(root);if(!spec)continue;
-      // Keep the venue manager's correct vertical offset and the authored instrument
-      // orientation. Only horizontal placement and scale are venue-specific.
+      // Venue manager already owns the correct stage-height offset and the instrument
+      // orientation. This layer changes only horizontal placement and absolute scale.
       root.position.x=spec.x;
       root.position.z=spec.z;
       root.scale.setScalar(spec.scale);
       pushed+=clearLed(root);
+      root.updateWorldMatrix(true,true);
+      const box=new T.Box3().setFromObject(root,true);
+      report.push({name:root.name,scale:spec.scale,height:box.isEmpty()?0:+box.getSize(new T.Vector3()).y.toFixed(2)});
     }
     const runtime=window.__VIRTUAL_BAND_CAMERA_RUNTIME__;
     runtime?.scene?.updateMatrixWorld?.(true);
     if(runtime?.renderer?.shadowMap)runtime.renderer.shadowMap.needsUpdate=true;
     window.refreshVirtualBandShadows?.();
-    console.info('[Venue layout] NOCTURNE band fitted · LED clearance enforced',{
-      mainLedZ:MAIN_LED_Z,minimumBandZ:MIN_GEOMETRY_Z,pushApplied:+pushed.toFixed(3),
+    console.info('[Venue layout] NOCTURNE live-stage proportions applied',{
+      mainLedZ:MAIN_LED_Z,minimumBandZ:MIN_GEOMETRY_Z,pushApplied:+pushed.toFixed(3),instruments:report,
     });
   }
 
