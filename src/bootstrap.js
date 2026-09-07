@@ -126,6 +126,9 @@ async function boot() {
   // browser edits live in localStorage until exported as JSON and committed back here.
   await loadScript('./src/data/camera-preset-config.js');
   await loadScript('./src/runtime/camera-preset-editor.js');
+  // Keep the editor itself out of the camera menu's document flow: entering edit mode
+  // opens a bounded floating inspector with its own scroll area instead of stretching UI.
+  await loadScript('./src/runtime/camera-preset-editor-layout.js');
 }
 
 boot().catch((error) => {
