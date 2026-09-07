@@ -129,6 +129,9 @@ async function boot() {
   // Keep the editor itself out of the camera menu's document flow: entering edit mode
   // opens a bounded floating inspector with its own scroll area instead of stretching UI.
   await loadScript('./src/runtime/camera-preset-editor-layout.js');
+  // Replace the long editor lists with one context selector: stage/venue when nothing is
+  // focused, or only the currently focused instrument's camera family.
+  await loadScript('./src/runtime/camera-context-editor.js');
 }
 
 boot().catch((error) => {
