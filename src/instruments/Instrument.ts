@@ -2,6 +2,11 @@ import type * as THREE from 'three';
 
 export type InstrumentRole = 'keyboard' | 'drums' | 'bass' | 'acoustic' | 'electric' | string;
 
+export interface InstrumentInteraction {
+  partId: string;
+  intensity: number;
+}
+
 export interface Instrument {
   id: string;
   role: InstrumentRole;
@@ -11,6 +16,7 @@ export interface Instrument {
   noteOff(note: number): void;
   update(dt: number): void;
   reset(): void;
+  interact?(interaction: InstrumentInteraction): boolean;
   dispose(): void;
 }
 
