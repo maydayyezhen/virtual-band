@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import type { VirtualBandApp } from '../app/VirtualBandApp';
 import type { AtelierViewId } from '../presentation/atelier/AtelierDrumShowcaseMode';
 
@@ -90,7 +91,7 @@ function AtelierExperience({ app }: { app: VirtualBandApp }) {
     showcase.setKeyboardBlocked(false);
   };
 
-  const onHelpBackdrop = (event: React.MouseEvent<HTMLDialogElement>) => {
+  const onHelpBackdrop = (event: ReactMouseEvent<HTMLDialogElement>) => {
     if (event.target !== event.currentTarget) return;
     const rect = event.currentTarget.getBoundingClientRect();
     if (
