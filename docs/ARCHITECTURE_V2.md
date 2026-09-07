@@ -19,6 +19,7 @@ VirtualBandApp
 ├── VenueManager
 ├── CameraRegistry / CameraSystem
 ├── PresentationManager
+├── ShowcaseSwitchController
 ├── ShowScheduler
 ├── ControlArbiter
 └── AppState
@@ -28,38 +29,41 @@ VirtualBandApp
 
 1. **One frame loop.** Only `Engine` owns `requestAnimationFrame` for simulation/rendering. Venue, presentation, camera, lighting, screens, instruments and editors expose `update()` instead of starting their own loops.
 2. **One transport clock.** Song time comes from `Transport`. DOM progress bars, camera modules and venue modules never infer playback time independently. Presentation-only demos consume Engine `dt`; they do not create another RAF or wall-clock loop.
-3. **Stable entity IDs.** Systems address instruments by IDs such as `drums.main` or `electric.2`. Object names are labels, not identity or routing logic.
+3. **Stable entity IDs.** Systems address instruments by IDs such as `drums.main`, `keyboard.main` or `electric.2`. Object names are labels, not identity or routing logic.
 4. **Venues are first-class.** `atelier-studio`, `empty-stage`, `nocturne` and future stages implement the same `Venue` interface. A Venue owns environment, fog, floor, fixed lighting, renderer profile and spatial layout.
 5. **One camera system.** Presentation modes, manual control, editor, auto director and Agent command `CameraSystem`; none creates a second output camera or a second render loop.
-6. **Presentation is separate from Venue.** A Venue answers “where and under what light”; a PresentationMode answers “how the user observes and interacts with it”. `AtelierDrumShowcaseMode` owns orbit/pan/zoom gesture behavior without owning saved camera assets, the renderer or the output camera.
-7. **Saved camera views belong to CameraRegistry.** Venue views use world coordinates. Instrument views use instrument-local coordinates and may include authored orbit/framing data. The four Atelier drum views (`whole`, `drummer`, `cymbals`, `pedals`) are reusable camera assets and can be invoked by showcase, show plans, manual director or Agent code.
+6. **Presentation is separate from Venue.** A Venue answers “where and under what light”; a PresentationMode answers “how the user observes and interacts with it”. Atelier showcase modes own orbit/pan/zoom/play gesture behavior without owning saved camera assets, the renderer or the output camera.
+7. **Saved camera views belong to CameraRegistry.** Venue views use world coordinates. Instrument views use instrument-local coordinates and may include authored orbit/framing data. Drum and keyboard close-up views are reusable camera assets and can be invoked by showcase, show plans, manual director or Agent code.
 8. **3D picking is a service, not gesture ownership.** `InstrumentInteractionSystem` resolves raycast hits and dispatches start/end interactions. Presentation modes decide whether a pointer gesture means play, orbit, pan or zoom.
-9. **Show control is arbitrated.** Camera / lighting / screen writers acquire channel ownership through `ControlArbiter`; priority is explicit instead of systems repeatedly overwriting each other.
-10. **UI is optional.** The current Atelier showcase intentionally has no application UI. If React UI is reintroduced later, it remains an adapter and runtime systems still never query or mutate UI DOM.
-11. **No runtime monkey patches.** Do not patch Three.js prototypes, `renderer.render`, `position.set`, venue APIs, or other systems to discover/steal ownership.
-12. **No load-order architecture.** Dependencies are ES modules imported explicitly; bootstrap order must not be the hidden integration mechanism.
+9. **Single-instrument showcase selection is explicit.** `ShowcaseSwitchController` only chooses which registered instrument is visible and which registered PresentationMode is active. It does not own cameras, audio, Venue state or instrument behavior. The current keyboard-only switch gesture is `Tab` / `Shift+Tab`; a future UI can call the same `select()` API.
+10. **Show control is arbitrated.** Camera / lighting / screen writers acquire channel ownership through `ControlArbiter`; priority is explicit instead of systems repeatedly overwriting each other.
+11. **UI is optional.** The current Atelier showcase intentionally has no application UI. If React UI is reintroduced later, it remains an adapter and runtime systems still never query or mutate UI DOM.
+12. **No runtime monkey patches.** Do not patch Three.js prototypes, `renderer.render`, `position.set`, venue APIs, or other systems to discover/steal ownership.
+13. **No load-order architecture.** Dependencies are ES modules imported explicitly; frozen donor chunks are concatenated only inside their narrow legacy adapters and never expose runtime globals.
 
 ## Atelier donor parity boundary
 
-The GPT-generated Atelier drum HTML is treated as a golden reference for the drum model, animation, studio environment and interaction feel. Its reusable responsibilities are separated rather than bundled into one page:
+The GPT-generated Atelier instrument HTML files are treated as golden references for instrument geometry, materials and authored mechanical animation. Their reusable responsibilities are separated rather than bundled into standalone pages:
 
 ```text
-Frozen drum model/controller
+Frozen donor geometry
         ↓
-legacyDrumAsset adapter
+legacy*Asset adapter
         ↓
-DrumsInstrument ───────→ AudioEngine / DrumSampler
+Instrument adapter ───────→ AudioEngine / sampler
         ↓
-AtelierStudioVenue      fixed environment / lights / fog / floor
+AtelierStudioVenue         fixed shared environment / lights / fog / floor
         ↓
-CameraRegistry          whole / drummer / cymbals / pedals
+CameraRegistry             authored instrument-local saved views
         ↓
-AtelierDrumShowcaseMode orbit / pan / zoom / play gestures / demo
+Atelier*ShowcaseMode       orbit / pan / zoom / play gestures
         ↓
-CameraSystem            sole output camera
+CameraSystem               sole output camera
 ```
 
-The added audio layer receives the same `noteOn` events as the donor animation. Mouse, keyboard, demo and future MIDI routing therefore converge on one instrument API instead of maintaining separate sound and animation paths.
+The drum kit uses `DrumsInstrument + DrumSampler`; the dual stage keyboard uses `KeyboardInstrument + KeyboardSampler`. The keyboard donor keeps the authored 88-key lower layer, 61-key upper layer, three pedals, screens and hardware intact. Its larger donor coordinate system is normalized only through the Atelier Venue layout transform, so instrument geometry itself remains unchanged.
+
+Audio receives the same semantic note events as visual animation. Mouse, computer keyboard and future MIDI routing therefore converge on instrument APIs instead of maintaining separate sound and animation paths. The keyboard lower tier currently resolves to the online Acoustic Grand Piano samples and the upper tier to the online Warm Pad samples; sample sourcing stays inside `KeyboardSampler` rather than inside the 3D model.
 
 ## Data direction
 
