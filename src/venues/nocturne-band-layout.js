@@ -14,22 +14,22 @@
   const LED_CLEARANCE=.95;
   const MIN_GEOMETRY_Z=MAIN_LED_Z+LED_CLEARANCE;
 
-  // Art-direction pass 2: keep a clear centre corridor for the LED/logo and any future
-  // performer, while pushing the back-line rigs outward. Scales are deliberately closer
-  // to real stage proportions than the original showcase layout.
+  // Art-direction pass 3: move the whole band about two metres toward the audience so
+  // the live area does not feel glued to the LED wall. Keep the centre corridor open,
+  // and trim the wide dual-keyboard rig another step so it reads at venue scale.
   const LAYOUT={
-    keyboard:{x:-7.4,z:-3.7,scale:.51},
-    drums:{x:3.7,z:-3.5,scale:1.22},
+    keyboard:{x:-7.5,z:-1.7,scale:.46},
+    drums:{x:3.7,z:-1.5,scale:1.22},
     acoustics:[
-      {x:-8.8,z:2.0,scale:.34},
-      {x:-5.7,z:3.8,scale:.35},
-      {x:-2.8,z:2.5,scale:.34},
+      {x:-8.8,z:4.0,scale:.34},
+      {x:-5.7,z:5.8,scale:.35},
+      {x:-2.8,z:4.5,scale:.34},
     ],
-    bass:{x:4.4,z:3.6,scale:.31},
+    bass:{x:4.4,z:5.6,scale:.31},
     electrics:[
-      {x:6.7,z:2.1,scale:.34},
-      {x:8.8,z:.2,scale:.33},
-      {x:10.2,z:-2.0,scale:.32},
+      {x:6.7,z:4.1,scale:.34},
+      {x:8.8,z:2.2,scale:.33},
+      {x:10.2,z:0.0,scale:.32},
     ],
   };
 
