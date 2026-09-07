@@ -3,7 +3,8 @@
 // NOCTURNE camera integration guard.
 // The original venue treats normal dragging as a person turning their head: camera
 // position stays fixed while yaw/pitch change. Reproduce that behavior on top of Camera
-// v2, and keep every rendered perspective camera inside the authored venue bounds.
+// v2, add first-person WASD/QE movement, and keep every rendered perspective camera
+// inside the authored venue bounds.
 (() => {
   const T=THREE;
   const stage=document.getElementById('stage');
@@ -16,8 +17,9 @@
   const SAFE={minX:-28.0,maxX:28.0,minY:1.85,maxY:20.25,minZ:-13.6,maxZ:56.6};
   const LOOK_DISTANCE=20;
   const pointers=new Map();
+  const keys=new Set();
   const raycaster=new T.Raycaster(),ndc=new T.Vector2();
-  let gesture=null,desiredHead=null,lastDesiredAt=-Infinity;
+  let gesture=null,desiredHead=null,lastDesiredAt=-Infinity,lastMoveFrame=performance.now();
 
   const active=()=>window.VirtualBandVenues?.current==='nocturne';
   const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
@@ -55,7 +57,7 @@
   function syncNote(){
     const note=document.getElementById('camera-v2-note');
     if(note&&active()&&!cameraApi.state?.focused)
-      note.textContent='NOCTURNE · 左拖原地环顾 · 右拖移动机位 · 滚轮改变视野';
+      note.textContent='NOCTURNE · 左拖环顾 · WASD 移动 · Q/E 升降 · Shift 加速 · 滚轮视野';
   }
   function cloneHead(head){
     return {
@@ -225,8 +227,55 @@
     if(root)cameraApi.focus?.(root);
   },true);
 
+  // First-person free-fly navigation, matching the authored CameraRig: W/S forward/back,
+  // A/D strafe, Q/E vertical, Shift for fast movement. Movement is relative to yaw rather
+  // than pitch so looking up/down does not make W fly vertically.
+  const NAV_CODES=new Set([
+    'KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE',
+    'ArrowUp','ArrowDown','ArrowLeft','ArrowRight','ShiftLeft','ShiftRight',
+  ]);
+  const editingTarget=target=>/INPUT|SELECT|TEXTAREA|BUTTON/.test(target?.tagName||'');
+  window.addEventListener('keydown',event=>{
+    if(!active()||editingTarget(event.target)||!NAV_CODES.has(event.code))return;
+    keys.add(event.code);
+    event.preventDefault();event.stopPropagation();event.stopImmediatePropagation?.();
+  },true);
+  window.addEventListener('keyup',event=>{
+    if(!NAV_CODES.has(event.code))return;
+    keys.delete(event.code);
+    if(active()){
+      event.preventDefault();event.stopPropagation();event.stopImmediatePropagation?.();
+    }
+  },true);
+  window.addEventListener('blur',()=>keys.clear());
+
+  function moveCamera(now){
+    requestAnimationFrame(moveCamera);
+    const dt=Math.min(.05,Math.max(0,(now-lastMoveFrame)/1000));
+    lastMoveFrame=now;
+    if(!active()||!keys.size||dt<=0)return;
+
+    const head=recentHead(250);
+    const forward=new T.Vector3(Math.sin(head.yaw),0,Math.cos(head.yaw));
+    const right=new T.Vector3(-Math.cos(head.yaw),0,Math.sin(head.yaw));
+    const move=new T.Vector3();
+    if(keys.has('KeyW')||keys.has('ArrowUp'))move.add(forward);
+    if(keys.has('KeyS')||keys.has('ArrowDown'))move.sub(forward);
+    if(keys.has('KeyD')||keys.has('ArrowRight'))move.add(right);
+    if(keys.has('KeyA')||keys.has('ArrowLeft'))move.sub(right);
+    if(keys.has('KeyE'))move.y+=1;
+    if(keys.has('KeyQ'))move.y-=1;
+    if(move.lengthSq()<=0)return;
+
+    const fast=keys.has('ShiftLeft')||keys.has('ShiftRight');
+    move.normalize().multiplyScalar((fast?15:6)*dt);
+    head.position.add(move);
+    poseHead(head);
+  }
+  requestAnimationFrame(moveCamera);
+
   window.addEventListener('virtual-band-venue-change',event=>{
-    pointers.clear();gesture=null;desiredHead=null;lastDesiredAt=-Infinity;
+    pointers.clear();keys.clear();gesture=null;desiredHead=null;lastDesiredAt=-Infinity;
     stage.classList.remove('dragging');
     if(event.detail?.id==='nocturne'){
       // If a previous scene left the eye outside the room, normalize it immediately.
@@ -244,5 +293,5 @@
     },
   };
   syncNote();
-  console.info('[Venue camera] NOCTURNE head-look + in-room camera guard attached',SAFE);
+  console.info('[Venue camera] NOCTURNE head-look + WASD free-fly + in-room guard attached',SAFE);
 })();
