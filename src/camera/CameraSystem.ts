@@ -8,14 +8,27 @@ export interface CameraPoseInput {
   fov: number;
 }
 
+export interface CameraLensInput {
+  fov?: number;
+  near?: number;
+  far?: number;
+}
+
 interface CameraPose {
   position: THREE.Vector3;
   target: THREE.Vector3;
   fov: number;
 }
 
+const DEFAULT_LENS = Object.freeze({ fov: 42, near: 0.05, far: 300 });
+
 export class CameraSystem {
-  readonly output = new THREE.PerspectiveCamera(42, 1, 0.05, 300);
+  readonly output = new THREE.PerspectiveCamera(
+    DEFAULT_LENS.fov,
+    1,
+    DEFAULT_LENS.near,
+    DEFAULT_LENS.far,
+  );
 
   private readonly registry: CameraRegistry;
   private readonly instruments: InstrumentRegistry;
@@ -34,6 +47,27 @@ export class CameraSystem {
     if (!Number.isFinite(aspect) || aspect <= 0 || Math.abs(this.output.aspect - aspect) < 1e-4) return;
     this.output.aspect = aspect;
     this.output.updateProjectionMatrix();
+  }
+
+  setLens(input: CameraLensInput): void {
+    let changed = false;
+    if (input.fov !== undefined && Number.isFinite(input.fov) && input.fov > 0 && this.output.fov !== input.fov) {
+      this.output.fov = input.fov;
+      changed = true;
+    }
+    if (input.near !== undefined && Number.isFinite(input.near) && input.near > 0 && this.output.near !== input.near) {
+      this.output.near = input.near;
+      changed = true;
+    }
+    if (input.far !== undefined && Number.isFinite(input.far) && input.far > this.output.near && this.output.far !== input.far) {
+      this.output.far = input.far;
+      changed = true;
+    }
+    if (changed) this.output.updateProjectionMatrix();
+  }
+
+  resetLens(): void {
+    this.setLens(DEFAULT_LENS);
   }
 
   setPose(input: CameraPoseInput, instant = false): void {
