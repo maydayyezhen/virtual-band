@@ -15,6 +15,23 @@ function loadScript(src) {
 
 const nextPaint = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
+function waitForRuntime(test, label, maxFrames = 600) {
+  return new Promise((resolve, reject) => {
+    let frames = 0;
+    const tick = () => {
+      let value = null;
+      try { value = test(); } catch {}
+      if (value) { resolve(value); return; }
+      if (++frames >= maxFrames) {
+        reject(new Error(`Timed out waiting for ${label}`));
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+    tick();
+  });
+}
+
 async function boot() {
   const sourceOrder = [
     './src/core/core.js',
@@ -51,6 +68,16 @@ async function boot() {
   await loadScript('./src/venues/nocturne-stage-source-finalize.js');
   await loadScript('./src/venues/venue-manager.js');
   await window.VirtualBandVenuesReady;
+
+  // camera-controller.js attaches on requestAnimationFrame, so script.onload does not
+  // guarantee that window.VirtualBandCamera already exists. Wait for the actual Camera
+  // v2 API before installing the venue capture handlers; otherwise the guard exits once
+  // during startup and left-drag appears completely dead.
+  await waitForRuntime(
+    () => window.VirtualBandCamera?.pose && window.__VIRTUAL_BAND_CAMERA_RUNTIME__?.renderer,
+    'Camera v2 runtime',
+  );
+
   // Venue mode follows the original CameraRig interaction model: head-look instead of
   // orbit, FOV zoom, and a renderer-level guarantee that every perspective eye stays
   // inside the authored room bounds. Install before the PROGRAM director wraps render.
