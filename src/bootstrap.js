@@ -95,6 +95,9 @@ async function boot() {
   await loadScript('./src/venues/nocturne-auto-show.js');
 
   await loadScript('./src/runtime/auto-director.js');
+  // Mirror the camera menu director state onto the main player so playback can be
+  // switched between MIDI-driven AUTO shots and a fixed/manual camera in one click.
+  await loadScript('./src/runtime/playback-camera-toggle.js');
   // Agent-authored timelines sit above the automatic director and can temporarily own
   // the camera for a song while preserving the user's manual override priority.
   await loadScript('./src/runtime/agent-camera-arrangements.js');
