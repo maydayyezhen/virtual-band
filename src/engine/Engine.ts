@@ -1,5 +1,6 @@
 import type { CameraSystem } from '../camera/CameraSystem';
 import type { InstrumentRegistry } from '../instruments/Instrument';
+import type { PresentationManager } from '../presentation/PresentationManager';
 import type { ShowScheduler } from '../show/ShowScheduler';
 import type { Transport } from '../transport/Transport';
 import type { VenueManager } from '../venues/VenueManager';
@@ -12,6 +13,7 @@ export class Engine {
   private readonly instruments: InstrumentRegistry;
   private readonly venues: VenueManager;
   private readonly show: ShowScheduler;
+  private readonly presentation: PresentationManager;
 
   private raf = 0;
   private lastFrame = 0;
@@ -23,6 +25,7 @@ export class Engine {
     instruments: InstrumentRegistry;
     venues: VenueManager;
     show: ShowScheduler;
+    presentation: PresentationManager;
   }) {
     this.renderer = options.renderer;
     this.camera = options.camera;
@@ -30,6 +33,7 @@ export class Engine {
     this.instruments = options.instruments;
     this.venues = options.venues;
     this.show = options.show;
+    this.presentation = options.presentation;
   }
 
   start(): void {
@@ -49,16 +53,22 @@ export class Engine {
     const dt = Math.min(0.05, Math.max(0, (now - this.lastFrame) / 1000));
     this.lastFrame = now;
 
+    const aspect = this.renderer.resizeIfNeeded();
+    this.camera.setAspect(aspect);
+
     this.transport.update(dt);
-    this.instruments.update(dt);
-    this.venues.update(dt);
     this.show.update(this.transport.snapshot.time);
     this.camera.update(dt);
 
-    const aspect = this.renderer.resizeIfNeeded();
-    this.camera.setAspect(aspect);
-    this.renderer.render(this.camera.output);
+    // Presentation is a command producer. It runs inside the same RAF and can drive
+    // demo notes before the instrument animation tick, matching the donor viewer.
+    this.presentation.update(dt);
 
+    const instrumentFrame = this.instruments.update(dt);
+    if (instrumentFrame.moved) this.renderer.invalidateShadows();
+    this.venues.update(dt);
+
+    this.renderer.render(this.camera.output);
     this.raf = requestAnimationFrame(this.frame);
   };
 }
