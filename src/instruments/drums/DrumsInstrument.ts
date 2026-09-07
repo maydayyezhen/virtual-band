@@ -9,6 +9,7 @@ export class DrumsInstrument implements Instrument {
   readonly root: THREE.Group;
 
   private readonly controller: LegacyDrumController;
+  private hiHatOpen = false;
 
   private constructor(root: THREE.Group, controller: LegacyDrumController) {
     this.root = root;
@@ -34,11 +35,17 @@ export class DrumsInstrument implements Instrument {
   }
 
   reset(): void {
+    this.hiHatOpen = false;
     this.controller.panic();
   }
 
   interact({ partId, intensity }: InstrumentInteraction): boolean {
-    const resolvedPart = partId === 'kickPedal' ? 'kick' : partId === 'hatPedal' ? 'hihat' : partId;
+    if (partId === 'hatPedal') {
+      this.hiHatOpen = !this.hiHatOpen;
+      return this.controller.setHiHat(this.hiHatOpen ? 1 : 0);
+    }
+
+    const resolvedPart = partId === 'kickPedal' ? 'kick' : partId;
     const velocity = Math.round(72 + Math.min(1, Math.max(0, intensity)) * 55);
     return this.controller.hit(resolvedPart, velocity);
   }
