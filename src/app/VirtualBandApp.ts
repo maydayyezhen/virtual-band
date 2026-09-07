@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { AppState } from './AppState';
+import { AudioEngine } from '../audio/AudioEngine';
+import { DrumSampler } from '../audio/DrumSampler';
 import { CameraRegistry } from '../camera/CameraRegistry';
 import { CameraSystem } from '../camera/CameraSystem';
 import { InstrumentOrbitMode } from '../camera/modes/InstrumentOrbitMode';
@@ -17,6 +19,8 @@ import { VenueManager } from '../venues/VenueManager';
 export class VirtualBandApp {
   readonly state = new AppState();
   readonly transport = new Transport();
+  readonly audio = new AudioEngine();
+  readonly drumSampler = new DrumSampler(this.audio);
   readonly instruments = new InstrumentRegistry();
   readonly cameraRegistry = new CameraRegistry();
   readonly control = new ControlArbiter();
@@ -74,9 +78,10 @@ export class VirtualBandApp {
     this.started = true;
 
     try {
-      const drums = await DrumsInstrument.create();
+      const drums = await DrumsInstrument.create(this.drumSampler);
       this.instruments.register(drums);
       this.instrumentLayer.add(drums.root);
+      void this.drumSampler.preload();
 
       this.activateVenue('empty-stage');
       this.showcase.enter(drums.id);
@@ -112,6 +117,7 @@ export class VirtualBandApp {
     this.interactions.dispose();
     this.control.clear();
     this.instruments.dispose();
+    this.audio.dispose();
     this.instrumentLayer.removeFromParent();
     this.venues.dispose();
     this.renderer.dispose();
