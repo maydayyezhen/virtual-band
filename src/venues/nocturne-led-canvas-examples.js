@@ -11,7 +11,7 @@
   if(!venue||!menu)return;
 
   const W=1792,H=560,TAU=Math.PI*2;
-  let active=false,mode='kaleidoscope',paused=false,lastNow=performance.now(),time=0,raf=0;
+  let active=false,mode='kaleidoscope',paused=false,lastNow=performance.now(),time=0,raf=0,drawAcc=0;
   const canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;
   const ctx=canvas.getContext('2d',{alpha:false});
   const particles=[];
@@ -30,6 +30,7 @@
   panel.appendChild(section);
 
   const style=document.createElement('style');style.id='venue-led-canvas-test-style';style.textContent=`
+    .venue-panel{max-height:calc(100vh - 72px);overflow-y:auto;overscroll-behavior:contain}
     .venue-led-canvas-test{display:grid;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid #cad9e016}
     .led-canvas-title{display:flex;align-items:center;justify-content:space-between;gap:8px}.led-canvas-title strong{font-size:10px;font-weight:600;color:#dce7e5}.led-canvas-title small{font-size:8px;color:#71858d}
     .led-canvas-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}.led-canvas-row{display:grid;grid-template-columns:1fr 1fr;gap:6px}
@@ -99,7 +100,7 @@
   }
 
   function spawnSmoke(t){
-    const count=5;
+    const count=3;
     for(let i=0;i<count;i++){
       const seed=t*1000+i+particles.length*7.1;
       particles.push({
@@ -113,7 +114,7 @@
         wobble:rand01(seed+23)*TAU,
       });
     }
-    while(particles.length>280)particles.shift();
+    while(particles.length>220)particles.shift();
   }
   function drawSmoke(t,dt){
     clear('#060713',.18);spawnSmoke(t);
@@ -148,7 +149,7 @@
     // One main-screen test owner at a time.
     if(window.NocturneLedImageTest?.active)window.NocturneLedImageTest.restore?.();
     if(window.NocturneLedVideoTest?.active)window.NocturneLedVideoTest.restore?.();
-    mode=next;active=true;paused=false;time=0;lastNow=performance.now();particles.length=0;clear('#05060d',1);drawFrame(1/60);apply();
+    mode=next;active=true;paused=false;time=0;drawAcc=0;lastNow=performance.now();particles.length=0;clear('#05060d',1);drawFrame(1/30);apply();
     pause.disabled=false;pause.textContent='暂停动画';
     for(const b of section.querySelectorAll('[data-led-canvas]'))b.classList.toggle('active',b.dataset.ledCanvas===mode);
     fire();return true;
@@ -174,9 +175,10 @@
     raf=requestAnimationFrame(loop);
     const dt=Math.min(.05,Math.max(0,(frameNow-lastNow)/1000));lastNow=frameNow;
     if(!active||paused||venue.current!=='nocturne')return;
-    time+=dt;drawFrame(dt);
-    // ScreenSurface reads this Canvas as media at its own cadence. No texture replacement,
-    // DOM work or LED API call is needed per frame.
+    drawAcc+=dt;if(drawAcc<1/30)return;
+    const step=Math.min(.05,drawAcc);drawAcc=0;time+=step;drawFrame(step);
+    // ScreenSurface reads this Canvas as media at its own ~30fps cadence. Matching that
+    // cadence avoids spending extra CPU/GPU work on frames the LED surface would skip.
   }
 
   section.addEventListener('click',event=>{const b=event.target.closest('[data-led-canvas]');if(b)setActiveMode(b.dataset.ledCanvas);});
