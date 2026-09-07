@@ -91,6 +91,7 @@ export class CameraSystem {
     if (!view) return false;
     const pose = this.resolve(view);
     if (!pose) return false;
+    this.setLens({ near: view.near, far: view.far });
     this.setPose(pose, instant);
     return true;
   }
@@ -105,9 +106,9 @@ export class CameraSystem {
     this.output.updateProjectionMatrix();
 
     if (
-      this.output.position.distanceToSquared(this.desired.position) < 1e-4 &&
-      this.target.distanceToSquared(this.desired.target) < 1e-4 &&
-      Math.abs(this.output.fov - this.desired.fov) < 1e-3
+      this.output.position.distanceToSquared(this.desired.position) < 1e-4
+      && this.target.distanceToSquared(this.desired.target) < 1e-4
+      && Math.abs(this.output.fov - this.desired.fov) < 1e-3
     ) {
       this.applyPose(this.desired);
       this.desired = null;
@@ -126,9 +127,30 @@ export class CameraSystem {
     const instrument = this.instruments.get(view.instrumentId);
     if (!instrument) return null;
     instrument.root.updateWorldMatrix(true, true);
+
+    if (view.kind === 'instrument') {
+      return {
+        position: instrument.root.localToWorld(new THREE.Vector3(...view.camera)),
+        target: instrument.root.localToWorld(new THREE.Vector3(...view.target)),
+        fov: view.fov,
+      };
+    }
+
+    const localTarget = new THREE.Vector3(...view.target);
+    const halfFov = THREE.MathUtils.degToRad(view.fov / 2);
+    const aspect = Math.max(0.01, this.output.aspect || 1);
+    const framedSpan = Math.max(view.height, view.width / aspect);
+    const distance = framedSpan / (2 * Math.tan(halfFov));
+    const cp = Math.cos(view.pitch);
+    const localPosition = new THREE.Vector3(
+      localTarget.x + Math.sin(view.yaw) * cp * distance,
+      localTarget.y + Math.sin(view.pitch) * distance,
+      localTarget.z + Math.cos(view.yaw) * cp * distance,
+    );
+
     return {
-      position: instrument.root.localToWorld(new THREE.Vector3(...view.camera)),
-      target: instrument.root.localToWorld(new THREE.Vector3(...view.target)),
+      position: instrument.root.localToWorld(localPosition),
+      target: instrument.root.localToWorld(localTarget),
       fov: view.fov,
     };
   }
