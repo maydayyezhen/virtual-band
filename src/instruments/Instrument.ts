@@ -24,6 +24,13 @@ export interface Instrument {
   noteOff(note: number): void;
   update(dt: number): InstrumentFrameResult | void;
   reset(): void;
+  /**
+   * Optional authored hit resolver for instruments whose playable region cannot be
+   * represented by one static userData.hit tag (for example a fretless fingerboard).
+   * The shared InteractionSystem still owns raycasting; the instrument only maps the
+   * nearest intersection to a stable partId.
+   */
+  resolveHit?(intersection: THREE.Intersection): string | null;
   interact?(interaction: InstrumentInteraction): boolean;
   dispose(): void;
 }
