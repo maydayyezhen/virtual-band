@@ -22,11 +22,22 @@ export interface InstrumentCameraView {
   far?: number;
 }
 
+export interface CameraViewportFraming {
+  reservedHeight?: number;
+  compactReservedHeight?: number;
+  compactHeightBreakpoint?: number;
+  minUsableHeightRatio?: number;
+  horizontalMargin?: number;
+  mobileHorizontalMargin?: number;
+  mobileWidthBreakpoint?: number;
+  minUsableWidth?: number;
+}
+
 /**
  * Authored orbit-style camera preset stored in instrument-local coordinates.
- * `height` / `width` describe the intended framed subject area, so CameraSystem
- * can resolve a suitable distance for the current viewport without coupling the
- * saved view to any presentation UI.
+ * `height` / `width` describe the intended framed subject area. Optional viewport
+ * framing preserves authored composition rules (including donor-safe areas)
+ * without making the preset belong to a particular PresentationMode.
  */
 export interface InstrumentOrbitCameraView {
   kind: 'instrument-orbit';
@@ -41,6 +52,7 @@ export interface InstrumentOrbitCameraView {
   fov: number;
   near?: number;
   far?: number;
+  viewportFraming?: CameraViewportFraming;
 }
 
 export type CameraView = WorldCameraView | InstrumentCameraView | InstrumentOrbitCameraView;
