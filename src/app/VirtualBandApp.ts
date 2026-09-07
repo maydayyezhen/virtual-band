@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { AppState } from './AppState';
 import { CameraRegistry } from '../camera/CameraRegistry';
 import { CameraSystem } from '../camera/CameraSystem';
-import { InstrumentShowcaseController } from '../camera/InstrumentShowcaseController';
 import { InstrumentOrbitMode } from '../camera/modes/InstrumentOrbitMode';
 import { Engine } from '../engine/Engine';
 import { RendererHost } from '../engine/RendererHost';
@@ -26,7 +25,6 @@ export class VirtualBandApp {
   readonly camera: CameraSystem;
   readonly interactions: InstrumentInteractionSystem;
   readonly showcase: InstrumentOrbitMode;
-  readonly showcaseController: InstrumentShowcaseController;
   readonly venues: VenueManager;
   readonly engine: Engine;
 
@@ -51,12 +49,6 @@ export class VirtualBandApp {
       instruments: this.instruments,
     });
     this.venues = new VenueManager(this.renderer.scene, this.instruments);
-    this.showcaseController = new InstrumentShowcaseController({
-      element: this.renderer.renderer.domElement,
-      interactions: this.interactions,
-      orbit: this.showcase,
-      onExit: () => this.restoreVenueCamera(),
-    });
     this.engine = new Engine({
       renderer: this.renderer,
       camera: this.camera,
@@ -87,6 +79,7 @@ export class VirtualBandApp {
       this.instrumentLayer.add(drums.root);
 
       this.activateVenue('empty-stage');
+      this.showcase.enter(drums.id);
       this.engine.start();
       this.state.patch({ running: true });
     } catch (error) {
@@ -96,7 +89,6 @@ export class VirtualBandApp {
   }
 
   activateVenue(id: string): void {
-    this.showcase.exit();
     const previous = this.venues.active?.id;
     const venue = this.venues.activate(id);
     if (previous && previous !== venue.id) this.cameraRegistry.clearVenueViews(previous);
@@ -116,7 +108,6 @@ export class VirtualBandApp {
     if (!this.started) return;
     this.started = false;
     this.engine.stop();
-    this.showcaseController.dispose();
     this.showcase.dispose();
     this.interactions.dispose();
     this.control.clear();
@@ -125,11 +116,5 @@ export class VirtualBandApp {
     this.venues.dispose();
     this.renderer.dispose();
     this.state.patch({ running: false, venueId: null });
-  }
-
-  private restoreVenueCamera(): void {
-    const venue = this.venues.active;
-    if (!venue) return;
-    this.camera.goToView(venue.cameraViews[0]?.id ?? '', false);
   }
 }
