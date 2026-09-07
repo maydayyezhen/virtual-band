@@ -6,6 +6,8 @@ export interface WorldCameraView {
   position: [number, number, number];
   target: [number, number, number];
   fov: number;
+  near?: number;
+  far?: number;
 }
 
 export interface InstrumentCameraView {
@@ -16,9 +18,32 @@ export interface InstrumentCameraView {
   camera: [number, number, number];
   target: [number, number, number];
   fov: number;
+  near?: number;
+  far?: number;
 }
 
-export type CameraView = WorldCameraView | InstrumentCameraView;
+/**
+ * Authored orbit-style camera preset stored in instrument-local coordinates.
+ * `height` / `width` describe the intended framed subject area, so CameraSystem
+ * can resolve a suitable distance for the current viewport without coupling the
+ * saved view to any presentation UI.
+ */
+export interface InstrumentOrbitCameraView {
+  kind: 'instrument-orbit';
+  id: string;
+  label: string;
+  instrumentId: string;
+  target: [number, number, number];
+  yaw: number;
+  pitch: number;
+  height: number;
+  width: number;
+  fov: number;
+  near?: number;
+  far?: number;
+}
+
+export type CameraView = WorldCameraView | InstrumentCameraView | InstrumentOrbitCameraView;
 
 export class CameraRegistry {
   private readonly views = new Map<string, CameraView>();
@@ -49,6 +74,17 @@ export class CameraRegistry {
   clearVenueViews(venueId: string): void {
     for (const [id, view] of this.views) {
       if (view.kind === 'world' && view.venueId === venueId) this.views.delete(id);
+    }
+  }
+
+  setInstrumentViews(instrumentId: string, views: Array<InstrumentCameraView | InstrumentOrbitCameraView>): void {
+    this.clearInstrumentViews(instrumentId);
+    for (const view of views) this.register(view);
+  }
+
+  clearInstrumentViews(instrumentId: string): void {
+    for (const [id, view] of this.views) {
+      if (view.kind !== 'world' && view.instrumentId === instrumentId) this.views.delete(id);
     }
   }
 
