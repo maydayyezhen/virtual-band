@@ -8,11 +8,6 @@ interface PointerPress {
   time: number;
 }
 
-interface InstrumentPick {
-  instrumentId: string;
-  partId: string | null;
-}
-
 export class InstrumentInteractionSystem {
   private readonly element: HTMLCanvasElement;
   private readonly camera: THREE.Camera;
@@ -38,10 +33,6 @@ export class InstrumentInteractionSystem {
     this.element.removeEventListener('pointerdown', this.onPointerDown);
     this.element.removeEventListener('pointerup', this.onPointerUp);
     this.element.removeEventListener('pointercancel', this.onPointerCancel);
-  }
-
-  pickInstrumentAt(clientX: number, clientY: number): string | null {
-    return this.pickAt(clientX, clientY)?.instrumentId ?? null;
   }
 
   private readonly onPointerDown = (event: PointerEvent): void => {
@@ -71,26 +62,12 @@ export class InstrumentInteractionSystem {
   };
 
   private interactAt(event: PointerEvent): void {
-    const pick = this.pickAt(event.clientX, event.clientY);
-    if (!pick?.partId) return;
-
-    const instrument = this.instruments.get(pick.instrumentId);
-    if (!instrument?.interact) return;
-
-    const intensity = event.pointerType === 'pen' && event.pressure > 0
-      ? Math.min(1, Math.max(0.15, event.pressure))
-      : 0.9;
-
-    instrument.interact({ partId: pick.partId, intensity });
-  }
-
-  private pickAt(clientX: number, clientY: number): InstrumentPick | null {
     const rect = this.element.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return null;
+    if (rect.width <= 0 || rect.height <= 0) return;
 
     this.pointer.set(
-      ((clientX - rect.left) / rect.width) * 2 - 1,
-      -((clientY - rect.top) / rect.height) * 2 + 1,
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1,
     );
 
     const roots = this.instruments.list().map((instrument) => instrument.root).filter((root) => root.visible);
@@ -114,9 +91,15 @@ export class InstrumentInteractionSystem {
         node = node.parent;
       }
 
-      if (instrumentId) return { instrumentId, partId };
-    }
+      if (!instrumentId || !partId) continue;
+      const instrument = this.instruments.get(instrumentId);
+      if (!instrument?.interact) continue;
 
-    return null;
+      const intensity = event.pointerType === 'pen' && event.pressure > 0
+        ? Math.min(1, Math.max(0.15, event.pressure))
+        : 0.9;
+
+      if (instrument.interact({ partId, intensity })) return;
+    }
   }
 }
