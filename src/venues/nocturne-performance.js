@@ -19,20 +19,21 @@
   const BLOOM_DIVISOR = 5; // scene stays full-res; only extract/blur buffers get smaller.
   const DPR_CAP = matchMedia('(max-width: 700px)').matches ? 1.25 : 1.5;
 
-  let runtime=null,app=null,renderer=null;
-  let originalPixelRatio=1;
+  let runtime=window.__VIRTUAL_BAND_CAMERA_RUNTIME__||null;
+  let app=null,renderer=runtime?.renderer||null;
+  let originalPixelRatio=renderer?.getPixelRatio?.()||1;
   let shadowTimer=0;
-  let configured=false;
+  let reported=false;
   const screenOriginals=new Map();
   const screenSizes=new Map();
-  const fixtureVisibility=new Map();
 
   function active(){return window.VirtualBandVenues?.current==='nocturne';}
 
   function resizeBloom(){
     if(!app?.glow||!renderer)return;
     const size=renderer.getDrawingBufferSize(new T.Vector2());
-    // Preserve the full-resolution source image but remove expensive 4x MSAA.
+    // Preserve the full-resolution scene source but remove expensive 4x render-target
+    // MSAA. Only the already-soft glow extract/blur buffers run at lower resolution.
     app.glow.sceneRT.setSize(size.x,size.y);
     app.glow.sceneRT.samples=0;
     const w=Math.max(1,Math.floor(size.x/BLOOM_DIVISOR));
@@ -56,16 +57,12 @@
     if(!app?.lights)return;
     for(const [id,fixture] of app.lights){
       if(!fixture?.light)continue;
-      if(!fixtureVisibility.has(id))fixtureVisibility.set(id,fixture.light.visible);
-      // The lens/glare/beam cone/spill remain fully animated. Only a small representative
-      // subset contributes costly real-time SpotLight shading to every PBR material.
+      // Lens/glare/volumetric beam/spill stay fully animated. Only six representative
+      // fixtures participate in expensive real-time PBR lighting.
       fixture.light.visible=REAL_FIXTURE_LIGHTS.has(id);
     }
-    // LED bloom already communicates screen spill very effectively; three additional
-    // real PointLights buy little visually and cost another three light evaluations.
-    for(const screen of app.screens?.values?.()||[]){
-      if(screen.glow)screen.glow.visible=false;
-    }
+    // The post glow already sells LED spill; these three PointLights are redundant.
+    for(const screen of app.screens?.values?.()||[])if(screen.glow)screen.glow.visible=false;
   }
 
   function configureScreens(){
@@ -84,11 +81,15 @@
       const original=screenOriginals.get(id),fps=LED_FPS[id]||18,step=1/fps;
       let accumulator=0;
       screen.update=function(dt){
-        // Brightness is cheap and should still react immediately even between redraws.
         this.material.uniforms.brightness.value=this.brightness;
         if(this.glow)this.glow.intensity=this.brightness*40;
-        accumulator+=Math.max(0,dt||0);
-        if(!this.dirty&&accumulator<step)return;
+        const running=this.playing&&(!this.demoOwner||this.app.demo);
+        if(running&&dt>0)accumulator+=dt;
+        if(this.dirty){
+          const elapsed=accumulator;accumulator=0;
+          return original(elapsed);
+        }
+        if(!running||accumulator<step)return;
         const elapsed=accumulator;accumulator=0;
         return original(elapsed);
       };
@@ -117,48 +118,77 @@
     },SHADOW_INTERVAL);
   }
 
-  function applyBalanced(){
-    if(!app||!renderer)return;
+  function configureStaticCost(){
+    if(!app)return;
     configureFixtureLights();
     configureHaze();
     configureScreens();
+  }
+
+  function applyBalanced(){
+    if(!app||!renderer)return;
+    configureStaticCost();
     applyRendererBudget();
     startShadowBudget();
-    configured=true;
   }
 
-  function syncVenue(){
-    if(active())applyBalanced();
-    else restoreRendererBudget();
-  }
-
-  async function attach(){
-    await window.VirtualBandVenuesReady;
-    runtime=window.__VIRTUAL_BAND_CAMERA_RUNTIME__;
-    app=window.VirtualBandVenues?.stage;
-    renderer=runtime?.renderer;
-    if(!app||!renderer)throw new Error('NOCTURNE performance runtime unavailable');
-    originalPixelRatio=renderer.getPixelRatio();
-    applyBalanced();
-    window.addEventListener('virtual-band-venue-change',syncVenue);
-    window.addEventListener('resize',()=>requestAnimationFrame(()=>{if(active())applyRendererBudget();}));
-
+  function installApi(){
+    if(window.NocturnePerformance)return;
     window.NocturnePerformance={
       profile:PROFILE,
       apply:applyBalanced,
       get stats(){return {
         profile:PROFILE,
         realFixtureLights:[...REAL_FIXTURE_LIGHTS],
-        totalFixtures:app.lights?.size||0,
+        totalFixtures:app?.lights?.size||0,
         shadowHz:Math.round(1000/SHADOW_INTERVAL*10)/10,
-        hazeDrawCount:app.haze?.points?.geometry?.drawRange?.count||0,
+        hazeDrawCount:app?.haze?.points?.geometry?.drawRange?.count||0,
         ledFps:{...LED_FPS},
         bloomDivisor:BLOOM_DIVISOR,
-        pixelRatio:renderer.getPixelRatio(),
+        pixelRatio:renderer?.getPixelRatio?.()||1,
       };},
     };
+  }
+
+  function report(){
+    if(reported||!app)return;reported=true;
+    installApi();
     console.info('[Venue perf] NOCTURNE balanced profile attached',window.NocturnePerformance.stats);
   }
 
-  attach().catch(error=>console.error('[Venue perf] failed',error));
+  // Loaded before venue-manager: the original stage dispatches this synchronously while
+  // being constructed. This lets us disable 24 of 30 real SpotLights and reduce haze/LED
+  // work before the first expensive venue render can happen.
+  window.addEventListener('nocturne-stage-ready',event=>{
+    runtime=window.__VIRTUAL_BAND_CAMERA_RUNTIME__||runtime;
+    renderer=runtime?.renderer||renderer;
+    if(renderer&&!originalPixelRatio)originalPixelRatio=renderer.getPixelRatio();
+    app=event.detail||window.__NOCTURNE_IMPORTED_STAGE__||app;
+    configureStaticCost();
+  });
+
+  // venue-manager dispatches this after applying its renderer state but before returning
+  // from activate(), so the balanced shadow/glow/DPR budget wins before the next frame.
+  window.addEventListener('virtual-band-venue-change',event=>{
+    if(!app)app=event.detail?.stage||window.VirtualBandVenues?.stage||null;
+    runtime=window.__VIRTUAL_BAND_CAMERA_RUNTIME__||runtime;
+    renderer=runtime?.renderer||renderer;
+    if(event.detail?.id==='nocturne')applyBalanced();
+    else restoreRendererBudget();
+    report();
+  });
+
+  window.addEventListener('resize',()=>requestAnimationFrame(()=>{
+    if(active())applyRendererBudget();
+  }));
+
+  // Fallback for cached/late execution.
+  const wait=()=>{
+    runtime=window.__VIRTUAL_BAND_CAMERA_RUNTIME__||runtime;
+    renderer=runtime?.renderer||renderer;
+    app=window.VirtualBandVenues?.stage||window.__NOCTURNE_IMPORTED_STAGE__||app;
+    if(app&&renderer){if(active())applyBalanced();configureStaticCost();report();return;}
+    requestAnimationFrame(wait);
+  };
+  wait();
 })();
