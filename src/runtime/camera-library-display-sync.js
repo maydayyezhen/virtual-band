@@ -130,10 +130,17 @@
     return `${library.subject}|${entries.map(item => `${item.id}:${item.label}:${item.system ? 1 : 0}`).join('|')}`;
   }
 
+  function isGroupedDom() {
+    const children = [...select.children];
+    return !children.length || children.every(node => node.tagName === 'OPTGROUP');
+  }
+
   function sync() {
     queued = false;
     const sig = signature();
-    if (sig === lastSignature) {
+    // Camera Library may repaint this select with flat <option> nodes even when the data
+    // itself did not change. Re-group whenever that happens, not only on data changes.
+    if (sig === lastSignature && isGroupedDom()) {
       back.hidden = isScene();
       return;
     }
