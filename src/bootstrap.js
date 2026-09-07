@@ -33,13 +33,13 @@ async function boot() {
   await window.loadVirtualBandSongs();
   await loadScript('./src/runtime/app.js');
   // app.js has now created the shared renderer. Bridge it with the captured Scene and
-  // Camera, attach the authored camera layer, then mount the selected venue before any
-  // automatic director starts choosing shots.
+  // Camera, attach the authored camera layer, then import the complete gifted venue
+  // before any automatic director starts choosing shots.
   await loadScript('./src/runtime/camera-runtime-bridge.js');
   await loadScript('./src/runtime/camera-controller.js');
   await loadScript('./src/venues/venue-ui.js');
+  await loadScript('./src/venues/nocturne-stage-source.js');
   await loadScript('./src/venues/venue-manager.js');
-  await loadScript('./src/venues/nocturne-calibration.js');
   await loadScript('./src/runtime/auto-director.js');
   // Agent-authored timelines sit above the automatic director and can temporarily own
   // the camera for a song while preserving the user's manual override priority.
