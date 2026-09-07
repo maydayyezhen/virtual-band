@@ -1,13 +1,16 @@
 import type * as THREE from 'three';
-import type { Venue } from './Venue';
+import type { InstrumentRegistry } from '../instruments/Instrument';
+import type { InstrumentTransform, Venue } from './Venue';
 
 export class VenueManager {
   private readonly scene: THREE.Scene;
+  private readonly instruments: InstrumentRegistry;
   private readonly venues = new Map<string, Venue>();
   private activeVenue: Venue | null = null;
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, instruments: InstrumentRegistry) {
     this.scene = scene;
+    this.instruments = instruments;
   }
 
   register(venue: Venue): void {
@@ -18,10 +21,14 @@ export class VenueManager {
   activate(id: string): Venue {
     const next = this.venues.get(id);
     if (!next) throw new Error(`Unknown venue: ${id}`);
-    if (this.activeVenue === next) return next;
+    if (this.activeVenue === next) {
+      this.applyLayout(next);
+      return next;
+    }
     if (this.activeVenue?.root.parent === this.scene) this.scene.remove(this.activeVenue.root);
     this.activeVenue = next;
     this.scene.add(next.root);
+    this.applyLayout(next);
     return next;
   }
 
@@ -39,4 +46,23 @@ export class VenueManager {
     this.venues.clear();
     this.activeVenue = null;
   }
+
+  private applyLayout(venue: Venue): void {
+    for (const instrument of this.instruments.list()) {
+      const transform = venue.layout[instrument.id];
+      instrument.root.visible = Boolean(transform);
+      if (!transform) continue;
+      applyTransform(instrument.root, transform);
+    }
+  }
+}
+
+function applyTransform(root: THREE.Object3D, transform: InstrumentTransform): void {
+  root.position.set(...transform.position);
+  const rotation = transform.rotation ?? [0, 0, 0];
+  root.rotation.set(...rotation);
+  const scale = transform.scale ?? 1;
+  if (typeof scale === 'number') root.scale.setScalar(scale);
+  else root.scale.set(...scale);
+  root.updateMatrixWorld(true);
 }
