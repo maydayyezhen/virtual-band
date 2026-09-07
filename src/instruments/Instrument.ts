@@ -2,9 +2,17 @@ import type * as THREE from 'three';
 
 export type InstrumentRole = 'keyboard' | 'drums' | 'bass' | 'acoustic' | 'electric' | string;
 
+export type InstrumentInteractionPhase = 'start' | 'end';
+
 export interface InstrumentInteraction {
   partId: string;
-  intensity: number;
+  velocity: number;
+  phase: InstrumentInteractionPhase;
+}
+
+export interface InstrumentFrameResult {
+  moved?: boolean;
+  animating?: boolean;
 }
 
 export interface Instrument {
@@ -14,7 +22,7 @@ export interface Instrument {
   root: THREE.Object3D;
   noteOn(note: number, velocity: number): void;
   noteOff(note: number): void;
-  update(dt: number): void;
+  update(dt: number): InstrumentFrameResult | void;
   reset(): void;
   interact?(interaction: InstrumentInteraction): boolean;
   dispose(): void;
@@ -43,8 +51,15 @@ export class InstrumentRegistry {
     return [...this.items.values()];
   }
 
-  update(dt: number): void {
-    for (const instrument of this.items.values()) instrument.update(dt);
+  update(dt: number): InstrumentFrameResult {
+    let moved = false;
+    let animating = false;
+    for (const instrument of this.items.values()) {
+      const result = instrument.update(dt);
+      moved ||= Boolean(result?.moved);
+      animating ||= Boolean(result?.animating);
+    }
+    return { moved, animating };
   }
 
   resetAll(): void {
