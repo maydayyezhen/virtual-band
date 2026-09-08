@@ -1,91 +1,92 @@
 # SF2 Audio Engine
 
-This document describes the SoundFont path used by the V2 runtime on `experiment/sf2-backend`.
-
-The native SF2 path is an experiment branch feature. `architecture-v2` remains unchanged while this backend is evaluated.
+This document describes the native TypeScript/Web Audio SoundFont 2 path on `experiment/sf2-backend`. The branch keeps the V2 ownership rules intact: 3D instrument adapters emit musical intent, samplers own instrument semantics, and the SF2 engine remains an audio backend rather than leaking into donor geometry or UI code.
 
 ## Runtime boundary
 
-`Sf2BankLibrary` owns SoundFont fetch/parse/cache. It is shared by the composition root, but it does not own synthesizer state.
-
-Each instrument owns its own backend and therefore its own independent synth state:
-
-- drums: `Sf2ProgramBackend`, bank 128 program 0;
-- electric guitar: `Sf2ProgramBackend`, bank 0;
-- acoustic guitar: `Sf2ProgramBackend`, bank 0;
-- keyboard: `Sf2KeyboardBackend`;
-- violin: `Sf2ViolinBackend`.
-
-`SampleLibrary` remains the sole MP3 fetch/decode/cache layer. SF2 bytes never enter `SampleLibrary`.
-
-## Voice signal path
-
-Each SF2 region voice is built as:
-
 ```text
-sample source
-  -> low-pass filter
-  -> LFO gain stage
-  -> volume-envelope gain
-  -> stereo pan
-  -> caller destination or synth output bus
+3D Instrument / MIDI
+        ↓
+Instrument sampler
+        ↓
+ProgramToneBackend / ViolinSustainBackend
+        ↓
+Performance profile
+        ↓
+Sf2Synth
+├── Sf2Envelope
+├── Sf2Filter
+├── Sf2Modulation
+├── Sf2Parser
+└── Sf2BankLibrary
+        ↓
+AudioEngine / Web Audio
 ```
 
-The source pitch can also be modulated by:
+`Sf2BankLibrary` owns shared fetch/parse work for the 148 MB `FluidR3_GM.sf2` bank. Individual instrument backends own independent `Sf2Synth` state, so program, sustain, pitch bend and voices do not bleed between instruments.
 
-- tuning generators;
-- pitch bend;
-- modulation envelope -> pitch;
-- modulation LFO -> pitch;
-- vibrato LFO -> pitch.
+`SampleLibrary` remains the MP3 fallback path. SF2 is not stored inside `SampleLibrary` because decoded MP3 sample caching and SoundFont preset/zone/sample semantics are different responsibilities.
 
-Filter cutoff can be modulated by the modulation envelope and modulation LFO. Volume can be modulated by the modulation LFO.
+## Implemented SoundFont semantics
 
-## Generator semantics
+The current parser/synth implements the following high-value SF2 behavior:
 
-The parser applies generator accumulation at the SoundFont hierarchy boundary:
+- RIFF `sfbk`, `sdta/smpl`, preset and instrument zone parsing;
+- preset-global/local and instrument-global/local generator composition;
+- key and velocity ranges;
+- sample start/end/loop offsets and sample loop modes 1/3;
+- root key, scale tuning, coarse/fine tuning and sample pitch correction;
+- bank/program selection;
+- initial attenuation and pan;
+- volume delay/attack/hold/decay/sustain/release;
+- `keynumToVolEnvHold` and `keynumToVolEnvDecay`;
+- `initialFilterFc`, `initialFilterQ` and `modEnvToFilterFc`;
+- modulation-envelope delay/attack/hold/decay/sustain/release;
+- `keynumToModEnvHold` and `keynumToModEnvDecay`;
+- modulation envelope to pitch (`modEnvToPitch`);
+- modulation LFO to pitch/filter/volume;
+- vibrato LFO to pitch;
+- LFO delay and frequency generators;
+- default Note-On velocity to initial attenuation behavior;
+- sustain pedal and pitch bend;
+- `exclusiveClass` voice choking, including GM hi-hat behavior.
 
-- local zones override their matching global zones;
-- key/velocity ranges intersect;
-- instrument generators establish absolute region values;
-- preset generators are additive offsets where SoundFont allows them;
-- illegal preset-level operators are ignored;
-- default generator values are applied before accumulation.
+## Volume-envelope model
 
-The current parser exposes the generator subset needed by envelope, filter, tuning, looping, pan, attenuation, exclusive class and LFO execution.
+SoundFont volume decay/release is treated as attenuation changing at a constant dB rate, not linear Web Audio gain. The engine uses a -96 dB effective silence floor for the SF2 volume envelope.
 
-## Volume envelope
+For example, if a region has a nominal 1 second decay time but its sustain attenuation is 12 dB, the audible decay stage uses 12/96 = 12.5% of that nominal time. Web Audio gain automation uses an exponential ramp so the amplitude curve follows the constant-dB envelope.
 
-SoundFont volume envelopes are handled in the dB domain where the silence floor is 960 cB = -96 dB.
+When Note Off arrives during attack/hold/decay, the engine reconstructs the current envelope level before starting release. Release duration is shortened according to how much of the 96 dB attenuation range has already been traversed.
 
-Implemented stages:
+## Filter and modulation-envelope model
 
-- delay;
-- attack;
-- hold;
-- decay;
-- sustain;
-- release.
+Each SF2 region can insert a Web Audio low-pass filter before its volume envelope:
 
-Hold/decay support key-number timecents tracking. Decay is interpreted as the full-scale 96 dB decay time, then shortened to the actual sustain attenuation. Release reconstructs the current envelope level at Note Off so a note released halfway through attack/decay does not restart from full level.
+```text
+AudioBufferSource
+      ↓
+SF2 low-pass filter
+      ↓
+LFO volume stage
+      ↓
+volume envelope
+      ↓
+pan
+      ↓
+instrument destination / AudioEngine bus
+```
 
-Loop mode 3 stops looping when release begins; loop mode 1 continues through release.
+`initialFilterFc` is converted from absolute cents to Hz. `initialFilterQ` is converted from centibels to dB for Web Audio resonance. The shared modulation envelope can drive both filter cutoff and sample pitch. Filter cutoff modulation uses `BiquadFilterNode.detune`; pitch modulation uses `AudioBufferSourceNode.detune`.
 
-## Filter
+The modulation envelope has delay/attack/hold/decay/sustain/release and key-dependent hold/decay timing. Note Off reconstructs the current envelope level before releasing back toward the static value.
 
-Each region gets a low-pass `BiquadFilterNode` from:
+## Internal LFO behavior
 
-- `initialFilterFc`;
-- `initialFilterQ`;
-- performance-profile brightness offset;
-- performance-profile velocity brightness;
-- modulation envelope -> cutoff.
+SoundFont defines two triangular low-frequency oscillators:
 
-Filter-envelope release reconstructs the current cutoff-envelope position before returning toward the static cutoff.
-
-`modLfoToFilterFc` is now executed by the internal modulation layer described below.
-
-## Internal modulation and LFOs
+- Modulation LFO: can drive pitch, filter cutoff and volume;
+- Vibrato LFO: drives pitch.
 
 The engine now parses and executes:
 
@@ -128,13 +129,11 @@ Per-note options can add temporary offsets on top of the active profile.
 
 ## Plucked-string lifecycle
 
-Acoustic- and electric-guitar browser interactions are treated as physical pluck impulses, not keyboard-style gates. A pointer or computer-key press produces the strike; releasing that input only releases the donor's held/fingering visual state. The audio voice keeps its natural decay ceiling instead of receiving an immediate Note Off.
+Acoustic- and electric-guitar browser interactions are treated as physical pluck impulses, not indefinitely held keyboard keys. A pointer or computer-key press produces the strike; releasing that input only releases the donor's held/fingering visual state. The audio voice keeps its natural decay ceiling instead of receiving an immediate Note Off.
 
-Strums use the same impulse lifecycle. The frozen donors still schedule visible string strikes; the instrument adapters tag those later `onHit` events as `strum` gestures, while direct `pluck()` calls are tagged separately as `pluck` gestures. Both receive finite SF2 auto-release ceilings.
+Strums use the same impulse lifecycle. The frozen donors still schedule visible string strikes; the instrument adapters tag those later `onHit` events as `strum` gestures, while direct `pluck()` calls are tagged as `pluck` gestures. Both receive finite SF2 auto-release ceilings.
 
-MIDI Note On / Note Off remains gated. This distinction is intentional: imported/device MIDI retains explicit note-duration semantics, while manual guitar picking models the fact that the hand leaves the string immediately after the excitation.
-
-Retriggering the same physical string quickly chokes its previous voice. Explicit muting (`muteString`, panic/reset, All Notes Off, or a new chord/strum preparation) can also damp an impulse voice. Program-specific ring ceilings remain a performance policy and do not rewrite SoundFont envelopes.
+MIDI Note On / Note Off remains gated. Retriggering the same physical string quickly chokes its previous voice, while explicit muting (`muteString`, panic/reset, All Notes Off, or strum preparation) can damp an impulse voice immediately. Program-specific ring ceilings remain a performance policy and do not rewrite SoundFont envelopes.
 
 ## MIDI controller boundary
 
@@ -183,4 +182,10 @@ npm run build
 npm run sf2:verify
 ```
 
-The parser verifier checks real FluidR3 presets plus synthetic envelope/filter/modulation math.
+`sf2:verify` checks real FluidR3 preset/region resolution across violin, piano, Warm Pad, acoustic/electric guitars and percussion. It validates volume-envelope math, filter conversion math, modulation-envelope metadata, LFO generator metadata/frequency conversion, default velocity attenuation, sustain loops and hi-hat exclusive classes.
+
+Listening validation should include long violin/Pad holds, piano decay, direct guitar plucks, repeated guitar strums, guitar harmonics/palm mute, hi-hat choke, velocity contrast, patches with vibrato/tremolo and sustain-pedal release.
+
+## Next compatibility work
+
+The next major layer is the external controller/modulator graph. It should be built beneath the same backend boundary and map MIDI CC/aftertouch/RPN sources onto existing pitch, gain, filter and LFO parameters rather than creating instrument-specific controller code in 3D adapters.
