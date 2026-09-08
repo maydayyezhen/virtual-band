@@ -3,6 +3,7 @@ import type { ViolinSampler } from '../../audio/ViolinSampler';
 import type { Instrument, InstrumentFrameResult, InstrumentInteraction } from '../Instrument';
 import {
   applyFingeringMarkerStyle,
+  createFingeringPreviewMarker,
   FINGERING_MARKER_STYLES,
 } from '../shared/FingeringMarkerStyle';
 import { StringFingeringState, type StringFingeringValue } from '../shared/StringFingeringState';
@@ -40,6 +41,8 @@ export class ViolinInstrument implements Instrument {
   private readonly interactionVoices = new Map<string, InteractionVoice>();
   private readonly releaseTails = new Map<number, VisualReleaseTail>();
   private readonly fingeringState = new StringFingeringState(STRING_ORDER, 24);
+  private readonly previewMarker: THREE.Mesh;
+  private fingeringPreview: { stringNumber: number; semitones: number } | null = null;
 
   private constructor(
     model: LegacyViolinModel,
@@ -51,6 +54,11 @@ export class ViolinInstrument implements Instrument {
     this.sampler = sampler;
     this.root = model.root;
     this.root.userData.instrumentId = this.id;
+    const markerSource = [...this.model.strings.values()][0]?.marker;
+    if (!markerSource) throw new Error('Violin has no fingering marker source');
+    this.previewMarker = createFingeringPreviewMarker(markerSource, 'Violin fingering hover preview');
+    this.root.add(this.previewMarker);
+    for (const string of this.model.strings.values()) string.marker.raycast = () => {};
     this.syncFingeringMarkers();
   }
 
@@ -170,7 +178,6 @@ export class ViolinInstrument implements Instrument {
     const result = this.controller.tick(dt);
     const releaseMoved = this.syncReleaseTailVisuals(dt);
     this.syncFingeringMarkers();
-    applyFingeringMarkerStyle(this.model.strings.values(), FINGERING_MARKER_STYLES.violin);
     return {
       moved: result.moved || releaseMoved,
       animating: result.animating || this.releaseTails.size > 0,
@@ -182,6 +189,7 @@ export class ViolinInstrument implements Instrument {
     this.controller.api.panic();
     this.sampler.reset();
     this.interactionVoices.clear();
+    this.fingeringPreview = null;
     this.clearFingering();
   }
 
@@ -269,6 +277,19 @@ export class ViolinInstrument implements Instrument {
     return true;
   }
 
+  previewInteraction(partId: string | null): void {
+    const match = partId ? /^finger:([1-4]):(\d{1,2})$/.exec(partId) : null;
+    const next = match
+      ? { stringNumber: Number(match[1]), semitones: Number(match[2]) }
+      : null;
+    if (
+      this.fingeringPreview?.stringNumber === next?.stringNumber
+      && this.fingeringPreview?.semitones === next?.semitones
+    ) return;
+    this.fingeringPreview = next;
+    this.syncFingeringMarkers();
+  }
+
   dispose(): void {
     this.reset();
     this.root.removeFromParent();
@@ -347,17 +368,39 @@ export class ViolinInstrument implements Instrument {
   private syncFingeringMarkers(): void {
     for (const string of this.model.strings.values()) {
       const semitones = this.fingeringState.get(string.number);
-      if (semitones === null || semitones <= 0) {
-        string.marker.visible = false;
-        continue;
-      }
-
-      const y = this.model.bridgeY + this.model.scale * 2 ** (-semitones / 12);
-      const point = this.controller.stringPoint(string, y, false);
-      point.z += 0.018;
-      string.marker.position.copy(point);
-      string.marker.visible = true;
+      const visible = semitones !== null && semitones > 0 && semitones <= 24;
+      if (visible) string.marker.position.copy(this.stoppedMarkerPoint(string.number, semitones));
+      applyFingeringMarkerStyle(
+        string.marker,
+        FINGERING_MARKER_STYLES.violin,
+        { visible, preview: false, attack: string.energy },
+      );
     }
+
+    const preview = this.fingeringPreview;
+    const committed = preview ? this.fingeringState.get(preview.stringNumber) : 0;
+    const visible = Boolean(
+      preview
+      && preview.semitones > 0
+      && preview.semitones <= 24
+      && committed !== preview.semitones
+      && this.model.strings.has(preview.stringNumber)
+    );
+    if (visible && preview) {
+      this.previewMarker.position.copy(this.stoppedMarkerPoint(preview.stringNumber, preview.semitones));
+    }
+    applyFingeringMarkerStyle(
+      this.previewMarker,
+      FINGERING_MARKER_STYLES.violin,
+      { visible, preview: true },
+    );
+  }
+
+  private stoppedMarkerPoint(stringNumber: number, semitones: number): THREE.Vector3 {
+    const string = this.model.strings.get(stringNumber);
+    if (!string) return new THREE.Vector3();
+    const y = this.model.bridgeY + this.model.scale * 2 ** (-semitones / 12);
+    return this.controller.stringPoint(string, y, false).add(new THREE.Vector3(0, 0, 0.018));
   }
 
   /**

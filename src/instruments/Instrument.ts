@@ -32,6 +32,11 @@ export interface Instrument {
    */
   resolveHit?(intersection: THREE.Intersection): string | null;
   interact?(interaction: InstrumentInteraction): boolean;
+  /**
+   * Optional transient interaction preview. This must not mutate musical state;
+   * it only projects the currently hoverable target into instrument visuals.
+   */
+  previewInteraction?(partId: string | null): void;
   dispose(): void;
 }
 

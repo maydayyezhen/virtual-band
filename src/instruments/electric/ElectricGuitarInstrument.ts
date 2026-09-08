@@ -8,6 +8,7 @@ import {
 import type { Instrument, InstrumentFrameResult, InstrumentInteraction } from '../Instrument';
 import {
   applyFingeringMarkerStyle,
+  createFingeringPreviewMarker,
   FINGERING_MARKER_STYLES,
 } from '../shared/FingeringMarkerStyle';
 import { StringFingeringState, type StringFingeringValue } from '../shared/StringFingeringState';
@@ -38,6 +39,8 @@ export class ElectricGuitarInstrument implements Instrument {
   private readonly sampler: ElectricGuitarSampler;
   private readonly interactionVoices = new Map<string, InteractionVoice>();
   private readonly fingeringState = new StringFingeringState(STRING_ORDER, 22);
+  private readonly previewMarker: THREE.Mesh;
+  private fingeringPreview: { stringNumber: number; fret: number } | null = null;
   private pendingStrumHits: number[] = [];
   private pendingDirectPluckString: number | null = null;
 
@@ -51,6 +54,11 @@ export class ElectricGuitarInstrument implements Instrument {
     this.sampler = sampler;
     this.root = model.root;
     this.root.userData.instrumentId = this.id;
+    const markerSource = [...this.model.strings.values()][0]?.marker;
+    if (!markerSource) throw new Error('Electric guitar has no fingering marker source');
+    this.previewMarker = createFingeringPreviewMarker(markerSource, 'Electric fingering hover preview');
+    this.root.add(this.previewMarker);
+    for (const string of this.model.strings.values()) string.marker.raycast = () => {};
     this.syncFingeringMarkers();
   }
 
@@ -201,7 +209,6 @@ export class ElectricGuitarInstrument implements Instrument {
   update(dt: number): InstrumentFrameResult {
     const result = this.controller.tick(dt);
     this.syncFingeringMarkers();
-    applyFingeringMarkerStyle(this.model.strings.values(), FINGERING_MARKER_STYLES.electricGuitar);
     return result;
   }
 
@@ -211,6 +218,7 @@ export class ElectricGuitarInstrument implements Instrument {
     this.interactionVoices.clear();
     this.pendingStrumHits = [];
     this.pendingDirectPluckString = null;
+    this.fingeringPreview = null;
     this.clearFingering();
   }
 
@@ -314,6 +322,19 @@ export class ElectricGuitarInstrument implements Instrument {
     return true;
   }
 
+  previewInteraction(partId: string | null): void {
+    const match = partId ? /^fret:([1-6]):(\d{1,2})$/.exec(partId) : null;
+    const next = match
+      ? { stringNumber: Number(match[1]), fret: Number(match[2]) }
+      : null;
+    if (
+      this.fingeringPreview?.stringNumber === next?.stringNumber
+      && this.fingeringPreview?.fret === next?.fret
+    ) return;
+    this.fingeringPreview = next;
+    this.syncFingeringMarkers();
+  }
+
   dispose(): void {
     this.reset();
     this.root.removeFromParent();
@@ -351,21 +372,43 @@ export class ElectricGuitarInstrument implements Instrument {
     const lastFret = Math.min(22, this.model.frets.length - 1);
     for (const string of this.model.strings.values()) {
       const fret = this.fingeringState.get(string.number);
-      if (fret === null || fret <= 0 || fret > lastFret) {
-        string.marker.visible = false;
-        continue;
-      }
-
-      const y = (this.model.frets[fret - 1] + this.model.frets[fret]) * 0.5;
-      const denominator = string.nut.y - string.saddle.y;
-      const t = denominator === 0
-        ? 0
-        : THREE.MathUtils.clamp((y - string.saddle.y) / denominator, 0, 1);
-      const point = string.saddle.clone().lerp(string.nut, t);
-      point.z += 0.024;
-      string.marker.position.copy(point);
-      string.marker.visible = true;
+      const visible = fret !== null && fret > 0 && fret <= lastFret;
+      if (visible) string.marker.position.copy(this.fretMarkerPoint(string.number, fret));
+      applyFingeringMarkerStyle(
+        string.marker,
+        FINGERING_MARKER_STYLES.electricGuitar,
+        { visible, preview: false, attack: string.energy },
+      );
     }
+
+    const preview = this.fingeringPreview;
+    const committed = preview ? this.fingeringState.get(preview.stringNumber) : 0;
+    const visible = Boolean(
+      preview
+      && preview.fret > 0
+      && preview.fret <= lastFret
+      && committed !== preview.fret
+      && this.model.strings.has(preview.stringNumber)
+    );
+    if (visible && preview) {
+      this.previewMarker.position.copy(this.fretMarkerPoint(preview.stringNumber, preview.fret));
+    }
+    applyFingeringMarkerStyle(
+      this.previewMarker,
+      FINGERING_MARKER_STYLES.electricGuitar,
+      { visible, preview: true },
+    );
+  }
+
+  private fretMarkerPoint(stringNumber: number, fret: number): THREE.Vector3 {
+    const string = this.model.strings.get(stringNumber);
+    if (!string) return new THREE.Vector3();
+    const y = (this.model.frets[fret - 1] + this.model.frets[fret]) * 0.5;
+    const denominator = string.nut.y - string.saddle.y;
+    const t = denominator === 0
+      ? 0
+      : THREE.MathUtils.clamp((y - string.saddle.y) / denominator, 0, 1);
+    return string.saddle.clone().lerp(string.nut, t).add(new THREE.Vector3(0, 0, 0.024));
   }
 }
 

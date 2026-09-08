@@ -12,6 +12,7 @@ export class InstrumentInteractionSystem {
   private readonly instruments: InstrumentRegistry;
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
+  private previewHit: InstrumentHit | null = null;
 
   constructor(options: {
     element: HTMLCanvasElement;
@@ -21,6 +22,9 @@ export class InstrumentInteractionSystem {
     this.element = options.element;
     this.camera = options.camera;
     this.instruments = options.instruments;
+    this.element.addEventListener('pointermove', this.onPreviewPointerMove);
+    this.element.addEventListener('pointerdown', this.onPreviewPointerDown);
+    this.element.addEventListener('pointerleave', this.onPreviewPointerLeave);
   }
 
   hitTest(clientX: number, clientY: number, instrumentId?: string): InstrumentHit | null {
@@ -83,7 +87,34 @@ export class InstrumentInteractionSystem {
     });
   }
 
-  dispose(): void {}
+  dispose(): void {
+    this.element.removeEventListener('pointermove', this.onPreviewPointerMove);
+    this.element.removeEventListener('pointerdown', this.onPreviewPointerDown);
+    this.element.removeEventListener('pointerleave', this.onPreviewPointerLeave);
+    this.setPreview(null);
+  }
+
+  private readonly onPreviewPointerMove = (event: PointerEvent): void => {
+    if (event.pointerType === 'touch' || event.buttons !== 0) return;
+    this.setPreview(this.hitTest(event.clientX, event.clientY));
+  };
+
+  private readonly onPreviewPointerDown = (): void => this.setPreview(null);
+  private readonly onPreviewPointerLeave = (): void => this.setPreview(null);
+
+  private setPreview(hit: InstrumentHit | null): void {
+    if (
+      this.previewHit?.instrumentId === hit?.instrumentId
+      && this.previewHit?.partId === hit?.partId
+    ) return;
+
+    if (this.previewHit) {
+      this.instruments.get(this.previewHit.instrumentId)?.previewInteraction?.(null);
+    }
+
+    this.previewHit = hit;
+    if (hit) this.instruments.get(hit.instrumentId)?.previewInteraction?.(hit.partId);
+  }
 }
 
 function isRenderedVisible(object: THREE.Object3D): boolean {
