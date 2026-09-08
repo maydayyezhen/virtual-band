@@ -35,6 +35,7 @@ export class ElectricGuitarInstrument implements Instrument {
   private readonly sampler: ElectricGuitarSampler;
   private readonly interactionVoices = new Map<string, InteractionVoice>();
   private pendingStrumHits: number[] = [];
+  private pendingDirectPluckString: number | null = null;
 
   private constructor(
     model: LegacyElectricModel,
@@ -71,7 +72,12 @@ export class ElectricGuitarInstrument implements Instrument {
   }
 
   pluck(stringNumber: number, velocity = 100, fret = 0): LegacyElectricHitEvent | false {
-    return this.controller.api.pluck(stringNumber, velocity, fret);
+    this.pendingDirectPluckString = stringNumber;
+    try {
+      return this.controller.api.pluck(stringNumber, velocity, fret);
+    } finally {
+      this.pendingDirectPluckString = null;
+    }
   }
 
   strum(
@@ -86,7 +92,7 @@ export class ElectricGuitarInstrument implements Instrument {
     }
 
     for (let stringNumber = 1; stringNumber <= 6; stringNumber += 1) {
-      this.sampler.noteOff(stringNumber);
+      this.sampler.muteString(stringNumber, 0.04);
     }
     this.pendingStrumHits = strumStringOrder(frets, direction);
     return true;
@@ -135,7 +141,7 @@ export class ElectricGuitarInstrument implements Instrument {
     else if (cc === 74) this.sampler.setTone(value / 127);
     else if (cc === 120) this.sampler.reset();
     else if (cc === 123) {
-      for (const stringNumber of activeBefore) this.sampler.noteOff(stringNumber);
+      for (const stringNumber of activeBefore) this.sampler.muteString(stringNumber, 0.04);
     } else if (cc === 121) {
       this.sampler.setSustain(false);
       this.sampler.setPitchBend(0);
@@ -158,6 +164,7 @@ export class ElectricGuitarInstrument implements Instrument {
     this.sampler.reset();
     this.interactionVoices.clear();
     this.pendingStrumHits = [];
+    this.pendingDirectPluckString = null;
   }
 
   resolveHit(intersection: THREE.Intersection): string | null {
@@ -229,6 +236,9 @@ export class ElectricGuitarInstrument implements Instrument {
       if (!voice) return true;
       this.interactionVoices.delete(partId);
       this.controller.api.noteOff(voice.note);
+      // Direct pointer/keyboard plucks are impulses. Releasing the input only
+      // clears the held visual state; the sampler keeps the plucked string's
+      // natural decay until it ends, is re-plucked, or is explicitly muted.
       this.sampler.noteOff(voice.stringNumber);
       return true;
     }
@@ -280,7 +290,9 @@ export class ElectricGuitarInstrument implements Instrument {
   private playAudio(event: LegacyElectricHitEvent): void {
     const strum = this.pendingStrumHits[0] === event.string;
     if (strum) this.pendingStrumHits.shift();
-    this.sampler.noteOn(event.string, event.note, event.velocity, strum ? 'strum' : 'gated');
+    const directPluck = this.pendingDirectPluckString === event.string;
+    const gesture = strum ? 'strum' : directPluck ? 'pluck' : 'gated';
+    this.sampler.noteOn(event.string, event.note, event.velocity, gesture);
   }
 }
 
