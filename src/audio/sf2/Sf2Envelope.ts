@@ -1,6 +1,6 @@
 import type { Sf2Region } from './Sf2Parser';
 
-export const SF2_SILENCE_CENTIBELS = 1000;
+export const SF2_SILENCE_CENTIBELS = 960;
 export const SF2_SILENCE_GAIN = 10 ** (-SF2_SILENCE_CENTIBELS / 200);
 
 export interface Sf2VolumeEnvelopePlan {
@@ -46,8 +46,8 @@ export function buildSf2VolumeEnvelopePlan(
   return {
     attackSeconds: timecentsToSeconds(region.attackVolEnv),
     holdSeconds: timecentsToSeconds(holdTimecents),
-    // SoundFont decay time is defined for a full 100 dB envelope change.
-    // A sustain attenuation of e.g. 120 cB (-12 dB) therefore uses 12%
+    // SoundFont decay time is defined for a full 96 dB envelope change.
+    // A sustain attenuation of e.g. 120 cB (-12 dB) therefore uses 12.5%
     // of the declared decay time.
     decaySeconds:
       decaySecondsForFullAttenuation

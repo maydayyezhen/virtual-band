@@ -141,19 +141,19 @@ function verifyEnvelopeMath() {
   const lowC = buildSf2VolumeEnvelopePlan(synthetic, 36);
 
   assertApprox(middleC.holdSeconds, 0.01, 0.0002, 'middle-C hold');
-  assertApprox(middleC.decaySeconds, 0.12, 0.0002, '12 dB decay duration');
+  assertApprox(middleC.decaySeconds, 0.125, 0.0002, '12 dB decay duration');
   assertApprox(lowC.holdSeconds, 0.02, 0.0004, 'key-tracked low-C hold');
-  assertApprox(lowC.decaySeconds, 0.24, 0.0004, 'key-tracked low-C decay');
+  assertApprox(lowC.decaySeconds, 0.25, 0.0004, 'key-tracked low-C decay');
 
   const halfDecayGain = decayGainFactor(120, 0.5);
   assertApprox(halfDecayGain, 10 ** (-6 / 20), 0.000001, 'constant-dB decay curve');
 
-  const minus50DbGain = 10 ** (-50 / 20);
+  const minus48DbGain = 10 ** (-48 / 20);
   assertApprox(
-    releaseDurationSeconds(1, minus50DbGain, 1),
+    releaseDurationSeconds(1, minus48DbGain, 1),
     0.5,
     0.000001,
-    'release duration from -50 dB',
+    'release duration from -48 dB',
   );
 }
 
