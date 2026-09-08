@@ -29,11 +29,15 @@ interface VoiceState {
 }
 
 interface ToneChain {
+  readonly program: ElectricGuitarProgramId;
   input: BiquadFilterNode;
   pickupLow: BiquadFilterNode;
   pickupHigh: BiquadFilterNode;
-  tone: BiquadFilterNode;
+  toneFilter: BiquadFilterNode;
   bus: AudioBus;
+  pickup: ElectricPickupPosition;
+  tone: number;
+  volume: number;
 }
 
 const STRUM_PROFILE: Readonly<Record<
@@ -65,13 +69,13 @@ export class ElectricGuitarSampler {
   private readonly samples: SampleLibrary;
   private readonly toneBackend: ProgramToneBackend | null;
   private readonly voices = new Map<number, VoiceState>();
+  private readonly toneChains = new Map<ElectricGuitarProgramId, ToneChain>();
   private sustain = false;
   private volume = DEFAULT_PRESET.volume;
   private tone = DEFAULT_PRESET.tone;
   private pickup: ElectricPickupPosition = DEFAULT_PRESET.pickup;
   private programId: ElectricGuitarProgramId = DEFAULT_ELECTRIC_GUITAR_PROGRAM;
   private pitchBend = 0;
-  private toneChain: ToneChain | null = null;
 
   constructor(
     audio: AudioEngine,
@@ -163,13 +167,25 @@ export class ElectricGuitarSampler {
   setProgram(value: number): boolean {
     const preset = getElectricGuitarProgram(value);
     if (!preset) return false;
+
     this.programId = preset.id;
     this.toneBackend?.setProgram(preset.id, 0);
     this.toneBackend?.setPerformanceProfile(PERFORMANCE_PROFILE[preset.id]);
-    this.pickup = preset.pickup;
-    this.tone = preset.tone;
-    this.volume = preset.volume;
-    this.updateToneChain();
+
+    const existingChain = this.toneChains.get(preset.id);
+    if (existingChain) {
+      // Program changes only select the processing chain for future notes. Existing
+      // tails keep flowing through the chain they were born into, so switching
+      // patches cannot recolor or re-level notes that are already ringing.
+      this.pickup = existingChain.pickup;
+      this.tone = existingChain.tone;
+      this.volume = existingChain.volume;
+    } else {
+      this.pickup = preset.pickup;
+      this.tone = preset.tone;
+      this.volume = preset.volume;
+    }
+
     void this.preloadProgram(preset.id);
     return true;
   }
@@ -177,14 +193,22 @@ export class ElectricGuitarSampler {
   setPickup(value: number): boolean {
     if (!Number.isInteger(value) || value < 0 || value > 2) return false;
     this.pickup = value as ElectricPickupPosition;
-    this.updateToneChain();
+    const chain = this.toneChains.get(this.programId);
+    if (chain) {
+      chain.pickup = this.pickup;
+      this.updateToneChain(chain);
+    }
     return true;
   }
 
   setTone(value: number): boolean {
     if (!Number.isFinite(value) || value < 0 || value > 1) return false;
     this.tone = value;
-    this.updateToneChain();
+    const chain = this.toneChains.get(this.programId);
+    if (chain) {
+      chain.tone = this.tone;
+      this.updateToneChain(chain);
+    }
     return true;
   }
 
@@ -211,7 +235,11 @@ export class ElectricGuitarSampler {
 
   setVolume(value: number): void {
     this.volume = clamp01(value);
-    this.toneChain?.bus.setGain(this.outputGain(), 0.025);
+    const chain = this.toneChains.get(this.programId);
+    if (chain) {
+      chain.volume = this.volume;
+      chain.bus.setGain(this.outputGain(chain), 0.025);
+    }
   }
 
   preloadCommon(): Promise<void> {
@@ -241,21 +269,17 @@ export class ElectricGuitarSampler {
   dispose(): void {
     this.reset();
     this.toneBackend?.dispose();
-    const chain = this.toneChain;
-    this.toneChain = null;
-    if (!chain) return;
-    chain.pickupLow.disconnect();
-    chain.pickupHigh.disconnect();
-    chain.tone.disconnect();
-    chain.bus.disconnect();
+    for (const chain of this.toneChains.values()) this.disposeToneChain(chain);
+    this.toneChains.clear();
   }
 
-  private outputGain(): number {
-    return this.volume * mixGain('electric', this.programId);
+  private outputGain(chain: ToneChain): number {
+    return chain.volume * mixGain('electric', chain.program);
   }
 
   private ensureToneChain(): ToneChain {
-    if (this.toneChain) return this.toneChain;
+    const existing = this.toneChains.get(this.programId);
+    if (existing) return existing;
 
     const context = this.audio.getContext();
     const pickupLow = context.createBiquadFilter();
@@ -266,28 +290,29 @@ export class ElectricGuitarSampler {
     pickupHigh.type = 'highshelf';
     pickupHigh.frequency.value = 2600;
 
-    const tone = context.createBiquadFilter();
-    tone.type = 'lowpass';
-    tone.Q.value = 0.48;
+    const toneFilter = context.createBiquadFilter();
+    toneFilter.type = 'lowpass';
+    toneFilter.Q.value = 0.48;
 
-    const bus = this.audio.createBus(this.outputGain());
-    pickupLow.connect(pickupHigh).connect(tone).connect(bus.input);
-
-    this.toneChain = {
+    const chain: ToneChain = {
+      program: this.programId,
       input: pickupLow,
       pickupLow,
       pickupHigh,
-      tone,
-      bus,
+      toneFilter,
+      bus: this.audio.createBus(1),
+      pickup: this.pickup,
+      tone: this.tone,
+      volume: this.volume,
     };
-    this.updateToneChain();
-    return this.toneChain;
+    pickupLow.connect(pickupHigh).connect(toneFilter).connect(chain.bus.input);
+
+    this.toneChains.set(this.programId, chain);
+    this.updateToneChain(chain);
+    return chain;
   }
 
-  private updateToneChain(): void {
-    const chain = this.toneChain;
-    if (!chain) return;
-
+  private updateToneChain(chain: ToneChain): void {
     const context = this.audio.getContext();
     const now = context.currentTime;
     const pickupProfiles = [
@@ -295,14 +320,21 @@ export class ElectricGuitarSampler {
       { low: 0.5, high: -1.0 },
       { low: -1.4, high: 3.6 },
     ] as const;
-    const profile = pickupProfiles[this.pickup];
+    const profile = pickupProfiles[chain.pickup];
     const maxCutoff = Math.min(18000, context.sampleRate * 0.45);
-    const cutoff = Math.min(maxCutoff, 900 + this.tone * this.tone * 16500);
+    const cutoff = Math.min(maxCutoff, 900 + chain.tone * chain.tone * 16500);
 
     rampParam(chain.pickupLow.gain, profile.low, now, 0.025);
     rampParam(chain.pickupHigh.gain, profile.high, now, 0.025);
-    rampParam(chain.tone.frequency, cutoff, now, 0.025);
-    chain.bus.setGain(this.outputGain(), 0.025);
+    rampParam(chain.toneFilter.frequency, cutoff, now, 0.025);
+    chain.bus.setGain(this.outputGain(chain), 0.025);
+  }
+
+  private disposeToneChain(chain: ToneChain): void {
+    chain.pickupLow.disconnect();
+    chain.pickupHigh.disconnect();
+    chain.toneFilter.disconnect();
+    chain.bus.disconnect();
   }
 
   private stopString(stringNumber: number, fadeSeconds: number): void {
