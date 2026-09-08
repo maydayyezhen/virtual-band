@@ -34,6 +34,7 @@ export class AcousticGuitarInstrument implements Instrument {
   private readonly sampler: AcousticGuitarSampler;
   private readonly interactionVoices = new Map<string, InteractionVoice>();
   private pendingStrumHits: number[] = [];
+  private pendingDirectPluckString: number | null = null;
 
   private constructor(
     model: LegacyAcousticModel,
@@ -70,7 +71,12 @@ export class AcousticGuitarInstrument implements Instrument {
   }
 
   pluck(stringNumber: number, velocity = 100, fret = 0): LegacyAcousticHitEvent | false {
-    return this.controller.api.pluck(stringNumber, velocity, fret);
+    this.pendingDirectPluckString = stringNumber;
+    try {
+      return this.controller.api.pluck(stringNumber, velocity, fret);
+    } finally {
+      this.pendingDirectPluckString = null;
+    }
   }
 
   strum(
@@ -84,11 +90,11 @@ export class AcousticGuitarInstrument implements Instrument {
       return false;
     }
 
-    // The donor emits the six strikes later from tick(). Stop the previous
-    // physical-string voices now, then tag those pending hits as an impulse
-    // strum so the audio backend can give them a finite natural lifecycle.
+    // The donor emits the six strikes later from tick(). Explicitly damp the
+    // previous physical-string voices now, then tag those delayed hits as
+    // impulses so each new strike gets its own natural decay lifecycle.
     for (let stringNumber = 1; stringNumber <= 6; stringNumber += 1) {
-      this.sampler.noteOff(stringNumber);
+      this.sampler.muteString(stringNumber, 0.04);
     }
     this.pendingStrumHits = strumStringOrder(frets, direction);
     return true;
@@ -129,7 +135,7 @@ export class AcousticGuitarInstrument implements Instrument {
     if (cc === 64) this.sampler.setSustain(value >= 64);
     else if (cc === 120) this.sampler.reset();
     else if (cc === 123) {
-      for (const stringNumber of activeBefore) this.sampler.noteOff(stringNumber);
+      for (const stringNumber of activeBefore) this.sampler.muteString(stringNumber, 0.04);
     } else if (cc === 121) {
       this.sampler.setSustain(false);
       this.sampler.setPitchBend(0);
@@ -152,6 +158,7 @@ export class AcousticGuitarInstrument implements Instrument {
     this.sampler.reset();
     this.interactionVoices.clear();
     this.pendingStrumHits = [];
+    this.pendingDirectPluckString = null;
   }
 
   resolveHit(intersection: THREE.Intersection): string | null {
@@ -205,6 +212,9 @@ export class AcousticGuitarInstrument implements Instrument {
       if (!voice) return true;
       this.interactionVoices.delete(partId);
       this.controller.api.noteOff(voice.note);
+      // Manual plucks are impulses: pointer/key release only releases the visual
+      // fingering state. AcousticGuitarSampler.noteOff intentionally ignores the
+      // impulse voice so the string can keep decaying naturally.
       this.sampler.noteOff(voice.stringNumber);
       return true;
     }
@@ -257,7 +267,9 @@ export class AcousticGuitarInstrument implements Instrument {
   private playAudio(event: LegacyAcousticHitEvent): void {
     const strum = this.pendingStrumHits[0] === event.string;
     if (strum) this.pendingStrumHits.shift();
-    this.sampler.noteOn(event.string, event.note, event.velocity, strum ? 'strum' : 'gated');
+    const directPluck = this.pendingDirectPluckString === event.string;
+    const gesture = strum ? 'strum' : directPluck ? 'pluck' : 'gated';
+    this.sampler.noteOn(event.string, event.note, event.velocity, gesture);
   }
 }
 
