@@ -45,9 +45,6 @@ export class InstrumentInteractionSystem {
     this.camera.updateMatrixWorld(true);
     this.raycaster.setFromCamera(this.pointer, this.camera);
 
-    // Preserve donor behavior: only the nearest *rendered* surface may resolve as a
-    // playable hit. Hidden markers/helper meshes do not block picking, while a visible
-    // unplayable front surface still blocks playable geometry behind it.
     const intersection = this.raycaster
       .intersectObjects(roots, true)
       .find((hit) => isRenderedVisible(hit.object));
@@ -85,6 +82,11 @@ export class InstrumentInteractionSystem {
       velocity: Math.max(0, Math.min(127, Math.round(velocity))),
       phase,
     });
+  }
+
+  allowsDragRetarget(hit: InstrumentHit): boolean {
+    const instrument = this.instruments.get(hit.instrumentId);
+    return instrument?.interactionDragBehavior?.(hit.partId) !== 'lock';
   }
 
   dispose(): void {

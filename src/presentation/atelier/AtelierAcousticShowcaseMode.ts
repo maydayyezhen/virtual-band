@@ -248,6 +248,7 @@ export class AtelierAcousticShowcaseMode implements PresentationMode {
     pointer.y = event.clientY;
 
     if (pointer.mode === 'play') {
+      if (pointer.hit && !this.interactions.allowsDragRetarget(pointer.hit)) return;
       this.playHit(pointer, this.interactions.hitTest(event.clientX, event.clientY, this.acoustic.id));
       return;
     }

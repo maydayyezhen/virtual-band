@@ -3,6 +3,7 @@ import type * as THREE from 'three';
 export type InstrumentRole = 'keyboard' | 'drums' | 'bass' | 'acoustic' | 'electric' | string;
 
 export type InstrumentInteractionPhase = 'start' | 'end';
+export type InstrumentInteractionDragBehavior = 'retarget' | 'lock';
 
 export interface InstrumentInteraction {
   partId: string;
@@ -37,6 +38,12 @@ export interface Instrument {
    * it only projects the currently hoverable target into instrument visuals.
    */
   previewInteraction?(partId: string | null): void;
+  /**
+   * Declares whether a held pointer may retarget to another part while moving.
+   * Discrete selectors such as frets/stopped positions should return `lock` so a
+   * click commits exactly one state change; continuous play surfaces may retarget.
+   */
+  interactionDragBehavior?(partId: string): InstrumentInteractionDragBehavior;
   dispose(): void;
 }
 

@@ -257,6 +257,7 @@ export class AtelierViolinShowcaseMode implements PresentationMode {
     pointer.y = event.clientY;
 
     if (pointer.mode === 'play') {
+      if (pointer.hit && !this.interactions.allowsDragRetarget(pointer.hit)) return;
       this.playHit(pointer, this.interactions.hitTest(event.clientX, event.clientY, this.violin.id));
       return;
     }

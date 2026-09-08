@@ -299,6 +299,10 @@ export class AcousticGuitarInstrument implements Instrument {
     return true;
   }
 
+  interactionDragBehavior(partId: string): 'retarget' | 'lock' {
+    return /^fret:([1-6]):(\d{1,2})$/.test(partId) ? 'lock' : 'retarget';
+  }
+
   previewInteraction(partId: string | null): void {
     const match = partId ? /^fret:([1-6]):(\d{1,2})$/.exec(partId) : null;
     const next = match

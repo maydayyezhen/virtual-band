@@ -277,6 +277,10 @@ export class ViolinInstrument implements Instrument {
     return true;
   }
 
+  interactionDragBehavior(partId: string): 'retarget' | 'lock' {
+    return /^finger:([1-4]):(\d{1,2})$/.test(partId) ? 'lock' : 'retarget';
+  }
+
   previewInteraction(partId: string | null): void {
     const match = partId ? /^finger:([1-4]):(\d{1,2})$/.exec(partId) : null;
     const next = match
