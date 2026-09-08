@@ -4,3 +4,5 @@ dist/
 *.log
 .DS_Store
 Thumbs.db
+public/soundfonts/FluidR3_GM.sf2
+public/soundfonts/FluidR3_GM.sf2.part
