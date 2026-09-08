@@ -5,6 +5,7 @@ import { AudioEngine } from '../audio/AudioEngine';
 import { DrumSampler } from '../audio/DrumSampler';
 import { ElectricGuitarSampler } from '../audio/ElectricGuitarSampler';
 import { KeyboardSampler } from '../audio/KeyboardSampler';
+import { SampleLibrary } from '../audio/SampleLibrary';
 import { ViolinSampler } from '../audio/ViolinSampler';
 import { CameraRegistry } from '../camera/CameraRegistry';
 import { CameraSystem } from '../camera/CameraSystem';
@@ -40,11 +41,12 @@ export class VirtualBandApp {
   readonly state = new AppState();
   readonly transport = new Transport();
   readonly audio = new AudioEngine();
-  readonly drumSampler = new DrumSampler(this.audio);
-  readonly electricSampler = new ElectricGuitarSampler(this.audio);
-  readonly acousticSampler = new AcousticGuitarSampler(this.audio);
-  readonly keyboardSampler = new KeyboardSampler(this.audio);
-  readonly violinSampler = new ViolinSampler(this.audio);
+  readonly samples = new SampleLibrary(this.audio);
+  readonly drumSampler = new DrumSampler(this.audio, this.samples);
+  readonly electricSampler = new ElectricGuitarSampler(this.audio, this.samples);
+  readonly acousticSampler = new AcousticGuitarSampler(this.audio, this.samples);
+  readonly keyboardSampler = new KeyboardSampler(this.audio, this.samples);
+  readonly violinSampler = new ViolinSampler(this.audio, this.samples);
   readonly instruments = new InstrumentRegistry();
   readonly cameraRegistry = new CameraRegistry();
   readonly control = new ControlArbiter();
@@ -111,6 +113,10 @@ export class VirtualBandApp {
     this.state.patch({ error: null });
 
     try {
+      // Local sample decode starts immediately and runs in parallel with donor/model setup.
+      // The visual scene still does not wait for audio warmup to finish.
+      void this.prepareShowcaseAudio();
+
       const [drums, keyboard, violin, electric, acoustic] = await Promise.all([
         DrumsInstrument.create(this.drumSampler),
         KeyboardInstrument.create(this.keyboardSampler),
@@ -137,13 +143,6 @@ export class VirtualBandApp {
       this.cameraRegistry.setInstrumentViews(violin.id, ATELIER_VIOLIN_VIEWS);
       this.cameraRegistry.setInstrumentViews(electric.id, ATELIER_ELECTRIC_VIEWS);
       this.cameraRegistry.setInstrumentViews(acoustic.id, ATELIER_ACOUSTIC_VIEWS);
-
-      // Network sound loading never blocks the visual scene.
-      void this.drumSampler.preload();
-      void this.keyboardSampler.preloadCommon();
-      void this.violinSampler.preloadCommon();
-      void this.electricSampler.preloadCommon();
-      void this.acousticSampler.preloadCommon();
 
       this.activateVenue('atelier-studio');
 
@@ -216,6 +215,16 @@ export class VirtualBandApp {
       this.state.patch({ running: false, error: message });
       throw error;
     }
+  }
+
+  async prepareShowcaseAudio(): Promise<void> {
+    await Promise.allSettled([
+      this.drumSampler.preload(),
+      this.keyboardSampler.preloadCommon(),
+      this.violinSampler.preloadCommon(),
+      this.electricSampler.preloadShowcase(),
+      this.acousticSampler.preloadShowcase(),
+    ]);
   }
 
   activateVenue(id: string): void {
@@ -311,6 +320,7 @@ export class VirtualBandApp {
     this.violin = null;
     this.electric = null;
     this.acoustic = null;
+    this.samples.dispose();
     this.audio.dispose();
     this.instrumentLayer.removeFromParent();
     this.venues.dispose();

@@ -1,10 +1,12 @@
 import type { AudioEngine, AudioVoice } from './AudioEngine';
 import type { KeyboardTier } from '../instruments/keyboard/legacyKeyboardAsset';
+import { fluidR3SamplePath, type SampleLibrary } from './SampleLibrary';
 
-const SAMPLE_BASE: Record<KeyboardTier, string> = {
-  lower: 'https://paulrosen.github.io/midi-js-soundfonts/FluidR3_GM/acoustic_grand_piano-mp3/',
-  upper: 'https://paulrosen.github.io/midi-js-soundfonts/FluidR3_GM/pad_2_warm-mp3/',
+const SAMPLE_SET: Record<KeyboardTier, string> = {
+  lower: 'acoustic_grand_piano',
+  upper: 'pad_2_warm',
 };
+const COMMON_NOTES = [60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72] as const;
 
 interface VoiceState {
   voice: AudioVoice | null;
@@ -13,12 +15,13 @@ interface VoiceState {
 
 export class KeyboardSampler {
   private readonly audio: AudioEngine;
-  private readonly buffers = new Map<string, Promise<AudioBuffer | null>>();
+  private readonly samples: SampleLibrary;
   private readonly voices = new Map<string, VoiceState>();
   private readonly sustain: Record<KeyboardTier, boolean> = { lower: false, upper: false };
 
-  constructor(audio: AudioEngine) {
+  constructor(audio: AudioEngine, samples: SampleLibrary) {
     this.audio = audio;
+    this.samples = samples;
   }
 
   noteOn(tier: KeyboardTier, note: number, velocity: number, source = 'runtime'): void {
@@ -61,10 +64,9 @@ export class KeyboardSampler {
   }
 
   async preloadCommon(): Promise<void> {
-    const notes = [60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72];
-    await Promise.allSettled([
-      ...notes.map((note) => this.load('lower', note)),
-      ...notes.map((note) => this.load('upper', note)),
+    await this.samples.preload([
+      ...COMMON_NOTES.map((note) => fluidR3SamplePath(SAMPLE_SET.lower, note)),
+      ...COMMON_NOTES.map((note) => fluidR3SamplePath(SAMPLE_SET.upper, note)),
     ]);
   }
 
@@ -82,31 +84,12 @@ export class KeyboardSampler {
   }
 
   private load(tier: KeyboardTier, note: number): Promise<AudioBuffer | null> {
-    const key = `${tier}:${note}`;
-    const existing = this.buffers.get(key);
-    if (existing) return existing;
-
-    const promise = (async () => {
-      try {
-        const response = await fetch(`${SAMPLE_BASE[tier]}${midiFlatName(note)}.mp3`);
-        if (!response.ok) return null;
-        return await this.audio.decode(await response.arrayBuffer());
-      } catch {
-        return null;
-      }
-    })();
-    this.buffers.set(key, promise);
-    return promise;
+    return this.samples.load(fluidR3SamplePath(SAMPLE_SET[tier], note));
   }
 }
 
 function voiceId(tier: KeyboardTier, note: number, source: string): string {
   return `${tier}:${note}:${source}`;
-}
-
-function midiFlatName(note: number): string {
-  const names = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
-  return `${names[note % 12]}${Math.floor(note / 12) - 1}`;
 }
 
 function clamp01(value: number): number {

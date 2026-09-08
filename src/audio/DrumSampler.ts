@@ -1,7 +1,5 @@
 import type { AudioEngine, AudioVoice } from './AudioEngine';
-
-const SAMPLE_BASE = 'https://paulrosen.github.io/midi-js-soundfonts/abcjs/percussion-mp3/';
-const FLAT_NAMES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+import { percussionSamplePath, type SampleLibrary } from './SampleLibrary';
 
 export const HI_HAT_NOTES = Object.freeze({
   closed: 42,
@@ -17,21 +15,19 @@ const CHOKE_THRESHOLD = 0.2;
 
 export class DrumSampler {
   private readonly audio: AudioEngine;
-  private readonly buffers = new Map<number, AudioBuffer>();
-  private readonly pending = new Map<number, Promise<AudioBuffer>>();
-  private readonly failed = new Set<number>();
+  private readonly samples: SampleLibrary;
   private readonly openHatVoices = new Set<AudioVoice>();
 
   private hiHatOpenness = 0;
   private hiHatGeneration = 0;
 
-  constructor(audio: AudioEngine) {
+  constructor(audio: AudioEngine, samples: SampleLibrary) {
     this.audio = audio;
+    this.samples = samples;
   }
 
   preload(notes: Iterable<number> = DEFAULT_DRUM_NOTES): Promise<void> {
-    const jobs = [...notes].map((note) => this.load(note).then(() => undefined).catch(() => undefined));
-    return Promise.all(jobs).then(() => undefined);
+    return this.samples.preload([...notes].map((note) => percussionSamplePath(clampMidi(note))));
   }
 
   noteOn(note: number, velocity = 100): void {
@@ -117,7 +113,7 @@ export class DrumSampler {
   private playOpenHat(gain: number, sustain?: number, fade?: number): void {
     const generation = this.hiHatGeneration;
     this.playSample(HI_HAT_NOTES.open, gain, (voice) => {
-      // If the pedal closed while the network sample was still loading, do not let
+      // If the pedal closed while a sample was still decoding, do not let
       // a stale open-hat tail begin after the choke event.
       if (generation !== this.hiHatGeneration && this.hiHatOpenness <= CHOKE_THRESHOLD) {
         voice.stop(0.01);
@@ -132,60 +128,16 @@ export class DrumSampler {
 
   private playSample(note: number, gain: number, onVoice?: (voice: AudioVoice) => void): void {
     const midi = clampMidi(note);
-    const ready = this.buffers.get(midi);
-
-    if (ready) {
-      const voice = this.audio.playBuffer(ready, gain);
+    void this.load(midi).then((buffer) => {
+      if (!buffer) return;
+      const voice = this.audio.playBuffer(buffer, gain);
       if (voice) onVoice?.(voice);
-      return;
-    }
-
-    if (this.failed.has(midi)) return;
-    void this.load(midi)
-      .then((buffer) => {
-        const voice = this.audio.playBuffer(buffer, gain);
-        if (voice) onVoice?.(voice);
-      })
-      .catch((error) => {
-        console.warn(`[DrumSampler] sample ${midi} unavailable`, error);
-      });
+    });
   }
 
-  private load(note: number): Promise<AudioBuffer> {
-    const midi = clampMidi(note);
-    const ready = this.buffers.get(midi);
-    if (ready) return Promise.resolve(ready);
-
-    const inflight = this.pending.get(midi);
-    if (inflight) return inflight;
-
-    const job = fetch(SAMPLE_BASE + noteFile(midi), { mode: 'cors' })
-      .then((response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return response.arrayBuffer();
-      })
-      .then((data) => this.audio.decode(data))
-      .then((buffer) => {
-        this.buffers.set(midi, buffer);
-        this.failed.delete(midi);
-        return buffer;
-      })
-      .catch((error) => {
-        this.failed.add(midi);
-        throw error;
-      })
-      .finally(() => {
-        this.pending.delete(midi);
-      });
-
-    this.pending.set(midi, job);
-    return job;
+  private load(note: number): Promise<AudioBuffer | null> {
+    return this.samples.load(percussionSamplePath(clampMidi(note)));
   }
-}
-
-function noteFile(note: number): string {
-  const octave = Math.floor(note / 12) - 1;
-  return `${FLAT_NAMES[note % 12]}${octave}.mp3`;
 }
 
 function velocityGain(velocity: number): number {

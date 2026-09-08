@@ -1,13 +1,14 @@
 import type { AudioEngine, AudioVoice } from './AudioEngine';
 import {
+  ACOUSTIC_GUITAR_PROGRAM_IDS,
   DEFAULT_ACOUSTIC_GUITAR_PROGRAM,
   getAcousticGuitarProgram,
   type AcousticGuitarProgramId,
 } from './AcousticGuitarProgram';
+import { fluidR3SamplePath, type SampleLibrary } from './SampleLibrary';
 
-const SAMPLE_ROOT = 'https://paulrosen.github.io/midi-js-soundfonts/FluidR3_GM/';
-const FLAT_NAMES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
 const PITCH_BEND_SEMITONES = 2;
+const COMMON_NOTES = [40, 45, 50, 55, 59, 64, 67, 69, 71, 72, 74, 76, 79, 81, 84] as const;
 
 interface VoiceState {
   voice: AudioVoice | null;
@@ -17,15 +18,16 @@ interface VoiceState {
 
 export class AcousticGuitarSampler {
   private readonly audio: AudioEngine;
-  private readonly buffers = new Map<string, Promise<AudioBuffer | null>>();
+  private readonly samples: SampleLibrary;
   private readonly voices = new Map<number, VoiceState>();
   private sustain = false;
   private volume = 0.86;
   private pitchBend = 0;
   private programId: AcousticGuitarProgramId = DEFAULT_ACOUSTIC_GUITAR_PROGRAM;
 
-  constructor(audio: AudioEngine) {
+  constructor(audio: AudioEngine, samples: SampleLibrary) {
     this.audio = audio;
+    this.samples = samples;
   }
 
   get program(): AcousticGuitarProgramId {
@@ -36,6 +38,7 @@ export class AcousticGuitarSampler {
     const preset = getAcousticGuitarProgram(value);
     if (!preset) return false;
     this.programId = preset.id;
+    void this.preloadProgram(preset.id);
     return true;
   }
 
@@ -99,11 +102,20 @@ export class AcousticGuitarSampler {
     return true;
   }
 
-  async preloadCommon(): Promise<void> {
-    const preset = getAcousticGuitarProgram(this.programId);
+  preloadCommon(): Promise<void> {
+    return this.preloadProgram(this.programId);
+  }
+
+  async preloadProgram(value: number): Promise<void> {
+    const preset = getAcousticGuitarProgram(value);
     if (!preset) return;
-    const notes = [40, 45, 50, 55, 59, 64, 67, 69, 71, 72, 74, 76, 79, 81, 84];
-    await Promise.allSettled(notes.map((note) => this.load(preset.sampleSet, note)));
+    await this.samples.preload(COMMON_NOTES.map((note) => fluidR3SamplePath(preset.sampleSet, note)));
+  }
+
+  async preloadShowcase(): Promise<void> {
+    await Promise.allSettled(
+      ACOUSTIC_GUITAR_PROGRAM_IDS.map((program) => this.preloadProgram(program)),
+    );
   }
 
   reset(): void {
@@ -124,26 +136,8 @@ export class AcousticGuitarSampler {
   }
 
   private load(sampleSet: string, note: number): Promise<AudioBuffer | null> {
-    const key = `${sampleSet}:${note}`;
-    const existing = this.buffers.get(key);
-    if (existing) return existing;
-
-    const promise = (async () => {
-      try {
-        const response = await fetch(`${SAMPLE_ROOT}${sampleSet}-mp3/${midiFlatName(note)}.mp3`);
-        if (!response.ok) return null;
-        return await this.audio.decode(await response.arrayBuffer());
-      } catch {
-        return null;
-      }
-    })();
-    this.buffers.set(key, promise);
-    return promise;
+    return this.samples.load(fluidR3SamplePath(sampleSet, note));
   }
-}
-
-function midiFlatName(note: number): string {
-  return `${FLAT_NAMES[note % 12]}${Math.floor(note / 12) - 1}`;
 }
 
 function pitchRate(value: number): number {

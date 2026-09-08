@@ -1,10 +1,12 @@
 import type { AudioEngine, AudioVoice } from './AudioEngine';
 import type { ViolinArticulation } from '../instruments/violin/legacyViolinAsset';
+import { fluidR3SamplePath, type SampleLibrary } from './SampleLibrary';
 
-const SAMPLE_BASE: Record<ViolinArticulation, string> = {
-  arco: 'https://paulrosen.github.io/midi-js-soundfonts/FluidR3_GM/violin-mp3/',
-  pizzicato: 'https://paulrosen.github.io/midi-js-soundfonts/FluidR3_GM/pizzicato_strings-mp3/',
+const SAMPLE_SET: Record<ViolinArticulation, string> = {
+  arco: 'violin',
+  pizzicato: 'pizzicato_strings',
 };
+const COMMON_NOTES = [55, 62, 67, 69, 71, 74, 76, 81, 88] as const;
 
 interface VoiceState {
   voice: AudioVoice | null;
@@ -15,12 +17,13 @@ interface VoiceState {
 
 export class ViolinSampler {
   private readonly audio: AudioEngine;
-  private readonly buffers = new Map<string, Promise<AudioBuffer | null>>();
+  private readonly samples: SampleLibrary;
   private readonly voices = new Map<number, VoiceState>();
   private generation = 0;
 
-  constructor(audio: AudioEngine) {
+  constructor(audio: AudioEngine, samples: SampleLibrary) {
     this.audio = audio;
+    this.samples = samples;
   }
 
   noteOn(
@@ -66,10 +69,9 @@ export class ViolinSampler {
   }
 
   async preloadCommon(): Promise<void> {
-    const notes = [55, 62, 67, 69, 71, 74, 76, 81, 88];
-    await Promise.allSettled([
-      ...notes.map((note) => this.load('arco', note)),
-      ...notes.map((note) => this.load('pizzicato', note)),
+    await this.samples.preload([
+      ...COMMON_NOTES.map((note) => fluidR3SamplePath(SAMPLE_SET.arco, note)),
+      ...COMMON_NOTES.map((note) => fluidR3SamplePath(SAMPLE_SET.pizzicato, note)),
     ]);
   }
 
@@ -85,27 +87,8 @@ export class ViolinSampler {
   }
 
   private load(articulation: ViolinArticulation, note: number): Promise<AudioBuffer | null> {
-    const key = `${articulation}:${note}`;
-    const existing = this.buffers.get(key);
-    if (existing) return existing;
-
-    const promise = (async () => {
-      try {
-        const response = await fetch(`${SAMPLE_BASE[articulation]}${midiFlatName(note)}.mp3`);
-        if (!response.ok) return null;
-        return await this.audio.decode(await response.arrayBuffer());
-      } catch {
-        return null;
-      }
-    })();
-    this.buffers.set(key, promise);
-    return promise;
+    return this.samples.load(fluidR3SamplePath(SAMPLE_SET[articulation], note));
   }
-}
-
-function midiFlatName(note: number): string {
-  const names = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
-  return `${names[note % 12]}${Math.floor(note / 12) - 1}`;
 }
 
 function clamp01(value: number): number {

@@ -1,15 +1,17 @@
 import type { AudioBus, AudioEngine, AudioVoice } from './AudioEngine';
 import {
   DEFAULT_ELECTRIC_GUITAR_PROGRAM,
+  ELECTRIC_GUITAR_PROGRAM_IDS,
   ELECTRIC_GUITAR_PROGRAMS,
   getElectricGuitarProgram,
   type ElectricGuitarProgramId,
   type ElectricPickupPosition,
 } from './ElectricGuitarProgram';
+import { fluidR3SamplePath, type SampleLibrary } from './SampleLibrary';
 
-const SAMPLE_ROOT = 'https://paulrosen.github.io/midi-js-soundfonts/FluidR3_GM/';
 const DEFAULT_PRESET = ELECTRIC_GUITAR_PROGRAMS[DEFAULT_ELECTRIC_GUITAR_PROGRAM];
 const PITCH_BEND_SEMITONES = 2;
+const COMMON_NOTES = [40, 45, 50, 55, 59, 64, 67, 69, 71, 74, 76, 79, 83, 86] as const;
 
 interface VoiceState {
   voice: AudioVoice | null;
@@ -27,7 +29,7 @@ interface ToneChain {
 
 export class ElectricGuitarSampler {
   private readonly audio: AudioEngine;
-  private readonly buffers = new Map<string, Promise<AudioBuffer | null>>();
+  private readonly samples: SampleLibrary;
   private readonly voices = new Map<number, VoiceState>();
   private sustain = false;
   private volume = DEFAULT_PRESET.volume;
@@ -37,8 +39,9 @@ export class ElectricGuitarSampler {
   private pitchBend = 0;
   private toneChain: ToneChain | null = null;
 
-  constructor(audio: AudioEngine) {
+  constructor(audio: AudioEngine, samples: SampleLibrary) {
     this.audio = audio;
+    this.samples = samples;
   }
 
   get program(): ElectricGuitarProgramId {
@@ -89,6 +92,7 @@ export class ElectricGuitarSampler {
     this.tone = preset.tone;
     this.setVolume(preset.volume);
     this.updateToneChain();
+    void this.preloadProgram(preset.id);
     return true;
   }
 
@@ -130,10 +134,20 @@ export class ElectricGuitarSampler {
     }
   }
 
-  async preloadCommon(): Promise<void> {
-    const notes = [40, 45, 50, 55, 59, 64, 67, 69, 71, 74, 76, 79, 83, 86];
-    const sampleSet = ELECTRIC_GUITAR_PROGRAMS[this.programId].sampleSet;
-    await Promise.allSettled(notes.map((note) => this.load(sampleSet, note)));
+  preloadCommon(): Promise<void> {
+    return this.preloadProgram(this.programId);
+  }
+
+  async preloadProgram(value: number): Promise<void> {
+    const preset = getElectricGuitarProgram(value);
+    if (!preset) return;
+    await this.samples.preload(COMMON_NOTES.map((note) => fluidR3SamplePath(preset.sampleSet, note)));
+  }
+
+  async preloadShowcase(): Promise<void> {
+    await Promise.allSettled(
+      ELECTRIC_GUITAR_PROGRAM_IDS.map((program) => this.preloadProgram(program)),
+    );
   }
 
   reset(): void {
@@ -211,27 +225,8 @@ export class ElectricGuitarSampler {
   }
 
   private load(sampleSet: string, note: number): Promise<AudioBuffer | null> {
-    const key = `${sampleSet}:${note}`;
-    const existing = this.buffers.get(key);
-    if (existing) return existing;
-
-    const promise = (async () => {
-      try {
-        const response = await fetch(`${SAMPLE_ROOT}${sampleSet}-mp3/${midiFlatName(note)}.mp3`);
-        if (!response.ok) return null;
-        return await this.audio.decode(await response.arrayBuffer());
-      } catch {
-        return null;
-      }
-    })();
-    this.buffers.set(key, promise);
-    return promise;
+    return this.samples.load(fluidR3SamplePath(sampleSet, note));
   }
-}
-
-function midiFlatName(note: number): string {
-  const names = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
-  return `${names[note % 12]}${Math.floor(note / 12) - 1}`;
 }
 
 function pitchRate(value: number): number {

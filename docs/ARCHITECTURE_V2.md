@@ -14,6 +14,7 @@ VirtualBandApp
 ├── Engine
 ├── Transport
 ├── AudioEngine
+├── SampleLibrary
 ├── InstrumentRegistry
 ├── InstrumentInteractionSystem
 ├── VenueManager
@@ -67,7 +68,9 @@ The violin keeps the donor's four physical strings, continuous fretless fingerbo
 
 Audio compatibility may intentionally cover a wider set of programs than the current authored geometry. Such cases must be documented rather than hidden behind runtime geometry patches. The current acoustic model is visually a steel-string guitar: GM 25 Steel is aligned with that model, while GM 24 Nylon is supported as an audio-compatibility mode and knowingly reuses the same steel-string visual asset. See `docs/INSTRUMENT_FIDELITY.md` for the explicit mismatch and future resolution policy.
 
-Audio receives the same semantic note events as visual animation. Mouse, computer keyboard, presentation demos and future MIDI routing therefore converge on instrument APIs instead of maintaining separate sound and animation paths. Sample sourcing stays inside sampler classes rather than inside 3D models.
+Audio receives the same semantic note events as visual animation. Mouse, computer keyboard, presentation demos and future MIDI routing therefore converge on instrument APIs instead of maintaining separate sound and animation paths. `SampleLibrary` owns local sample paths, fetch/decode and the shared decoded-buffer cache; sampler classes own instrument-specific program, articulation, sustain, pitch, tone/effect and voice semantics. Core samples are served from `/soundfonts` rather than an external runtime CDN.
+
+Atelier starts audio warmup in parallel with donor/model setup. The warmup decodes common notes for drums, both keyboard tiers, both violin articulations, all exposed electric-guitar programs and both acoustic-guitar programs without blocking the visual scene. Program switches also request their program warmup as a fallback. A future formal song-playback path should derive exact Program + Note requirements from the loaded MIDI and await those samples before starting `Transport`.
 
 ## Data direction
 
