@@ -34,6 +34,7 @@ export class ElectricGuitarInstrument implements Instrument {
   private readonly controller: LegacyElectricController;
   private readonly sampler: ElectricGuitarSampler;
   private readonly interactionVoices = new Map<string, InteractionVoice>();
+  private pendingStrumHits: number[] = [];
 
   private constructor(
     model: LegacyElectricModel,
@@ -79,10 +80,15 @@ export class ElectricGuitarInstrument implements Instrument {
     direction: ElectricStrumDirection = 'down',
   ): boolean {
     const handled = this.controller.api.strum(frets, velocity, direction);
-    if (!handled) return false;
+    if (!handled) {
+      this.pendingStrumHits = [];
+      return false;
+    }
+
     for (let stringNumber = 1; stringNumber <= 6; stringNumber += 1) {
       this.sampler.noteOff(stringNumber);
     }
+    this.pendingStrumHits = strumStringOrder(frets, direction);
     return true;
   }
 
@@ -151,6 +157,7 @@ export class ElectricGuitarInstrument implements Instrument {
     this.controller.api.panic();
     this.sampler.reset();
     this.interactionVoices.clear();
+    this.pendingStrumHits = [];
   }
 
   resolveHit(intersection: THREE.Intersection): string | null {
@@ -271,6 +278,18 @@ export class ElectricGuitarInstrument implements Instrument {
   }
 
   private playAudio(event: LegacyElectricHitEvent): void {
-    this.sampler.noteOn(event.string, event.note, event.velocity);
+    const strum = this.pendingStrumHits[0] === event.string;
+    if (strum) this.pendingStrumHits.shift();
+    this.sampler.noteOn(event.string, event.note, event.velocity, strum ? 'strum' : 'gated');
   }
+}
+
+function strumStringOrder(
+  frets: Array<number | null>,
+  direction: ElectricStrumDirection,
+): number[] {
+  const indices = direction === 'down' ? [0, 1, 2, 3, 4, 5] : [5, 4, 3, 2, 1, 0];
+  return indices
+    .filter((index) => frets[index] !== null)
+    .map((index) => 6 - index);
 }

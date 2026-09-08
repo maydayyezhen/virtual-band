@@ -1,4 +1,9 @@
 import { readFile } from 'node:fs/promises';
+import {
+  buildSf2VolumeEnvelopePlan,
+  decayGainFactor,
+  releaseDurationSeconds,
+} from '../src/audio/sf2/Sf2Envelope.ts';
 import { parseSf2 } from '../src/audio/sf2/Sf2Parser.ts';
 
 const file = await readFile(new URL('../public/soundfonts/FluidR3_GM.sf2', import.meta.url));
@@ -29,8 +34,8 @@ if (padLooped.length === 0) throw new Error('Warm Pad C4 has no valid sustain-lo
 
 const nylonRegions = requireRegions(0, 24, 64, 100, 'Nylon guitar E4');
 const steelRegions = requireRegions(0, 25, 64, 100, 'Steel guitar E4');
-const electricRegionCounts = [26, 27, 28, 29, 30, 31].map(
-  (program) => requireRegions(0, program, 64, 100, `Electric guitar program ${program} E4`).length,
+const electricRegions = [26, 27, 28, 29, 30, 31].map(
+  (program) => requireRegions(0, program, 64, 100, `Electric guitar program ${program} E4`),
 );
 const kickRegions = requireRegions(128, 0, 36, 100, 'Kick drum');
 const closedHatRegions = requireRegions(128, 0, 42, 100, 'Closed hi-hat');
@@ -40,6 +45,21 @@ const hatExclusiveClasses = [...new Set(
     .map((region) => region.exclusiveClass)
     .filter((value) => value > 0),
 )];
+
+for (const region of [
+  ...nylonRegions,
+  ...steelRegions,
+  ...electricRegions.flat(),
+]) {
+  if (!Number.isFinite(region.keynumToVolEnvHold)) {
+    throw new Error(`Invalid keynumToVolEnvHold on ${region.sample.name}`);
+  }
+  if (!Number.isFinite(region.keynumToVolEnvDecay)) {
+    throw new Error(`Invalid keynumToVolEnvDecay on ${region.sample.name}`);
+  }
+}
+
+verifyEnvelopeMath();
 
 console.log(`Presets: ${presets.length}`);
 console.log(`Violin preset: ${violin.name}`);
@@ -53,10 +73,11 @@ console.log(`Violin A4 regions: ${violinRegions.length}`);
 console.log(`Piano C4 regions: ${pianoRegions.length}`);
 console.log(`Warm Pad C4 regions: ${padRegions.length} (${padLooped.length} looped)`);
 console.log(`Nylon/Steel E4 regions: ${nylonRegions.length}/${steelRegions.length}`);
-console.log(`Electric E4 region counts: ${electricRegionCounts.join('/')}`);
+console.log(`Electric E4 region counts: ${electricRegions.map((regions) => regions.length).join('/')}`);
 console.log(`Kick regions: ${kickRegions.length}`);
 console.log(`Hi-hat regions closed/open: ${closedHatRegions.length}/${openHatRegions.length}`);
 console.log(`Hi-hat exclusive classes: ${hatExclusiveClasses.length ? hatExclusiveClasses.join(',') : 'none'}`);
+
 for (const region of violinRegions) {
   console.log({
     sample: region.sample.name,
@@ -68,7 +89,25 @@ for (const region of violinRegions) {
     releaseTc: region.releaseVolEnv,
   });
 }
-console.log('SF2 full-ensemble parser verification passed.');
+
+console.log('Guitar envelope snapshot at E4:');
+for (const [label, regions] of [
+  ['nylon', nylonRegions],
+  ['steel', steelRegions],
+  ...electricRegions.map((regions, index) => [`program-${26 + index}`, regions]),
+]) {
+  console.log(label, regions.map((region) => ({
+    sample: region.sample.name,
+    loopMode: region.sampleModes,
+    decayTc: region.decayVolEnv,
+    sustainCb: region.sustainVolEnv,
+    releaseTc: region.releaseVolEnv,
+    keyToHold: region.keynumToVolEnvHold,
+    keyToDecay: region.keynumToVolEnvDecay,
+  })));
+}
+
+console.log('SF2 full-ensemble parser/envelope verification passed.');
 
 function requirePreset(bank, program, label) {
   const preset = presets.find((candidate) => candidate.bank === bank && candidate.program === program);
@@ -85,4 +124,41 @@ function requireRegions(bank, program, note, velocity, label) {
 function hasSustainLoop(region) {
   return (region.sampleModes === 1 || region.sampleModes === 3)
     && region.loopEnd > region.loopStart + 1;
+}
+
+function verifyEnvelopeMath() {
+  const synthetic = {
+    attackVolEnv: -12000,
+    holdVolEnv: -7973,
+    decayVolEnv: 0,
+    sustainVolEnv: 120,
+    releaseVolEnv: 0,
+    keynumToVolEnvHold: 50,
+    keynumToVolEnvDecay: 50,
+  };
+
+  const middleC = buildSf2VolumeEnvelopePlan(synthetic, 60);
+  const lowC = buildSf2VolumeEnvelopePlan(synthetic, 36);
+
+  assertApprox(middleC.holdSeconds, 0.01, 0.0002, 'middle-C hold');
+  assertApprox(middleC.decaySeconds, 0.12, 0.0002, '12 dB decay duration');
+  assertApprox(lowC.holdSeconds, 0.02, 0.0004, 'key-tracked low-C hold');
+  assertApprox(lowC.decaySeconds, 0.24, 0.0004, 'key-tracked low-C decay');
+
+  const halfDecayGain = decayGainFactor(120, 0.5);
+  assertApprox(halfDecayGain, 10 ** (-6 / 20), 0.000001, 'constant-dB decay curve');
+
+  const minus50DbGain = 10 ** (-50 / 20);
+  assertApprox(
+    releaseDurationSeconds(1, minus50DbGain, 1),
+    0.5,
+    0.000001,
+    'release duration from -50 dB',
+  );
+}
+
+function assertApprox(actual, expected, tolerance, label) {
+  if (Math.abs(actual - expected) > tolerance) {
+    throw new Error(`${label}: expected ${expected}, got ${actual}`);
+  }
 }

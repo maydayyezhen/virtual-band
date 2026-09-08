@@ -33,6 +33,7 @@ export class AcousticGuitarInstrument implements Instrument {
   private readonly controller: LegacyAcousticController;
   private readonly sampler: AcousticGuitarSampler;
   private readonly interactionVoices = new Map<string, InteractionVoice>();
+  private pendingStrumHits: number[] = [];
 
   private constructor(
     model: LegacyAcousticModel,
@@ -78,10 +79,18 @@ export class AcousticGuitarInstrument implements Instrument {
     direction: AcousticStrumDirection = 'down',
   ): boolean {
     const handled = this.controller.api.strum(frets, velocity, direction);
-    if (!handled) return false;
+    if (!handled) {
+      this.pendingStrumHits = [];
+      return false;
+    }
+
+    // The donor emits the six strikes later from tick(). Stop the previous
+    // physical-string voices now, then tag those pending hits as an impulse
+    // strum so the audio backend can give them a finite natural lifecycle.
     for (let stringNumber = 1; stringNumber <= 6; stringNumber += 1) {
       this.sampler.noteOff(stringNumber);
     }
+    this.pendingStrumHits = strumStringOrder(frets, direction);
     return true;
   }
 
@@ -142,6 +151,7 @@ export class AcousticGuitarInstrument implements Instrument {
     this.controller.api.panic();
     this.sampler.reset();
     this.interactionVoices.clear();
+    this.pendingStrumHits = [];
   }
 
   resolveHit(intersection: THREE.Intersection): string | null {
@@ -245,6 +255,18 @@ export class AcousticGuitarInstrument implements Instrument {
   }
 
   private playAudio(event: LegacyAcousticHitEvent): void {
-    this.sampler.noteOn(event.string, event.note, event.velocity);
+    const strum = this.pendingStrumHits[0] === event.string;
+    if (strum) this.pendingStrumHits.shift();
+    this.sampler.noteOn(event.string, event.note, event.velocity, strum ? 'strum' : 'gated');
   }
+}
+
+function strumStringOrder(
+  frets: Array<number | null>,
+  direction: AcousticStrumDirection,
+): number[] {
+  const indices = direction === 'down' ? [0, 1, 2, 3, 4, 5] : [5, 4, 3, 2, 1, 0];
+  return indices
+    .filter((index) => frets[index] !== null)
+    .map((index) => 6 - index);
 }

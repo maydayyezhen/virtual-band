@@ -39,6 +39,8 @@ export interface Sf2Region {
   readonly decayVolEnv: number;
   readonly sustainVolEnv: number;
   readonly releaseVolEnv: number;
+  readonly keynumToVolEnvHold: number;
+  readonly keynumToVolEnvDecay: number;
 }
 
 interface PresetHeader {
@@ -88,6 +90,8 @@ const GEN = {
   decayVolEnv: 36,
   sustainVolEnv: 37,
   releaseVolEnv: 38,
+  keynumToVolEnvHold: 39,
+  keynumToVolEnvDecay: 40,
   instrument: 41,
   keyRange: 43,
   velocityRange: 44,
@@ -111,7 +115,24 @@ const ASSIGN_OPERATORS = new Set<number>([
   GEN.sampleModes,
   GEN.keynum,
   GEN.velocity,
-  GEN.scaleTuning,
+  GEN.exclusiveClass,
+  GEN.overridingRootKey,
+
+]);
+
+const ILLEGAL_PRESET_OPERATORS = new Set<number>([
+  GEN.startAddrsOffset,
+  GEN.endAddrsOffset,
+  GEN.startloopAddrsOffset,
+  GEN.endloopAddrsOffset,
+  GEN.startAddrsCoarseOffset,
+  GEN.endAddrsCoarseOffset,
+  GEN.startloopAddrsCoarseOffset,
+  GEN.keynum,
+  GEN.velocity,
+  GEN.endloopAddrsCoarseOffset,
+  GEN.sampleID,
+  GEN.sampleModes,
   GEN.exclusiveClass,
   GEN.overridingRootKey,
 ]);
@@ -184,7 +205,7 @@ export class Sf2SoundFont {
       const instrument = this.instruments[instrumentIndex];
       if (!instrument || !nextInstrument) continue;
 
-      const presetState = mergeZones(presetGlobal, presetLocal);
+      const presetState = mergeZoneOverrides(presetGlobal, presetLocal);
       if (!matchesRange(presetState, key, velocity)) continue;
 
       const instrumentZones = this.readZones(
@@ -199,7 +220,8 @@ export class Sf2SoundFont {
         const sampleGenerator = instrumentLocal.find((generator) => generator.operator === GEN.sampleID);
         if (!sampleGenerator) continue;
 
-        const state = mergeZones(presetGlobal, presetLocal, instrumentGlobal, instrumentLocal);
+        const instrumentState = mergeZoneOverrides(instrumentGlobal, instrumentLocal);
+        const state = mergePresetWithInstrument(presetState, instrumentState);
         if (!matchesRange(state, key, velocity)) continue;
 
         const sampleId = sampleGenerator.rawAmount;
@@ -233,7 +255,7 @@ export class Sf2SoundFont {
 
         if (end <= start + 1) continue;
 
-        const overrideRoot = state.values.get(GEN.overridingRootKey);
+        const overrideRoot = getValue(state, GEN.overridingRootKey);
         regions.push({
           sampleId,
           sample,
@@ -250,14 +272,16 @@ export class Sf2SoundFont {
           rootKey: overrideRoot !== undefined && overrideRoot >= 0 && overrideRoot <= 127
             ? overrideRoot
             : sample.originalPitch,
-          scaleTuning: state.values.get(GEN.scaleTuning) ?? 100,
+          scaleTuning: getValue(state, GEN.scaleTuning),
           initialAttenuation: getValue(state, GEN.initialAttenuation),
           pan: getValue(state, GEN.pan),
-          attackVolEnv: state.values.get(GEN.attackVolEnv) ?? -12000,
-          holdVolEnv: state.values.get(GEN.holdVolEnv) ?? -12000,
-          decayVolEnv: state.values.get(GEN.decayVolEnv) ?? -12000,
-          sustainVolEnv: state.values.get(GEN.sustainVolEnv) ?? 0,
-          releaseVolEnv: state.values.get(GEN.releaseVolEnv) ?? -12000,
+          attackVolEnv: getValue(state, GEN.attackVolEnv),
+          holdVolEnv: getValue(state, GEN.holdVolEnv),
+          decayVolEnv: getValue(state, GEN.decayVolEnv),
+          sustainVolEnv: getValue(state, GEN.sustainVolEnv),
+          releaseVolEnv: getValue(state, GEN.releaseVolEnv),
+          keynumToVolEnvHold: getValue(state, GEN.keynumToVolEnvHold),
+          keynumToVolEnvDecay: getValue(state, GEN.keynumToVolEnvDecay),
         });
       }
     }
@@ -413,35 +437,64 @@ function parseSampleHeaders(view: DataView, chunk: ChunkView): Sf2SampleHeader[]
   return records;
 }
 
-function mergeZones(...zones: readonly GeneratorRecord[][]): ZoneState {
+function mergeZoneOverrides(
+  globalZone: readonly GeneratorRecord[],
+  localZone: readonly GeneratorRecord[],
+): ZoneState {
   const state: ZoneState = {
     values: new Map<number, number>(),
     keyRange: [0, 127],
     velocityRange: [0, 127],
   };
+  applyZoneOverrides(state, globalZone);
+  applyZoneOverrides(state, localZone);
+  return state;
+}
 
-  for (const zone of zones) {
-    for (const generator of zone) {
-      if (generator.operator === GEN.keyRange || generator.operator === GEN.velocityRange) {
-        const low = generator.rawAmount & 0xff;
-        const high = (generator.rawAmount >>> 8) & 0xff;
-        const target = generator.operator === GEN.keyRange ? state.keyRange : state.velocityRange;
-        target[0] = Math.max(target[0], low);
-        target[1] = Math.min(target[1], high);
-        continue;
-      }
-
-      const amount = ASSIGN_OPERATORS.has(generator.operator)
-        ? generator.rawAmount
-        : generator.signedAmount;
-      if (ASSIGN_OPERATORS.has(generator.operator)) {
-        state.values.set(generator.operator, amount);
-      } else {
-        state.values.set(generator.operator, (state.values.get(generator.operator) ?? 0) + amount);
-      }
+function applyZoneOverrides(state: ZoneState, zone: readonly GeneratorRecord[]): void {
+  for (const generator of zone) {
+    if (generator.operator === GEN.keyRange || generator.operator === GEN.velocityRange) {
+      const low = generator.rawAmount & 0xff;
+      const high = (generator.rawAmount >>> 8) & 0xff;
+      const target = generator.operator === GEN.keyRange ? state.keyRange : state.velocityRange;
+      // Global and local range constraints compose by intersection. This keeps a
+      // preset/instrument global range from being widened again by a local zone.
+      target[0] = Math.max(target[0], low);
+      target[1] = Math.min(target[1], high);
+      continue;
     }
-  }
 
+    const amount = ASSIGN_OPERATORS.has(generator.operator)
+      ? generator.rawAmount
+      : generator.signedAmount;
+    // At a given level, local instrument/preset zones supersede their global
+    // zone for an identical generator. IGEN values are absolute; PGEN values
+    // remain offsets until merged with the resolved instrument state.
+    state.values.set(generator.operator, amount);
+  }
+}
+
+function mergePresetWithInstrument(
+  preset: ZoneState,
+  instrument: ZoneState,
+): ZoneState {
+  const state: ZoneState = {
+    values: new Map(instrument.values),
+    keyRange: [
+      Math.max(preset.keyRange[0], instrument.keyRange[0]),
+      Math.min(preset.keyRange[1], instrument.keyRange[1]),
+    ],
+    velocityRange: [
+      Math.max(preset.velocityRange[0], instrument.velocityRange[0]),
+      Math.min(preset.velocityRange[1], instrument.velocityRange[1]),
+    ],
+  };
+
+  for (const [operator, offset] of preset.values) {
+    if (operator === GEN.instrument || ILLEGAL_PRESET_OPERATORS.has(operator)) continue;
+    const base = state.values.get(operator) ?? defaultGeneratorValue(operator);
+    state.values.set(operator, base + offset);
+  }
   return state;
 }
 
@@ -457,7 +510,19 @@ function matchesRange(state: ZoneState, key: number, velocity: number): boolean 
 }
 
 function getValue(state: ZoneState, operator: number): number {
-  return state.values.get(operator) ?? 0;
+  return state.values.get(operator) ?? defaultGeneratorValue(operator);
+}
+
+function defaultGeneratorValue(operator: number): number {
+  if (
+    operator === GEN.attackVolEnv
+    || operator === GEN.holdVolEnv
+    || operator === GEN.decayVolEnv
+    || operator === GEN.releaseVolEnv
+  ) return -12000;
+  if (operator === GEN.scaleTuning) return 100;
+  if (operator === GEN.overridingRootKey) return -1;
+  return 0;
 }
 
 function requiredChunk(chunks: ReadonlyMap<string, ChunkView>, id: string): ChunkView {

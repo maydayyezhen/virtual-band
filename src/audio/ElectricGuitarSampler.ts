@@ -7,7 +7,7 @@ import {
   type ElectricGuitarProgramId,
   type ElectricPickupPosition,
 } from './ElectricGuitarProgram';
-import type { ProgramToneBackend } from './ProgramToneBackend';
+import type { ProgramToneBackend, ProgramToneNoteOptions } from './ProgramToneBackend';
 import { fluidR3SamplePath, type SampleLibrary } from './SampleLibrary';
 
 const DEFAULT_PRESET = ELECTRIC_GUITAR_PROGRAMS[DEFAULT_ELECTRIC_GUITAR_PROGRAM];
@@ -15,6 +15,7 @@ const PITCH_BEND_SEMITONES = 2;
 const COMMON_NOTES = [40, 45, 50, 55, 59, 64, 67, 69, 71, 74, 76, 79, 83, 86] as const;
 
 type VoiceBackend = 'mp3' | 'tone';
+type GuitarGesture = 'gated' | 'strum';
 
 interface VoiceState {
   voice: AudioVoice | null;
@@ -29,6 +30,18 @@ interface ToneChain {
   tone: BiquadFilterNode;
   bus: AudioBus;
 }
+
+const STRUM_PROFILE: Readonly<Record<
+  ElectricGuitarProgramId,
+  { ringSeconds: number; fadeSeconds: number }
+>> = {
+  26: { ringSeconds: 3.8, fadeSeconds: 0.15 },
+  27: { ringSeconds: 4.2, fadeSeconds: 0.15 },
+  28: { ringSeconds: 0.55, fadeSeconds: 0.06 },
+  29: { ringSeconds: 4.8, fadeSeconds: 0.17 },
+  30: { ringSeconds: 5.0, fadeSeconds: 0.17 },
+  31: { ringSeconds: 2.8, fadeSeconds: 0.14 },
+};
 
 export class ElectricGuitarSampler {
   private readonly audio: AudioEngine;
@@ -58,22 +71,32 @@ export class ElectricGuitarSampler {
     return this.programId;
   }
 
-  noteOn(stringNumber: number, note: number, velocity: number): void {
+  noteOn(
+    stringNumber: number,
+    note: number,
+    velocity: number,
+    gesture: GuitarGesture = 'gated',
+  ): void {
     if (!Number.isInteger(stringNumber) || stringNumber < 1 || stringNumber > 6) return;
     if (!Number.isInteger(note) || note < 0 || note > 127) return;
 
+    // Retriggering a physical string should mute its previous voice quickly;
+    // otherwise long SF2 release tails stack under fast strums and repeated notes.
     this.stopString(stringNumber, 0.018);
     const preset = ELECTRIC_GUITAR_PROGRAMS[this.programId];
     const accentedVelocity = clamp01((velocity / 127) * preset.accent);
     const backendVelocity = Math.round(accentedVelocity * 127);
     const baseGain = Math.pow(accentedVelocity, 1.16) * 0.82;
     const chain = this.ensureToneChain();
+    const toneOptions = gesture === 'strum'
+      ? electricStrumToneOptions(this.programId, note, chain.input)
+      : { destination: chain.input, gainScale: 0.82 };
 
     if (this.toneBackend?.noteOn(
       voiceId(stringNumber),
       note,
       backendVelocity,
-      { destination: chain.input, gainScale: 0.82 },
+      toneOptions,
     )) {
       this.voices.set(stringNumber, {
         voice: null,
@@ -267,7 +290,7 @@ export class ElectricGuitarSampler {
     this.voices.delete(stringNumber);
 
     if (state.backend === 'tone') {
-      this.toneBackend?.noteOff(voiceId(stringNumber));
+      this.toneBackend?.noteOff(voiceId(stringNumber), fadeSeconds);
       return;
     }
 
@@ -277,6 +300,21 @@ export class ElectricGuitarSampler {
   private load(sampleSet: string, note: number): Promise<AudioBuffer | null> {
     return this.samples.load(fluidR3SamplePath(sampleSet, note));
   }
+}
+
+function electricStrumToneOptions(
+  program: ElectricGuitarProgramId,
+  note: number,
+  destination: AudioNode,
+): ProgramToneNoteOptions {
+  const profile = STRUM_PROFILE[program];
+  const pitchScale = 2 ** ((60 - clamp(note, 40, 86)) / 84);
+  return {
+    destination,
+    gainScale: 0.82,
+    autoReleaseSeconds: clamp(profile.ringSeconds * pitchScale, 0.35, 6.0),
+    autoReleaseFadeSeconds: profile.fadeSeconds,
+  };
 }
 
 function voiceId(stringNumber: number): string {

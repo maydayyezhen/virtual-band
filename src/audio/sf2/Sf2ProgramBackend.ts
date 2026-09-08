@@ -20,6 +20,7 @@ export class Sf2ProgramBackend implements ProgramToneBackend {
   private readonly url: string;
   private readonly label: string;
   private readonly pitchBendSemitones: number;
+  private readonly autoReleaseTimers = new Map<string, number>();
   private preparePromise: Promise<boolean> | null = null;
   private failed = false;
   private programId: number;
@@ -91,12 +92,33 @@ export class Sf2ProgramBackend implements ProgramToneBackend {
     options?: ProgramToneNoteOptions,
   ): boolean {
     if (!this.ready) return false;
-    return this.synth.noteOnVoice(voiceKey(this.label, voiceId), note, velocity, options) > 0;
+    const key = voiceKey(this.label, voiceId);
+    this.clearAutoRelease(key);
+
+    const started = this.synth.noteOnVoice(key, note, velocity, options) > 0;
+    if (!started) return false;
+
+    const autoReleaseSeconds = options?.autoReleaseSeconds;
+    if (autoReleaseSeconds !== undefined && Number.isFinite(autoReleaseSeconds) && autoReleaseSeconds > 0) {
+      const timer = window.setTimeout(() => {
+        this.autoReleaseTimers.delete(key);
+        const fade = options?.autoReleaseFadeSeconds;
+        this.synth.noteOffVoice(
+          key,
+          fade !== undefined && Number.isFinite(fade) && fade >= 0 ? Math.max(0.005, fade) : undefined,
+        );
+      }, Math.max(0.01, autoReleaseSeconds) * 1000);
+      this.autoReleaseTimers.set(key, timer);
+    }
+
+    return true;
   }
 
-  noteOff(voiceId: string): void {
+  noteOff(voiceId: string, forcedReleaseSeconds?: number): void {
     if (!this.ready) return;
-    this.synth.noteOffVoice(voiceKey(this.label, voiceId));
+    const key = voiceKey(this.label, voiceId);
+    this.clearAutoRelease(key);
+    this.synth.noteOffVoice(key, forcedReleaseSeconds);
   }
 
   setSustain(pressed: boolean): void {
@@ -114,6 +136,7 @@ export class Sf2ProgramBackend implements ProgramToneBackend {
   }
 
   reset(): void {
+    this.clearAutoReleaseTimers();
     if (!this.ready) return;
     this.synth.allNotesOff(0.03);
     this.synth.setSustain(false);
@@ -121,7 +144,20 @@ export class Sf2ProgramBackend implements ProgramToneBackend {
   }
 
   dispose(): void {
+    this.clearAutoReleaseTimers();
     this.synth.dispose();
+  }
+
+  private clearAutoRelease(key: string): void {
+    const timer = this.autoReleaseTimers.get(key);
+    if (timer === undefined) return;
+    window.clearTimeout(timer);
+    this.autoReleaseTimers.delete(key);
+  }
+
+  private clearAutoReleaseTimers(): void {
+    for (const timer of this.autoReleaseTimers.values()) window.clearTimeout(timer);
+    this.autoReleaseTimers.clear();
   }
 }
 

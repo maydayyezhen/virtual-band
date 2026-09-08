@@ -1,12 +1,20 @@
 import type { AudioBus, AudioEngine } from '../AudioEngine';
 import type { ProgramToneNoteOptions } from '../ProgramToneBackend';
 import type { Sf2BankLibrary } from './Sf2BankLibrary';
+import {
+  buildSf2VolumeEnvelopePlan,
+  centibelsToGain,
+  decayGainFactor,
+  releaseDurationSeconds,
+  SF2_SILENCE_GAIN,
+} from './Sf2Envelope';
 import { parseSf2, type Sf2PresetInfo, type Sf2Region, type Sf2SoundFont } from './Sf2Parser';
 
 interface VoiceEnvelopeState {
   readonly startTime: number;
   readonly peakGain: number;
   readonly sustainGain: number;
+  readonly sustainAttenuationCentibels: number;
   readonly attackSeconds: number;
   readonly holdSeconds: number;
   readonly decaySeconds: number;
@@ -36,8 +44,12 @@ export interface Sf2RegionInspection {
   readonly loopStartSeconds: number;
   readonly loopEndSeconds: number;
   readonly attackSeconds: number;
+  readonly holdSeconds: number;
   readonly decaySeconds: number;
+  readonly sustainAttenuationCentibels: number;
   readonly releaseSeconds: number;
+  readonly keynumToVolEnvHold: number;
+  readonly keynumToVolEnvDecay: number;
 }
 
 export class Sf2Synth {
@@ -205,19 +217,27 @@ export class Sf2Synth {
   }
 
   inspect(note: number, velocity = 100, program = this.program, bank = this.bank): Sf2RegionInspection[] {
-    const regions = this.requireFont().resolveRegions(bank, program, clampMidi(note), clampMidi(velocity));
-    return regions.map((region) => ({
-      sample: region.sample.name,
-      keyRange: region.keyRange,
-      velocityRange: region.velocityRange,
-      loopMode: region.sampleModes,
-      exclusiveClass: region.exclusiveClass,
-      loopStartSeconds: Math.max(0, (region.loopStart - region.start) / region.sample.sampleRate),
-      loopEndSeconds: Math.max(0, (region.loopEnd - region.start) / region.sample.sampleRate),
-      attackSeconds: timecentsToSeconds(region.attackVolEnv),
-      decaySeconds: timecentsToSeconds(region.decayVolEnv),
-      releaseSeconds: timecentsToSeconds(region.releaseVolEnv),
-    }));
+    const midi = clampMidi(note);
+    const regions = this.requireFont().resolveRegions(bank, program, midi, clampMidi(velocity));
+    return regions.map((region) => {
+      const envelope = buildSf2VolumeEnvelopePlan(region, midi);
+      return {
+        sample: region.sample.name,
+        keyRange: region.keyRange,
+        velocityRange: region.velocityRange,
+        loopMode: region.sampleModes,
+        exclusiveClass: region.exclusiveClass,
+        loopStartSeconds: Math.max(0, (region.loopStart - region.start) / region.sample.sampleRate),
+        loopEndSeconds: Math.max(0, (region.loopEnd - region.start) / region.sample.sampleRate),
+        attackSeconds: envelope.attackSeconds,
+        holdSeconds: envelope.holdSeconds,
+        decaySeconds: envelope.decaySeconds,
+        sustainAttenuationCentibels: envelope.sustainAttenuationCentibels,
+        releaseSeconds: envelope.releaseSecondsFromFullScale,
+        keynumToVolEnvHold: region.keynumToVolEnvHold,
+        keynumToVolEnvDecay: region.keynumToVolEnvDecay,
+      };
+    });
   }
 
   dispose(): void {
@@ -260,19 +280,20 @@ export class Sf2Synth {
     const velocityGain = Math.pow(velocity / 127, 1.35);
     const attenuationGain = centibelsToGain(Math.max(0, region.initialAttenuation));
     const gainScale = clamp(options?.gainScale ?? 1, 0, 4);
-    const peakGain = Math.min(1, velocityGain * attenuationGain * gainScale);
-    const sustainGain = peakGain * centibelsToGain(Math.max(0, region.sustainVolEnv));
-    const attack = timecentsToSeconds(region.attackVolEnv);
-    const hold = timecentsToSeconds(region.holdVolEnv);
-    const decay = timecentsToSeconds(region.decayVolEnv);
-    const release = timecentsToSeconds(region.releaseVolEnv);
+    const peakGain = Math.max(1e-8, Math.min(1, velocityGain * attenuationGain * gainScale));
+    const envelopePlan = buildSf2VolumeEnvelopePlan(region, note);
+    const sustainGain = Math.max(
+      peakGain * SF2_SILENCE_GAIN,
+      peakGain * envelopePlan.sustainGainFactor,
+    );
     const envelope: VoiceEnvelopeState = {
       startTime: now,
       peakGain,
       sustainGain,
-      attackSeconds: attack,
-      holdSeconds: hold,
-      decaySeconds: decay,
+      sustainAttenuationCentibels: envelopePlan.sustainAttenuationCentibels,
+      attackSeconds: envelopePlan.attackSeconds,
+      holdSeconds: envelopePlan.holdSeconds,
+      decaySeconds: envelopePlan.decaySeconds,
     };
 
     scheduleEnvelope(gain.gain, envelope);
@@ -285,7 +306,7 @@ export class Sf2Synth {
       source,
       gain,
       panner,
-      releaseSeconds: release,
+      releaseSeconds: envelopePlan.releaseSecondsFromFullScale,
       loopMode,
       exclusiveClass: region.exclusiveClass,
       basePlaybackRate,
@@ -317,20 +338,33 @@ export class Sf2Synth {
     voice.stopped = true;
     const context = this.audio.getContext();
     const now = context.currentTime;
-    const release = clamp(forcedReleaseSeconds ?? voice.releaseSeconds, 0.005, 30);
     const currentGain = envelopeGainAt(voice.envelope, now);
+    const baseRelease = clamp(forcedReleaseSeconds ?? voice.releaseSeconds, 0.005, 30);
+    const release = forcedReleaseSeconds !== undefined
+      ? baseRelease
+      : clamp(
+        releaseDurationSeconds(baseRelease, currentGain, voice.envelope.peakGain),
+        0.005,
+        30,
+      );
 
     if (voice.loopMode === 3) voice.source.loop = false;
 
-    // Do not rely on AudioParam.value after cancelling scheduled automation: in
-    // some browser paths it reflects a scheduled endpoint rather than the audible
-    // instantaneous level. Reconstruct the envelope level explicitly, pin that
-    // exact value at Note Off, then fade continuously to silence.
+    // SoundFont volume decay/release is linear in envelope attenuation, which
+    // means exponential in Web Audio gain. Reconstruct the exact audible level
+    // at Note Off, then ramp by constant dB/time down to the -100 dB SF2 floor.
+    const floorGain = Math.max(1e-8, voice.envelope.peakGain * SF2_SILENCE_GAIN);
     voice.gain.gain.cancelScheduledValues(now);
-    voice.gain.gain.setValueAtTime(currentGain, now);
-    voice.gain.gain.linearRampToValueAtTime(0, now + release);
+    if (currentGain > floorGain * 1.001 && release > 0.001) {
+      voice.gain.gain.setValueAtTime(Math.max(currentGain, floorGain), now);
+      voice.gain.gain.exponentialRampToValueAtTime(floorGain, now + release);
+      voice.gain.gain.setValueAtTime(0, now + release + 0.001);
+    } else {
+      voice.gain.gain.setValueAtTime(0, now);
+    }
+
     try {
-      voice.source.stop(now + release + 0.025);
+      voice.source.stop(now + release + 0.006);
     } catch {}
   }
 
@@ -361,7 +395,7 @@ export class Sf2Synth {
   }
 
   private requireFont(): Sf2SoundFont {
-    if (!this.font) throw new Error('SF2 is not loaded. Run sf2Experiment.load() first.');
+    if (!this.font) throw new Error('SF2 is not loaded. Prepare the tone backend first.');
     return this.font;
   }
 }
@@ -387,6 +421,7 @@ function scheduleEnvelope(param: AudioParam, envelope: VoiceEnvelopeState): void
     startTime,
     peakGain,
     sustainGain,
+    sustainAttenuationCentibels,
     attackSeconds,
     holdSeconds,
     decaySeconds,
@@ -394,7 +429,9 @@ function scheduleEnvelope(param: AudioParam, envelope: VoiceEnvelopeState): void
 
   param.cancelScheduledValues(startTime);
   if (attackSeconds > 0.001) {
-    param.setValueAtTime(0.000001, startTime);
+    // SF2 volume attack is convex in envelope/dB space but nominally linear
+    // in audible amplitude, so a linear GainNode attack is appropriate.
+    param.setValueAtTime(0, startTime);
     param.linearRampToValueAtTime(peakGain, startTime + attackSeconds);
   } else {
     param.setValueAtTime(peakGain, startTime);
@@ -402,8 +439,11 @@ function scheduleEnvelope(param: AudioParam, envelope: VoiceEnvelopeState): void
 
   const holdEnd = startTime + attackSeconds + holdSeconds;
   param.setValueAtTime(peakGain, holdEnd);
-  if (decaySeconds > 0.001) param.linearRampToValueAtTime(sustainGain, holdEnd + decaySeconds);
-  else param.setValueAtTime(sustainGain, holdEnd);
+  if (decaySeconds > 0.001 && sustainAttenuationCentibels > 0) {
+    param.exponentialRampToValueAtTime(sustainGain, holdEnd + decaySeconds);
+  } else {
+    param.setValueAtTime(sustainGain, holdEnd);
+  }
 }
 
 function envelopeGainAt(envelope: VoiceEnvelopeState, time: number): number {
@@ -411,7 +451,7 @@ function envelopeGainAt(envelope: VoiceEnvelopeState, time: number): number {
   const attackEnd = envelope.attackSeconds;
   if (envelope.attackSeconds > 0.001 && elapsed < attackEnd) {
     const t = clamp(elapsed / envelope.attackSeconds, 0, 1);
-    return lerp(0.000001, envelope.peakGain, t);
+    return envelope.peakGain * t;
   }
 
   const holdEnd = attackEnd + envelope.holdSeconds;
@@ -420,23 +460,10 @@ function envelopeGainAt(envelope: VoiceEnvelopeState, time: number): number {
   const decayEnd = holdEnd + envelope.decaySeconds;
   if (envelope.decaySeconds > 0.001 && elapsed < decayEnd) {
     const t = clamp((elapsed - holdEnd) / envelope.decaySeconds, 0, 1);
-    return lerp(envelope.peakGain, envelope.sustainGain, t);
+    return envelope.peakGain * decayGainFactor(envelope.sustainAttenuationCentibels, t);
   }
 
   return envelope.sustainGain;
-}
-
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
-
-function timecentsToSeconds(timecents: number): number {
-  if (!Number.isFinite(timecents) || timecents <= -32768) return 0;
-  return clamp(2 ** (timecents / 1200), 0, 100);
-}
-
-function centibelsToGain(centibels: number): number {
-  return 10 ** (-centibels / 200);
 }
 
 function clampMidi(value: number): number {
