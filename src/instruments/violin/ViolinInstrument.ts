@@ -5,6 +5,7 @@ import {
   applyFingeringMarkerStyle,
   FINGERING_MARKER_STYLES,
 } from '../shared/FingeringMarkerStyle';
+import { StringFingeringState, type StringFingeringValue } from '../shared/StringFingeringState';
 import {
   buildLegacyViolinAsset,
   type LegacyViolinController,
@@ -25,6 +26,8 @@ interface VisualReleaseTail {
   elapsedSeconds: number;
 }
 
+const STRING_ORDER = [4, 3, 2, 1] as const;
+
 export class ViolinInstrument implements Instrument {
   readonly id = 'violin.main';
   readonly role = 'violin';
@@ -36,6 +39,7 @@ export class ViolinInstrument implements Instrument {
   private readonly sampler: ViolinSampler;
   private readonly interactionVoices = new Map<string, InteractionVoice>();
   private readonly releaseTails = new Map<number, VisualReleaseTail>();
+  private readonly fingeringState = new StringFingeringState(STRING_ORDER, 24);
 
   private constructor(
     model: LegacyViolinModel,
@@ -47,6 +51,7 @@ export class ViolinInstrument implements Instrument {
     this.sampler = sampler;
     this.root = model.root;
     this.root.userData.instrumentId = this.id;
+    this.syncFingeringMarkers();
   }
 
   static async create(sampler: ViolinSampler): Promise<ViolinInstrument> {
@@ -73,6 +78,39 @@ export class ViolinInstrument implements Instrument {
     const result = this.controller.api.playString(stringNumber, velocity, semitones);
     if (result) this.playAudio(result);
     return result;
+  }
+
+  playCurrentString(stringNumber: number, velocity = 100): LegacyViolinHitEvent | false {
+    const semitones = this.fingeringState.get(stringNumber);
+    if (semitones === null) return false;
+    return this.playString(stringNumber, velocity, semitones);
+  }
+
+  get fingering(): Array<number | null> {
+    return this.fingeringState.snapshot();
+  }
+
+  setFingering(positions: readonly StringFingeringValue[]): boolean {
+    if (!this.fingeringState.setAll(positions)) return false;
+    this.syncFingeringMarkers();
+    return true;
+  }
+
+  clearFingering(): void {
+    this.fingeringState.clear();
+    this.syncFingeringMarkers();
+  }
+
+  setStoppedPosition(stringNumber: number, semitones: number): boolean {
+    if (!this.fingeringState.set(stringNumber, semitones)) return false;
+    this.syncFingeringMarkers();
+    return true;
+  }
+
+  toggleStoppedPosition(stringNumber: number, semitones: number): boolean {
+    if (!this.fingeringState.toggle(stringNumber, semitones)) return false;
+    this.syncFingeringMarkers();
+    return true;
   }
 
   setArticulation(value: ViolinArticulation): boolean {
@@ -131,6 +169,7 @@ export class ViolinInstrument implements Instrument {
   update(dt: number): InstrumentFrameResult {
     const result = this.controller.tick(dt);
     const releaseMoved = this.syncReleaseTailVisuals(dt);
+    this.syncFingeringMarkers();
     applyFingeringMarkerStyle(this.model.strings.values(), FINGERING_MARKER_STYLES.violin);
     return {
       moved: result.moved || releaseMoved,
@@ -143,6 +182,7 @@ export class ViolinInstrument implements Instrument {
     this.controller.api.panic();
     this.sampler.reset();
     this.interactionVoices.clear();
+    this.clearFingering();
   }
 
   resolveHit(intersection: THREE.Intersection): string | null {
@@ -153,10 +193,17 @@ export class ViolinInstrument implements Instrument {
     }
 
     const point = this.root.worldToLocal(intersection.point.clone());
+    const fingerboardZone = point.y >= this.model.boardEnd
+      && point.y < this.model.nutY - 0.05;
+    const playZone = point.y < this.model.boardEnd;
+
     if (
-      point.z < 0.375
-      || point.y < this.model.bridgeY - 0.04
+      point.y < this.model.bridgeY - 0.12
       || point.y > this.model.nutY + 0.055
+      || (
+        point.z < 0.375
+        && !(playZone && isFrontFacingInteraction(intersection, this.root))
+      )
     ) return null;
 
     const t = THREE.MathUtils.clamp(
@@ -173,25 +220,29 @@ export class ViolinInstrument implements Instrument {
     if (!string) return null;
 
     const stringX = THREE.MathUtils.lerp(string.saddle.x, string.nut.x, t);
-    if (Math.abs(point.x - stringX) > 0.051) return null;
+    const hitTolerance = playZone ? 0.072 : 0.051;
+    if (Math.abs(point.x - stringX) > hitTolerance) return null;
 
-    let semitones = 0;
-    if (point.y >= this.model.boardEnd && point.y < this.model.nutY - 0.05) {
-      semitones = THREE.MathUtils.clamp(
-        Math.round(-12 * Math.log2((point.y - this.model.bridgeY) / this.model.scale)),
-        0,
-        24,
-      );
-    } else if (point.y < this.model.boardEnd) {
-      semitones = string.held ? string.interval : 0;
-    }
+    if (playZone) return `play:${string.number}`;
+    if (!fingerboardZone) return null;
 
-    return `string:${string.number}:${semitones}`;
+    const semitones = THREE.MathUtils.clamp(
+      Math.round(-12 * Math.log2((point.y - this.model.bridgeY) / this.model.scale)),
+      1,
+      24,
+    );
+    return `finger:${string.number}:${semitones}`;
   }
 
   interact({ partId, velocity, phase }: InstrumentInteraction): boolean {
-    const match = /^string:([1-4]):(\d{1,2})$/.exec(partId);
-    if (!match) return false;
+    const fingerMatch = /^finger:([1-4]):(\d{1,2})$/.exec(partId);
+    if (fingerMatch) {
+      if (phase === 'end') return true;
+      return this.toggleStoppedPosition(Number(fingerMatch[1]), Number(fingerMatch[2]));
+    }
+
+    const playMatch = /^play:([1-4])$/.exec(partId);
+    if (!playMatch) return false;
 
     if (phase === 'end') {
       const voice = this.interactionVoices.get(partId);
@@ -202,18 +253,15 @@ export class ViolinInstrument implements Instrument {
       return true;
     }
 
-    const stringNumber = Number(match[1]);
-    const semitones = Number(match[2]);
-    if (semitones < 0 || semitones > 24) return false;
-
+    const stringNumber = Number(playMatch[1]);
     const previous = this.interactionVoices.get(partId);
     if (previous) {
       this.controller.api.noteOff(previous.note);
       this.beginReleaseTail(previous.stringNumber, this.sampler.noteOff(previous.stringNumber));
     }
 
-    const result = this.playString(stringNumber, velocity, semitones);
-    if (!result) return false;
+    const result = this.playCurrentString(stringNumber, velocity);
+    if (!result) return true;
     this.interactionVoices.set(partId, {
       note: result.note,
       stringNumber: result.string,
@@ -296,6 +344,22 @@ export class ViolinInstrument implements Instrument {
     return moved;
   }
 
+  private syncFingeringMarkers(): void {
+    for (const string of this.model.strings.values()) {
+      const semitones = this.fingeringState.get(string.number);
+      if (semitones === null || semitones <= 0) {
+        string.marker.visible = false;
+        continue;
+      }
+
+      const y = this.model.bridgeY + this.model.scale * 2 ** (-semitones / 12);
+      const point = this.controller.stringPoint(string, y, false);
+      point.z += 0.018;
+      string.marker.position.copy(point);
+      string.marker.visible = true;
+    }
+  }
+
   /**
    * The frozen donor already exposes stringPoint(), so the adapter can redraw the
    * dynamic tube after overriding only release-tail energy. This keeps donor code
@@ -318,14 +382,18 @@ export class ViolinInstrument implements Instrument {
     }
     positions.needsUpdate = true;
     string.mesh.geometry.computeBoundingSphere();
-
-    const materials = Array.isArray(string.mesh.material)
-      ? string.mesh.material
-      : [string.mesh.material];
-    for (const material of materials) {
-      if ('emissiveIntensity' in material) {
-        (material as THREE.MeshStandardMaterial).emissiveIntensity = string.energy * 0.12;
-      }
-    }
   }
+}
+
+function isFrontFacingInteraction(
+  intersection: THREE.Intersection,
+  root: THREE.Object3D,
+): boolean {
+  if (!intersection.face) return false;
+
+  const normalMatrix = new THREE.Matrix3().getNormalMatrix(intersection.object.matrixWorld);
+  const worldNormal = intersection.face.normal.clone().applyMatrix3(normalMatrix).normalize();
+  const rootWorldRotation = root.getWorldQuaternion(new THREE.Quaternion()).invert();
+  const localNormal = worldNormal.applyQuaternion(rootWorldRotation);
+  return localNormal.z > 0.15;
 }

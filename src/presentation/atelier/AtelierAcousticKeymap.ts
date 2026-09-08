@@ -4,6 +4,7 @@ export type AtelierAcousticKeyAction =
   | { kind: 'string'; stringNumber: number }
   | { kind: 'chord'; chordIndex: number }
   | { kind: 'strum'; direction: 'down' | 'up' }
+  | { kind: 'clear-fingering' }
   | { kind: 'program-toggle' }
   | { kind: 'view'; view: AtelierAcousticViewName }
   | { kind: 'panic' };
@@ -20,6 +21,7 @@ export const ATELIER_ACOUSTIC_KEYMAP: Readonly<Record<string, AtelierAcousticKey
   Digit2: { kind: 'chord', chordIndex: 1 },
   Digit3: { kind: 'chord', chordIndex: 2 },
   Digit4: { kind: 'chord', chordIndex: 3 },
+  Digit0: { kind: 'clear-fingering' },
   Space: { kind: 'strum', direction: 'down' },
   KeyE: { kind: 'strum', direction: 'up' },
   KeyQ: { kind: 'program-toggle' },

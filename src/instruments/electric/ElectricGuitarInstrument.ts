@@ -10,6 +10,7 @@ import {
   applyFingeringMarkerStyle,
   FINGERING_MARKER_STYLES,
 } from '../shared/FingeringMarkerStyle';
+import { StringFingeringState, type StringFingeringValue } from '../shared/StringFingeringState';
 import {
   buildLegacyElectricAsset,
   type ElectricControlId,
@@ -24,6 +25,8 @@ interface InteractionVoice {
   stringNumber: number;
 }
 
+const STRING_ORDER = [6, 5, 4, 3, 2, 1] as const;
+
 export class ElectricGuitarInstrument implements Instrument {
   readonly id = 'electric.main';
   readonly role = 'electric';
@@ -34,6 +37,7 @@ export class ElectricGuitarInstrument implements Instrument {
   private readonly controller: LegacyElectricController;
   private readonly sampler: ElectricGuitarSampler;
   private readonly interactionVoices = new Map<string, InteractionVoice>();
+  private readonly fingeringState = new StringFingeringState(STRING_ORDER, 22);
   private pendingStrumHits: number[] = [];
   private pendingDirectPluckString: number | null = null;
 
@@ -47,6 +51,7 @@ export class ElectricGuitarInstrument implements Instrument {
     this.sampler = sampler;
     this.root = model.root;
     this.root.userData.instrumentId = this.id;
+    this.syncFingeringMarkers();
   }
 
   static async create(sampler: ElectricGuitarSampler): Promise<ElectricGuitarInstrument> {
@@ -80,6 +85,12 @@ export class ElectricGuitarInstrument implements Instrument {
     }
   }
 
+  pluckCurrentString(stringNumber: number, velocity = 100): LegacyElectricHitEvent | false {
+    const fret = this.fingeringState.get(stringNumber);
+    if (fret === null) return false;
+    return this.pluck(stringNumber, velocity, fret);
+  }
+
   strum(
     frets: Array<number | null>,
     velocity = 100,
@@ -95,6 +106,40 @@ export class ElectricGuitarInstrument implements Instrument {
       this.sampler.muteString(stringNumber, 0.04);
     }
     this.pendingStrumHits = strumStringOrder(frets, direction);
+    return true;
+  }
+
+  strumCurrentFingering(
+    velocity = 100,
+    direction: ElectricStrumDirection = 'down',
+  ): boolean {
+    return this.strum(this.fingering, velocity, direction);
+  }
+
+  get fingering(): Array<number | null> {
+    return this.fingeringState.snapshot();
+  }
+
+  setFingering(frets: readonly StringFingeringValue[]): boolean {
+    if (!this.fingeringState.setAll(frets)) return false;
+    this.syncFingeringMarkers();
+    return true;
+  }
+
+  clearFingering(): void {
+    this.fingeringState.clear();
+    this.syncFingeringMarkers();
+  }
+
+  setStringFret(stringNumber: number, fret: number): boolean {
+    if (!this.fingeringState.set(stringNumber, fret)) return false;
+    this.syncFingeringMarkers();
+    return true;
+  }
+
+  toggleStringFret(stringNumber: number, fret: number): boolean {
+    if (!this.fingeringState.toggle(stringNumber, fret)) return false;
+    this.syncFingeringMarkers();
     return true;
   }
 
@@ -155,6 +200,7 @@ export class ElectricGuitarInstrument implements Instrument {
 
   update(dt: number): InstrumentFrameResult {
     const result = this.controller.tick(dt);
+    this.syncFingeringMarkers();
     applyFingeringMarkerStyle(this.model.strings.values(), FINGERING_MARKER_STYLES.electricGuitar);
     return result;
   }
@@ -165,6 +211,7 @@ export class ElectricGuitarInstrument implements Instrument {
     this.interactionVoices.clear();
     this.pendingStrumHits = [];
     this.pendingDirectPluckString = null;
+    this.clearFingering();
   }
 
   resolveHit(intersection: THREE.Intersection): string | null {
@@ -178,6 +225,11 @@ export class ElectricGuitarInstrument implements Instrument {
     }
 
     const point = this.root.worldToLocal(intersection.point.clone());
+    const lastFret = Math.min(22, this.model.frets.length - 1);
+    const fingerboardZone = point.y > this.model.frets[lastFret] - 0.04
+      && point.y < this.model.nutY - 0.03;
+    const pluckZone = point.y <= this.model.frets[lastFret] - 0.04;
+
     if (
       point.z < 0.275
       || point.y < this.model.bridgeY - 0.14
@@ -198,22 +250,20 @@ export class ElectricGuitarInstrument implements Instrument {
     if (!string) return null;
 
     const stringX = THREE.MathUtils.lerp(string.saddle.x, string.nut.x, t);
-    if (Math.abs(point.x - stringX) > 0.062) return null;
+    const hitTolerance = pluckZone ? 0.09 : 0.062;
+    if (Math.abs(point.x - stringX) > hitTolerance) return null;
 
-    let fret = 0;
-    if (point.y > this.model.frets[22] - 0.04 && point.y < this.model.nutY - 0.03) {
-      for (let index = 1; index <= 22; index += 1) {
-        if (point.y <= this.model.frets[index - 1] && point.y > this.model.frets[index]) {
-          fret = index;
-          break;
-        }
+    if (pluckZone) return `pluck:${string.number}`;
+    if (!fingerboardZone) return null;
+
+    let fret = lastFret;
+    for (let index = 1; index <= lastFret; index += 1) {
+      if (point.y <= this.model.frets[index - 1] && point.y > this.model.frets[index]) {
+        fret = index;
+        break;
       }
-      if (point.y <= this.model.frets[22]) fret = 22;
-    } else if (point.y <= this.model.frets[22] - 0.04) {
-      fret = string.held ? string.fret : 0;
     }
-
-    return `string:${string.number}:${fret}`;
+    return `fret:${string.number}:${fret}`;
   }
 
   interact({ partId, velocity, phase }: InstrumentInteraction): boolean {
@@ -228,33 +278,35 @@ export class ElectricGuitarInstrument implements Instrument {
       return this.setControl(id, next);
     }
 
-    const stringMatch = /^string:([1-6]):(\d{1,2})$/.exec(partId);
-    if (!stringMatch) return false;
+    const fretMatch = /^fret:([1-6]):(\d{1,2})$/.exec(partId);
+    if (fretMatch) {
+      if (phase === 'end') return true;
+      return this.toggleStringFret(Number(fretMatch[1]), Number(fretMatch[2]));
+    }
+
+    const pluckMatch = /^pluck:([1-6])$/.exec(partId);
+    if (!pluckMatch) return false;
 
     if (phase === 'end') {
       const voice = this.interactionVoices.get(partId);
       if (!voice) return true;
       this.interactionVoices.delete(partId);
       this.controller.api.noteOff(voice.note);
-      // Direct pointer/keyboard plucks are impulses. Releasing the input only
-      // clears the held visual state; the sampler keeps the plucked string's
-      // natural decay until it ends, is re-plucked, or is explicitly muted.
+      // Manual plucks are impulses. Input release only clears donor hold state;
+      // the sampler keeps the old string tail until natural decay or re-pluck.
       this.sampler.noteOff(voice.stringNumber);
       return true;
     }
 
-    const stringNumber = Number(stringMatch[1]);
-    const fret = Number(stringMatch[2]);
-    if (fret < 0 || fret > 22) return false;
-
+    const stringNumber = Number(pluckMatch[1]);
     const previous = this.interactionVoices.get(partId);
     if (previous) {
       this.controller.api.noteOff(previous.note);
       this.sampler.noteOff(previous.stringNumber);
     }
 
-    const result = this.pluck(stringNumber, velocity, fret);
-    if (!result) return false;
+    const result = this.pluckCurrentString(stringNumber, velocity);
+    if (!result) return true;
     this.interactionVoices.set(partId, {
       note: result.note,
       stringNumber: result.string,
@@ -293,6 +345,27 @@ export class ElectricGuitarInstrument implements Instrument {
     const directPluck = this.pendingDirectPluckString === event.string;
     const gesture = strum ? 'strum' : directPluck ? 'pluck' : 'gated';
     this.sampler.noteOn(event.string, event.note, event.velocity, gesture);
+  }
+
+  private syncFingeringMarkers(): void {
+    const lastFret = Math.min(22, this.model.frets.length - 1);
+    for (const string of this.model.strings.values()) {
+      const fret = this.fingeringState.get(string.number);
+      if (fret === null || fret <= 0 || fret > lastFret) {
+        string.marker.visible = false;
+        continue;
+      }
+
+      const y = (this.model.frets[fret - 1] + this.model.frets[fret]) * 0.5;
+      const denominator = string.nut.y - string.saddle.y;
+      const t = denominator === 0
+        ? 0
+        : THREE.MathUtils.clamp((y - string.saddle.y) / denominator, 0, 1);
+      const point = string.saddle.clone().lerp(string.nut, t);
+      point.z += 0.024;
+      string.marker.position.copy(point);
+      string.marker.visible = true;
+    }
   }
 }
 

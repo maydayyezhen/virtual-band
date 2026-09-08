@@ -4,6 +4,7 @@ import type { ViolinArticulation } from '../../instruments/violin/legacyViolinAs
 export type AtelierViolinKeyAction =
   | { kind: 'string'; stringNumber: number }
   | { kind: 'articulation'; articulation: ViolinArticulation }
+  | { kind: 'clear-fingering' }
   | { kind: 'view'; view: AtelierViolinViewName }
   | { kind: 'demo' }
   | { kind: 'panic' };
@@ -16,6 +17,7 @@ export const ATELIER_VIOLIN_KEYMAP: Readonly<Record<string, AtelierViolinKeyActi
 
   Digit1: { kind: 'articulation', articulation: 'arco' },
   Digit2: { kind: 'articulation', articulation: 'pizzicato' },
+  Digit0: { kind: 'clear-fingering' },
 
   Digit3: { kind: 'view', view: 'whole' },
   Digit4: { kind: 'view', view: 'body' },

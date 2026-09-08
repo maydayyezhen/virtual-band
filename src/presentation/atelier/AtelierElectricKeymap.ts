@@ -4,6 +4,7 @@ export type AtelierElectricKeyAction =
   | { kind: 'string'; stringNumber: number }
   | { kind: 'chord'; chordIndex: number }
   | { kind: 'strum' }
+  | { kind: 'clear-fingering' }
   | { kind: 'program-step'; delta: -1 | 1 }
   | { kind: 'view'; view: AtelierElectricViewName }
   | { kind: 'panic' };
@@ -20,6 +21,7 @@ export const ATELIER_ELECTRIC_KEYMAP: Readonly<Record<string, AtelierElectricKey
   Digit2: { kind: 'chord', chordIndex: 1 },
   Digit3: { kind: 'chord', chordIndex: 2 },
   Digit4: { kind: 'chord', chordIndex: 3 },
+  Digit0: { kind: 'clear-fingering' },
   Space: { kind: 'strum' },
 
   KeyQ: { kind: 'program-step', delta: -1 },

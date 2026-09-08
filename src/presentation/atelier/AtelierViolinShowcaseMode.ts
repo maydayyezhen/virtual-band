@@ -312,7 +312,7 @@ export class AtelierViolinShowcaseMode implements PresentationMode {
 
     if (action?.kind === 'string') {
       if (!event.repeat && !this.computerKeys.has(event.code)) {
-        const result = this.violin.playString(action.stringNumber, 100, 0);
+        const result = this.violin.playCurrentString(action.stringNumber, 100);
         if (result) {
           this.computerKeys.set(event.code, {
             note: result.note,
@@ -323,6 +323,8 @@ export class AtelierViolinShowcaseMode implements PresentationMode {
     } else if (action?.kind === 'articulation') {
       this.violin.setArticulation(action.articulation);
       if (action.articulation === 'pizzicato') this.setBowFramed(false);
+    } else if (action?.kind === 'clear-fingering') {
+      if (!event.repeat) this.violin.clearFingering();
     } else if (action?.kind === 'view') {
       this.selectView(action.view);
     } else if (action?.kind === 'demo') {

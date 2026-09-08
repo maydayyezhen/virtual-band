@@ -82,7 +82,6 @@ export class AtelierElectricShowcaseMode implements PresentationMode {
   private momentumX = 0;
   private momentumY = 0;
   private previousGesture: GestureState | null = null;
-  private currentChord = 0;
 
   constructor(options: {
     element: HTMLCanvasElement;
@@ -308,16 +307,15 @@ export class AtelierElectricShowcaseMode implements PresentationMode {
     if (/INPUT|TEXTAREA|SELECT/.test(targetTag)) return;
 
     const action = ATELIER_ELECTRIC_KEYMAP[event.code];
-    const velocityAction = action?.kind === 'string' || action?.kind === 'chord' || action?.kind === 'strum';
+    const velocityAction = action?.kind === 'string' || action?.kind === 'strum';
     if (event.altKey && !velocityAction) return;
     let handled = Boolean(action);
 
     if (action?.kind === 'string') {
       if (!event.repeat && !this.computerKeys.has(event.code)) {
-        const result = this.electric.pluck(
+        const result = this.electric.pluckCurrentString(
           action.stringNumber,
           guitarKeyboardVelocity(event, 104),
-          0,
         );
         if (result) {
           this.computerKeys.set(event.code, {
@@ -327,12 +325,13 @@ export class AtelierElectricShowcaseMode implements PresentationMode {
         }
       }
     } else if (action?.kind === 'chord') {
-      if (!event.repeat) {
-        this.currentChord = action.chordIndex;
-        this.strumCurrentChord(guitarKeyboardVelocity(event, 106));
-      }
+      if (!event.repeat) this.electric.setFingering(CHORDS[action.chordIndex] ?? CHORDS[0]);
     } else if (action?.kind === 'strum') {
-      if (!event.repeat) this.strumCurrentChord(guitarKeyboardVelocity(event, 100));
+      if (!event.repeat) {
+        this.electric.strumCurrentFingering(guitarKeyboardVelocity(event, 100), 'down');
+      }
+    } else if (action?.kind === 'clear-fingering') {
+      if (!event.repeat) this.electric.clearFingering();
     } else if (action?.kind === 'program-step') {
       if (!event.repeat) this.stepProgram(action.delta);
     } else if (action?.kind === 'view') {
@@ -398,12 +397,6 @@ export class AtelierElectricShowcaseMode implements PresentationMode {
     this.pointers.clear();
     this.previousGesture = null;
     this.element.classList.remove('dragging');
-  }
-
-  private strumCurrentChord(velocity: number): void {
-    const chord = CHORDS[this.currentChord];
-    if (!chord) return;
-    this.electric.strum([...chord], velocity, 'down');
   }
 
   private stepProgram(delta: -1 | 1): void {

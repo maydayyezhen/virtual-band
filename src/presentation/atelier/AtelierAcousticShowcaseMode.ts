@@ -78,7 +78,6 @@ export class AtelierAcousticShowcaseMode implements PresentationMode {
   private momentumX = 0;
   private momentumY = 0;
   private previousGesture: GestureState | null = null;
-  private currentChord = 0;
 
   constructor(options: {
     element: HTMLCanvasElement;
@@ -304,16 +303,15 @@ export class AtelierAcousticShowcaseMode implements PresentationMode {
     if (/INPUT|TEXTAREA|SELECT/.test(targetTag)) return;
 
     const action = ATELIER_ACOUSTIC_KEYMAP[event.code];
-    const velocityAction = action?.kind === 'string' || action?.kind === 'chord' || action?.kind === 'strum';
+    const velocityAction = action?.kind === 'string' || action?.kind === 'strum';
     if (event.altKey && !velocityAction) return;
     let handled = Boolean(action);
 
     if (action?.kind === 'string') {
       if (!event.repeat && !this.computerKeys.has(event.code)) {
-        const result = this.acoustic.pluck(
+        const result = this.acoustic.pluckCurrentString(
           action.stringNumber,
           guitarKeyboardVelocity(event, 104),
-          0,
         );
         if (result) {
           this.computerKeys.set(event.code, {
@@ -323,14 +321,16 @@ export class AtelierAcousticShowcaseMode implements PresentationMode {
         }
       }
     } else if (action?.kind === 'chord') {
-      if (!event.repeat) {
-        this.currentChord = action.chordIndex;
-        this.strumCurrentChord(guitarKeyboardVelocity(event, 106), 'down');
-      }
+      if (!event.repeat) this.acoustic.setFingering(CHORDS[action.chordIndex] ?? CHORDS[0]);
     } else if (action?.kind === 'strum') {
       if (!event.repeat) {
-        this.strumCurrentChord(guitarKeyboardVelocity(event, 100), action.direction);
+        this.acoustic.strumCurrentFingering(
+          guitarKeyboardVelocity(event, 100),
+          action.direction,
+        );
       }
+    } else if (action?.kind === 'clear-fingering') {
+      if (!event.repeat) this.acoustic.clearFingering();
     } else if (action?.kind === 'program-toggle') {
       if (!event.repeat) {
         const nextProgram = this.acoustic.program === 24 ? 25 : 24;
@@ -403,12 +403,6 @@ export class AtelierAcousticShowcaseMode implements PresentationMode {
     this.pointers.clear();
     this.previousGesture = null;
     this.element.classList.remove('dragging');
-  }
-
-  private strumCurrentChord(velocity: number, direction: 'down' | 'up'): void {
-    const chord = CHORDS[this.currentChord];
-    if (!chord) return;
-    this.acoustic.strum([...chord], velocity, direction);
   }
 
   private changeZoom(factor: number): void {
