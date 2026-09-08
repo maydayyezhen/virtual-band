@@ -6,6 +6,10 @@ import {
   ATELIER_ELECTRIC_VIEW_IDS,
   type AtelierElectricViewName,
 } from '../../camera/presets/AtelierElectricViews';
+import {
+  ELECTRIC_GUITAR_PROGRAM_IDS,
+  ELECTRIC_GUITAR_PROGRAMS,
+} from '../../audio/ElectricGuitarProgram';
 import type { InstrumentHit, InstrumentInteractionSystem } from '../../instruments/InstrumentInteractionSystem';
 import type { ElectricGuitarInstrument } from '../../instruments/electric/ElectricGuitarInstrument';
 import type { PresentationMode } from '../PresentationManager';
@@ -320,6 +324,8 @@ export class AtelierElectricShowcaseMode implements PresentationMode {
       }
     } else if (action?.kind === 'strum') {
       if (!event.repeat) this.strumCurrentChord(100);
+    } else if (action?.kind === 'program-step') {
+      if (!event.repeat) this.stepProgram(action.delta);
     } else if (action?.kind === 'view') {
       this.selectView(action.view);
     } else if (action?.kind === 'panic') {
@@ -389,6 +395,19 @@ export class AtelierElectricShowcaseMode implements PresentationMode {
     const chord = CHORDS[this.currentChord];
     if (!chord) return;
     this.electric.strum([...chord], velocity, 'down');
+  }
+
+  private stepProgram(delta: -1 | 1): void {
+    const currentIndex = ELECTRIC_GUITAR_PROGRAM_IDS.indexOf(this.electric.program);
+    const normalizedIndex = currentIndex < 0 ? 0 : currentIndex;
+    const nextIndex = (
+      normalizedIndex + delta + ELECTRIC_GUITAR_PROGRAM_IDS.length
+    ) % ELECTRIC_GUITAR_PROGRAM_IDS.length;
+    const nextProgram = ELECTRIC_GUITAR_PROGRAM_IDS[nextIndex];
+    if (!this.electric.setProgram(nextProgram)) return;
+
+    const preset = ELECTRIC_GUITAR_PROGRAMS[nextProgram];
+    console.info(`[Virtual Band V2] electric program ${preset.id} · ${preset.name}`);
   }
 
   private changeZoom(factor: number): void {
