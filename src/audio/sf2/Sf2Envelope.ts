@@ -1,4 +1,4 @@
-import type { Sf2Region } from './Sf2Parser';
+import type { Sf2Region } from './Sf2Parser.ts';
 
 export const SF2_SILENCE_CENTIBELS = 960;
 export const SF2_SILENCE_GAIN = 10 ** (-SF2_SILENCE_CENTIBELS / 200);
@@ -49,9 +49,6 @@ export function buildSf2VolumeEnvelopePlan(
     delaySeconds: timecentsToSeconds(region.delayVolEnv),
     attackSeconds: timecentsToSeconds(region.attackVolEnv),
     holdSeconds: timecentsToSeconds(holdTimecents),
-    // SoundFont decay time is defined for a full 96 dB envelope change.
-    // A sustain attenuation of e.g. 120 cB (-12 dB) therefore uses 12.5%
-    // of the declared decay time.
     decaySeconds:
       decaySecondsForFullAttenuation
       * (sustainAttenuationCentibels / SF2_SILENCE_CENTIBELS),
@@ -68,8 +65,6 @@ export function keyTrackedTimecents(
 ): number {
   if (!Number.isFinite(baseTimecents)) return -32768;
   if (!Number.isFinite(keynumScale)) return baseTimecents;
-  // SF2 defines key 60 as the neutral point. Positive key tracking shortens
-  // hold/decay as pitch rises and lengthens them below middle C.
   return baseTimecents + keynumScale * (60 - clamp(note, 0, 127));
 }
 

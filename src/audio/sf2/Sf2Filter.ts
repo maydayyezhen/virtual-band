@@ -1,6 +1,6 @@
 import type { ProgramToneNoteOptions } from '../ProgramToneBackend';
-import { keyTrackedTimecents, timecentsToSeconds } from './Sf2Envelope';
-import type { Sf2Region } from './Sf2Parser';
+import { keyTrackedTimecents, timecentsToSeconds } from './Sf2Envelope.ts';
+import type { Sf2Region } from './Sf2Parser.ts';
 
 export interface Sf2FilterEnvelopePlan {
   readonly delaySeconds: number;
@@ -55,8 +55,6 @@ export function buildSf2FilterPlan(
       20,
       Math.max(20, sampleRate * 0.49),
     ),
-    // SF2 initialFilterQ is in centibels above DC gain. For Web Audio lowpass,
-    // BiquadFilterNode.Q is interpreted in dB, so cB / 10 maps directly.
     resonanceDb: clamp(region.initialFilterQ / 10, 0, 96),
     staticDetuneCents: clamp(brightness + velocityToFilter * velocityAmount, -9600, 9600),
     envelopeDepthCents: clamp(region.modEnvToFilterFc * envelopeScale, -12000, 12000),
