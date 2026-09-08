@@ -15,7 +15,7 @@ if (import.meta.env.DEV) {
   });
   Object.defineProperty(window, 'sf2Experiment', {
     configurable: true,
-    value: new Sf2Experiment(app.audio),
+    value: new Sf2Experiment(app.audio, app.violinSf2.synth),
   });
 }
 
