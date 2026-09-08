@@ -1,4 +1,5 @@
 import type { AudioBus, AudioEngine } from '../AudioEngine';
+import type { Sf2BankLibrary } from './Sf2BankLibrary';
 import { parseSf2, type Sf2PresetInfo, type Sf2Region, type Sf2SoundFont } from './Sf2Parser';
 
 interface VoiceEnvelopeState {
@@ -39,6 +40,7 @@ export interface Sf2RegionInspection {
 export class Sf2Synth {
   private readonly audio: AudioEngine;
   private readonly bus: AudioBus;
+  private readonly banks: Sf2BankLibrary | null;
   private readonly audioBuffers = new Map<string, AudioBuffer>();
   private readonly voices = new Map<string, Set<ActiveVoice>>();
   private font: Sf2SoundFont | null = null;
@@ -49,8 +51,9 @@ export class Sf2Synth {
   private pitchBendSemitones = 2;
   private loadedBytes = 0;
 
-  constructor(audio: AudioEngine) {
+  constructor(audio: AudioEngine, banks: Sf2BankLibrary | null = null) {
     this.audio = audio;
+    this.banks = banks;
     this.bus = audio.createBus(0.9);
   }
 
@@ -63,13 +66,22 @@ export class Sf2Synth {
   }
 
   async load(url = '/soundfonts/FluidR3_GM.sf2'): Promise<Sf2SoundFont> {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`SF2 load failed: HTTP ${response.status} for ${url}`);
-    const data = await response.arrayBuffer();
-    const font = parseSf2(data);
+    let font: Sf2SoundFont;
+    let byteLength: number;
+
+    if (this.banks) {
+      ({ font, byteLength } = await this.banks.load(url));
+    } else {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`SF2 load failed: HTTP ${response.status} for ${url}`);
+      const data = await response.arrayBuffer();
+      font = parseSf2(data);
+      byteLength = data.byteLength;
+    }
+
     this.allNotesOff(0.02);
     this.font = font;
-    this.loadedBytes = data.byteLength;
+    this.loadedBytes = byteLength;
     this.audioBuffers.clear();
     return font;
   }

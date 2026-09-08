@@ -1,5 +1,6 @@
 import type { AudioEngine } from '../AudioEngine';
 import type { ViolinReleaseInfo, ViolinSustainBackend } from '../ViolinSustainBackend';
+import type { Sf2BankLibrary } from './Sf2BankLibrary';
 import { Sf2Synth } from './Sf2Synth';
 
 const VIOLIN_PROGRAM = 40;
@@ -19,8 +20,8 @@ export class Sf2ViolinBackend implements ViolinSustainBackend {
   private preparePromise: Promise<boolean> | null = null;
   private failed = false;
 
-  constructor(audio: AudioEngine, url = DEFAULT_URL) {
-    this.synth = new Sf2Synth(audio);
+  constructor(audio: AudioEngine, banks: Sf2BankLibrary, url = DEFAULT_URL) {
+    this.synth = new Sf2Synth(audio, banks);
     this.url = url;
   }
 
