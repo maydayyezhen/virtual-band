@@ -2,11 +2,13 @@ import * as THREE from 'three';
 import { AppState } from './AppState';
 import { AudioEngine } from '../audio/AudioEngine';
 import { DrumSampler } from '../audio/DrumSampler';
+import { ElectricGuitarSampler } from '../audio/ElectricGuitarSampler';
 import { KeyboardSampler } from '../audio/KeyboardSampler';
 import { ViolinSampler } from '../audio/ViolinSampler';
 import { CameraRegistry } from '../camera/CameraRegistry';
 import { CameraSystem } from '../camera/CameraSystem';
 import { ATELIER_DRUM_VIEWS } from '../camera/presets/AtelierDrumViews';
+import { ATELIER_ELECTRIC_VIEWS } from '../camera/presets/AtelierElectricViews';
 import { ATELIER_KEYBOARD_VIEWS } from '../camera/presets/AtelierKeyboardViews';
 import { ATELIER_VIOLIN_VIEWS } from '../camera/presets/AtelierViolinViews';
 import { Engine } from '../engine/Engine';
@@ -14,9 +16,11 @@ import { RendererHost } from '../engine/RendererHost';
 import { InstrumentRegistry } from '../instruments/Instrument';
 import { InstrumentInteractionSystem } from '../instruments/InstrumentInteractionSystem';
 import { DrumsInstrument } from '../instruments/drums/DrumsInstrument';
+import { ElectricGuitarInstrument } from '../instruments/electric/ElectricGuitarInstrument';
 import { KeyboardInstrument } from '../instruments/keyboard/KeyboardInstrument';
 import { ViolinInstrument } from '../instruments/violin/ViolinInstrument';
 import { AtelierDrumShowcaseMode } from '../presentation/atelier/AtelierDrumShowcaseMode';
+import { AtelierElectricShowcaseMode } from '../presentation/atelier/AtelierElectricShowcaseMode';
 import { AtelierKeyboardShowcaseMode } from '../presentation/atelier/AtelierKeyboardShowcaseMode';
 import { AtelierViolinShowcaseMode } from '../presentation/atelier/AtelierViolinShowcaseMode';
 import { PresentationManager } from '../presentation/PresentationManager';
@@ -33,6 +37,7 @@ export class VirtualBandApp {
   readonly transport = new Transport();
   readonly audio = new AudioEngine();
   readonly drumSampler = new DrumSampler(this.audio);
+  readonly electricSampler = new ElectricGuitarSampler(this.audio);
   readonly keyboardSampler = new KeyboardSampler(this.audio);
   readonly violinSampler = new ViolinSampler(this.audio);
   readonly instruments = new InstrumentRegistry();
@@ -50,9 +55,11 @@ export class VirtualBandApp {
   private drums: DrumsInstrument | null = null;
   private keyboard: KeyboardInstrument | null = null;
   private violin: ViolinInstrument | null = null;
+  private electric: ElectricGuitarInstrument | null = null;
   private atelierMode: AtelierDrumShowcaseMode | null = null;
   private keyboardMode: AtelierKeyboardShowcaseMode | null = null;
   private violinMode: AtelierViolinShowcaseMode | null = null;
+  private electricMode: AtelierElectricShowcaseMode | null = null;
   private showcaseSwitch: ShowcaseSwitchController | null = null;
   private started = false;
   private lastStateTime = -Infinity;
@@ -97,29 +104,34 @@ export class VirtualBandApp {
     this.state.patch({ error: null });
 
     try {
-      const [drums, keyboard, violin] = await Promise.all([
+      const [drums, keyboard, violin, electric] = await Promise.all([
         DrumsInstrument.create(this.drumSampler),
         KeyboardInstrument.create(this.keyboardSampler),
         ViolinInstrument.create(this.violinSampler),
+        ElectricGuitarInstrument.create(this.electricSampler),
       ]);
       this.drums = drums;
       this.keyboard = keyboard;
       this.violin = violin;
+      this.electric = electric;
 
       this.instruments.register(drums);
       this.instruments.register(keyboard);
       this.instruments.register(violin);
-      this.instrumentLayer.add(drums.root, keyboard.root, violin.root);
+      this.instruments.register(electric);
+      this.instrumentLayer.add(drums.root, keyboard.root, violin.root, electric.root);
 
       // Saved views are reusable camera assets, not presentation-mode data.
       this.cameraRegistry.setInstrumentViews(drums.id, ATELIER_DRUM_VIEWS);
       this.cameraRegistry.setInstrumentViews(keyboard.id, ATELIER_KEYBOARD_VIEWS);
       this.cameraRegistry.setInstrumentViews(violin.id, ATELIER_VIOLIN_VIEWS);
+      this.cameraRegistry.setInstrumentViews(electric.id, ATELIER_ELECTRIC_VIEWS);
 
       // Network sound loading never blocks the visual scene.
       void this.drumSampler.preload();
       void this.keyboardSampler.preloadCommon();
       void this.violinSampler.preloadCommon();
+      void this.electricSampler.preloadCommon();
 
       this.activateVenue('atelier-studio');
 
@@ -144,12 +156,21 @@ export class VirtualBandApp {
         violin,
         interactions: this.interactions,
       });
+      const electricMode = new AtelierElectricShowcaseMode({
+        element: this.renderer.renderer.domElement,
+        camera: this.camera,
+        cameraRegistry: this.cameraRegistry,
+        electric,
+        interactions: this.interactions,
+      });
       this.atelierMode = drumMode;
       this.keyboardMode = keyboardMode;
       this.violinMode = violinMode;
+      this.electricMode = electricMode;
       this.presentation.register(drumMode);
       this.presentation.register(keyboardMode);
       this.presentation.register(violinMode);
+      this.presentation.register(electricMode);
 
       this.showcaseSwitch = new ShowcaseSwitchController({
         instruments: this.instruments,
@@ -158,6 +179,7 @@ export class VirtualBandApp {
           { instrumentId: drums.id, presentationId: drumMode.id },
           { instrumentId: keyboard.id, presentationId: keyboardMode.id },
           { instrumentId: violin.id, presentationId: violinMode.id },
+          { instrumentId: electric.id, presentationId: electricMode.id },
         ],
         initialInstrumentId: drums.id,
         onChanged: () => this.renderer.invalidateShadows(),
@@ -207,6 +229,11 @@ export class VirtualBandApp {
     return this.violin;
   }
 
+  requireElectricGuitar(): ElectricGuitarInstrument {
+    if (!this.electric) throw new Error('Atelier electric guitar is not ready');
+    return this.electric;
+  }
+
   requireAtelierShowcase(): AtelierDrumShowcaseMode {
     if (!this.atelierMode) throw new Error('Atelier drum showcase is not ready');
     return this.atelierMode;
@@ -222,6 +249,11 @@ export class VirtualBandApp {
     return this.violinMode;
   }
 
+  requireElectricShowcase(): AtelierElectricShowcaseMode {
+    if (!this.electricMode) throw new Error('Atelier electric guitar showcase is not ready');
+    return this.electricMode;
+  }
+
   dispose(): void {
     if (!this.started) return;
     this.started = false;
@@ -232,15 +264,18 @@ export class VirtualBandApp {
     this.atelierMode = null;
     this.keyboardMode = null;
     this.violinMode = null;
+    this.electricMode = null;
     if (this.drums) this.cameraRegistry.clearInstrumentViews(this.drums.id);
     if (this.keyboard) this.cameraRegistry.clearInstrumentViews(this.keyboard.id);
     if (this.violin) this.cameraRegistry.clearInstrumentViews(this.violin.id);
+    if (this.electric) this.cameraRegistry.clearInstrumentViews(this.electric.id);
     this.interactions.dispose();
     this.control.clear();
     this.instruments.dispose();
     this.drums = null;
     this.keyboard = null;
     this.violin = null;
+    this.electric = null;
     this.audio.dispose();
     this.instrumentLayer.removeFromParent();
     this.venues.dispose();
