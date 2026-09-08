@@ -11,8 +11,11 @@ export interface AudioBus {
   disconnect(): void;
 }
 
+export const DEFAULT_AUDIO_MASTER_GAIN = 0.9;
+
 export class AudioEngine {
   private context: AudioContext | null = null;
+  private mix: GainNode | null = null;
   private master: GainNode | null = null;
   private readonly activeSources = new Set<AudioBufferSourceNode>();
 
@@ -21,23 +24,26 @@ export class AudioEngine {
 
     const Context = window.AudioContext;
     const context = new Context();
+    const mix = context.createGain();
     const master = context.createGain();
-    master.gain.value = 0.9;
-    master.connect(context.destination);
+    mix.gain.value = 1;
+    master.gain.value = DEFAULT_AUDIO_MASTER_GAIN;
+    mix.connect(master).connect(context.destination);
 
     this.context = context;
+    this.mix = mix;
     this.master = master;
     return context;
   }
 
   createBus(gain = 1): AudioBus {
     const context = this.getContext();
-    const master = this.master;
-    if (!master) throw new Error('Audio master is unavailable');
+    const mix = this.mix;
+    if (!mix) throw new Error('Audio mix bus is unavailable');
 
     const input = context.createGain();
     input.gain.value = clamp01(gain);
-    input.connect(master);
+    input.connect(mix);
     let connected = true;
 
     return {
@@ -60,6 +66,43 @@ export class AudioEngine {
     };
   }
 
+  /**
+   * Connects a read-only analysis branch to the summed instrument mix before the
+   * user-facing master gain. This is intentionally a tap, not another mix owner.
+   */
+  connectMixTap(destination: AudioNode): () => void {
+    this.getContext();
+    const mix = this.mix;
+    if (!mix) throw new Error('Audio mix bus is unavailable');
+
+    mix.connect(destination);
+    let connected = true;
+    return () => {
+      if (!connected) return;
+      connected = false;
+      try { mix.disconnect(destination); } catch {}
+    };
+  }
+
+  setMasterGain(value: number, rampSeconds = 0.025): void {
+    const context = this.getContext();
+    const master = this.master;
+    if (!master) return;
+
+    const now = context.currentTime;
+    const next = clamp(value, 0, 4);
+    const ramp = Math.max(0, rampSeconds);
+    master.gain.cancelScheduledValues(now);
+    master.gain.setValueAtTime(master.gain.value, now);
+    if (ramp > 0) master.gain.linearRampToValueAtTime(next, now + ramp);
+    else master.gain.setValueAtTime(next, now);
+  }
+
+  get masterGain(): number {
+    this.getContext();
+    return this.master?.gain.value ?? DEFAULT_AUDIO_MASTER_GAIN;
+  }
+
   async resume(): Promise<void> {
     const context = this.getContext();
     if (context.state === 'suspended') await context.resume();
@@ -71,8 +114,8 @@ export class AudioEngine {
 
   playBuffer(buffer: AudioBuffer, gain = 1, when?: number, destination?: AudioNode): AudioVoice | null {
     const context = this.getContext();
-    const master = this.master;
-    if (!master) return null;
+    const mix = this.mix;
+    if (!mix) return null;
 
     void this.resume();
 
@@ -84,7 +127,7 @@ export class AudioEngine {
 
     source.buffer = buffer;
     voiceGain.gain.value = clamp01(gain);
-    source.connect(voiceGain).connect(destination ?? master);
+    source.connect(voiceGain).connect(destination ?? mix);
 
     const cleanup = (): void => {
       if (cleaned) return;
@@ -162,7 +205,9 @@ export class AudioEngine {
 
   dispose(): void {
     this.stopAll();
+    this.mix?.disconnect();
     this.master?.disconnect();
+    this.mix = null;
     this.master = null;
 
     const context = this.context;
@@ -172,10 +217,15 @@ export class AudioEngine {
 }
 
 function clamp01(value: number): number {
-  return Math.max(0, Math.min(1, value));
+  return clamp(value, 0, 1);
 }
 
 function clampPlaybackRate(value: number): number {
   if (!Number.isFinite(value)) return 1;
-  return Math.max(0.125, Math.min(8, value));
+  return clamp(value, 0.125, 8);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
 }
