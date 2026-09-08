@@ -1,6 +1,7 @@
 import type { AudioEngine, AudioVoice } from './AudioEngine';
 import type { ViolinArticulation } from '../instruments/violin/legacyViolinAsset';
 import { fluidR3SamplePath, type SampleLibrary } from './SampleLibrary';
+import type { ViolinSustainBackend } from './ViolinSustainBackend';
 
 const SAMPLE_SET: Record<ViolinArticulation, string> = {
   arco: 'violin',
@@ -8,8 +9,11 @@ const SAMPLE_SET: Record<ViolinArticulation, string> = {
 };
 const COMMON_NOTES = [55, 62, 67, 69, 71, 74, 76, 81, 88] as const;
 
+type VoiceBackend = 'mp3' | 'sustain';
+
 interface VoiceState {
   voice: AudioVoice | null;
+  backend: VoiceBackend;
   released: boolean;
   articulation: ViolinArticulation;
   generation: number;
@@ -18,12 +22,18 @@ interface VoiceState {
 export class ViolinSampler {
   private readonly audio: AudioEngine;
   private readonly samples: SampleLibrary;
+  private readonly sustainBackend: ViolinSustainBackend | null;
   private readonly voices = new Map<number, VoiceState>();
   private generation = 0;
 
-  constructor(audio: AudioEngine, samples: SampleLibrary) {
+  constructor(
+    audio: AudioEngine,
+    samples: SampleLibrary,
+    sustainBackend: ViolinSustainBackend | null = null,
+  ) {
     this.audio = audio;
     this.samples = samples;
+    this.sustainBackend = sustainBackend;
   }
 
   noteOn(
@@ -36,8 +46,21 @@ export class ViolinSampler {
     if (!Number.isInteger(note) || note < 0 || note > 127) return;
 
     this.stopString(stringNumber, 0.025);
+
+    if (articulation === 'arco' && this.sustainBackend?.noteOn(stringNumber, note, velocity)) {
+      this.voices.set(stringNumber, {
+        voice: null,
+        backend: 'sustain',
+        released: false,
+        articulation,
+        generation: ++this.generation,
+      });
+      return;
+    }
+
     const state: VoiceState = {
       voice: null,
+      backend: 'mp3',
       released: false,
       articulation,
       generation: ++this.generation,
@@ -65,24 +88,50 @@ export class ViolinSampler {
     const state = this.voices.get(stringNumber);
     if (!state) return;
     state.released = true;
+
+    if (state.backend === 'sustain') {
+      this.voices.delete(stringNumber);
+      this.sustainBackend?.noteOff(stringNumber);
+      return;
+    }
+
     if (state.articulation === 'arco') this.stopString(stringNumber, 0.11);
   }
 
+  setPitchBend(value: number): boolean {
+    return this.sustainBackend?.setPitchBend(value) ?? false;
+  }
+
   async preloadCommon(): Promise<void> {
-    await this.samples.preload([
-      ...COMMON_NOTES.map((note) => fluidR3SamplePath(SAMPLE_SET.arco, note)),
-      ...COMMON_NOTES.map((note) => fluidR3SamplePath(SAMPLE_SET.pizzicato, note)),
+    await Promise.allSettled([
+      this.samples.preload([
+        ...COMMON_NOTES.map((note) => fluidR3SamplePath(SAMPLE_SET.arco, note)),
+        ...COMMON_NOTES.map((note) => fluidR3SamplePath(SAMPLE_SET.pizzicato, note)),
+      ]),
+      this.sustainBackend?.prepare() ?? Promise.resolve(false),
     ]);
   }
 
   reset(): void {
+    this.sustainBackend?.reset();
     for (const stringNumber of [...this.voices.keys()]) this.stopString(stringNumber, 0.025);
+  }
+
+  dispose(): void {
+    this.reset();
+    this.sustainBackend?.dispose();
   }
 
   private stopString(stringNumber: number, fadeSeconds: number): void {
     const state = this.voices.get(stringNumber);
     if (!state) return;
     this.voices.delete(stringNumber);
+
+    if (state.backend === 'sustain') {
+      this.sustainBackend?.noteOff(stringNumber);
+      return;
+    }
+
     state.voice?.stop(fadeSeconds);
   }
 
