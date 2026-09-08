@@ -1,5 +1,10 @@
 import * as THREE from 'three';
 import type { ElectricGuitarSampler } from '../../audio/ElectricGuitarSampler';
+import {
+  DEFAULT_ELECTRIC_GUITAR_PROGRAM,
+  getElectricGuitarProgram,
+  type ElectricGuitarProgramId,
+} from '../../audio/ElectricGuitarProgram';
 import type { Instrument, InstrumentFrameResult, InstrumentInteraction } from '../Instrument';
 import {
   buildLegacyElectricAsset,
@@ -44,6 +49,7 @@ export class ElectricGuitarInstrument implements Instrument {
       onHit: (event) => instrument?.playAudio(event),
     });
     instrument = new ElectricGuitarInstrument(model, controller, sampler);
+    instrument.setProgram(DEFAULT_ELECTRIC_GUITAR_PROGRAM);
     return instrument;
   }
 
@@ -76,13 +82,34 @@ export class ElectricGuitarInstrument implements Instrument {
     return true;
   }
 
+  get program(): ElectricGuitarProgramId {
+    return this.sampler.program;
+  }
+
+  setProgram(value: number): boolean {
+    const preset = getElectricGuitarProgram(value);
+    if (!preset) return false;
+
+    this.controller.api.setControl('pickup', preset.pickup);
+    this.controller.api.setControl('tone', preset.tone);
+    this.controller.api.setControl('volume', preset.volume);
+    return this.sampler.setProgram(preset.id);
+  }
+
+  programChange(value: number): boolean {
+    return this.setProgram(value);
+  }
+
   setPitchBend(value: number): boolean {
-    return this.controller.api.setPitchBend(value);
+    if (!this.controller.api.setPitchBend(value)) return false;
+    return this.sampler.setPitchBend(value);
   }
 
   setControl(id: ElectricControlId, value: number): boolean {
     if (!this.controller.api.setControl(id, value)) return false;
     if (id === 'volume') this.sampler.setVolume(value);
+    else if (id === 'tone') this.sampler.setTone(value);
+    else if (id === 'pickup') this.sampler.setPickup(value);
     return true;
   }
 
@@ -95,11 +122,13 @@ export class ElectricGuitarInstrument implements Instrument {
 
     if (cc === 64) this.sampler.setSustain(value >= 64);
     else if (cc === 7) this.sampler.setVolume(value / 127);
+    else if (cc === 74) this.sampler.setTone(value / 127);
     else if (cc === 120) this.sampler.reset();
     else if (cc === 123) {
       for (const stringNumber of activeBefore) this.sampler.noteOff(stringNumber);
     } else if (cc === 121) {
       this.sampler.setSustain(false);
+      this.sampler.setPitchBend(0);
     }
     return true;
   }

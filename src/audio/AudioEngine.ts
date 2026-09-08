@@ -1,7 +1,14 @@
 export interface AudioVoice {
   setGain(value: number, rampSeconds?: number): void;
+  setPlaybackRate(value: number, rampSeconds?: number): void;
   stop(fadeSeconds?: number, delaySeconds?: number): void;
   onEnded(listener: () => void): () => void;
+}
+
+export interface AudioBus {
+  readonly input: GainNode;
+  setGain(value: number, rampSeconds?: number): void;
+  disconnect(): void;
 }
 
 export class AudioEngine {
@@ -23,6 +30,36 @@ export class AudioEngine {
     return context;
   }
 
+  createBus(gain = 1): AudioBus {
+    const context = this.getContext();
+    const master = this.master;
+    if (!master) throw new Error('Audio master is unavailable');
+
+    const input = context.createGain();
+    input.gain.value = clamp01(gain);
+    input.connect(master);
+    let connected = true;
+
+    return {
+      input,
+      setGain: (value, rampSeconds = 0) => {
+        if (!connected) return;
+        const now = context.currentTime;
+        const next = clamp01(value);
+        const ramp = Math.max(0, rampSeconds);
+        input.gain.cancelScheduledValues(now);
+        input.gain.setValueAtTime(input.gain.value, now);
+        if (ramp > 0) input.gain.linearRampToValueAtTime(next, now + ramp);
+        else input.gain.setValueAtTime(next, now);
+      },
+      disconnect: () => {
+        if (!connected) return;
+        connected = false;
+        input.disconnect();
+      },
+    };
+  }
+
   async resume(): Promise<void> {
     const context = this.getContext();
     if (context.state === 'suspended') await context.resume();
@@ -32,7 +69,7 @@ export class AudioEngine {
     return this.getContext().decodeAudioData(data.slice(0));
   }
 
-  playBuffer(buffer: AudioBuffer, gain = 1, when?: number): AudioVoice | null {
+  playBuffer(buffer: AudioBuffer, gain = 1, when?: number, destination?: AudioNode): AudioVoice | null {
     const context = this.getContext();
     const master = this.master;
     if (!master) return null;
@@ -47,7 +84,7 @@ export class AudioEngine {
 
     source.buffer = buffer;
     voiceGain.gain.value = clamp01(gain);
-    source.connect(voiceGain).connect(master);
+    source.connect(voiceGain).connect(destination ?? master);
 
     const cleanup = (): void => {
       if (cleaned) return;
@@ -69,6 +106,16 @@ export class AudioEngine {
         voiceGain.gain.setValueAtTime(voiceGain.gain.value, now);
         if (ramp > 0) voiceGain.gain.linearRampToValueAtTime(next, now + ramp);
         else voiceGain.gain.setValueAtTime(next, now);
+      },
+      setPlaybackRate: (value, rampSeconds = 0) => {
+        if (cleaned) return;
+        const now = context.currentTime;
+        const next = clampPlaybackRate(value);
+        const ramp = Math.max(0, rampSeconds);
+        source.playbackRate.cancelScheduledValues(now);
+        source.playbackRate.setValueAtTime(source.playbackRate.value, now);
+        if (ramp > 0) source.playbackRate.linearRampToValueAtTime(next, now + ramp);
+        else source.playbackRate.setValueAtTime(next, now);
       },
       stop: (fadeSeconds = 0, delaySeconds = 0) => {
         if (cleaned) return;
@@ -126,4 +173,9 @@ export class AudioEngine {
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
+}
+
+function clampPlaybackRate(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(0.125, Math.min(8, value));
 }
