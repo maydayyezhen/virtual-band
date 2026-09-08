@@ -4,6 +4,7 @@ export const SF2_SILENCE_CENTIBELS = 960;
 export const SF2_SILENCE_GAIN = 10 ** (-SF2_SILENCE_CENTIBELS / 200);
 
 export interface Sf2VolumeEnvelopePlan {
+  readonly delaySeconds: number;
   readonly attackSeconds: number;
   readonly holdSeconds: number;
   readonly decaySeconds: number;
@@ -15,6 +16,7 @@ export interface Sf2VolumeEnvelopePlan {
 export function buildSf2VolumeEnvelopePlan(
   region: Pick<
     Sf2Region,
+    | 'delayVolEnv'
     | 'attackVolEnv'
     | 'holdVolEnv'
     | 'decayVolEnv'
@@ -44,6 +46,7 @@ export function buildSf2VolumeEnvelopePlan(
   const decaySecondsForFullAttenuation = timecentsToSeconds(decayTimecents);
 
   return {
+    delaySeconds: timecentsToSeconds(region.delayVolEnv),
     attackSeconds: timecentsToSeconds(region.attackVolEnv),
     holdSeconds: timecentsToSeconds(holdTimecents),
     // SoundFont decay time is defined for a full 96 dB envelope change.

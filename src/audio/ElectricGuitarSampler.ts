@@ -7,7 +7,11 @@ import {
   type ElectricGuitarProgramId,
   type ElectricPickupPosition,
 } from './ElectricGuitarProgram';
-import type { ProgramToneBackend, ProgramToneNoteOptions } from './ProgramToneBackend';
+import type {
+  ProgramToneBackend,
+  ProgramToneNoteOptions,
+  ProgramTonePerformanceProfile,
+} from './ProgramToneBackend';
 import { fluidR3SamplePath, type SampleLibrary } from './SampleLibrary';
 
 const DEFAULT_PRESET = ELECTRIC_GUITAR_PROGRAMS[DEFAULT_ELECTRIC_GUITAR_PROGRAM];
@@ -43,6 +47,18 @@ const STRUM_PROFILE: Readonly<Record<
   31: { ringSeconds: 2.8, fadeSeconds: 0.14 },
 };
 
+const PERFORMANCE_PROFILE: Readonly<Record<
+  ElectricGuitarProgramId,
+  ProgramTonePerformanceProfile
+>> = {
+  26: { brightnessCents: -420, velocityToFilterCents: -720, filterEnvelopeScale: 0.9 },
+  27: { brightnessCents: -40, velocityToFilterCents: -850, filterEnvelopeScale: 1 },
+  28: { brightnessCents: -880, velocityToFilterCents: -480, filterEnvelopeScale: 0.65 },
+  29: { brightnessCents: -140, velocityToFilterCents: -650, filterEnvelopeScale: 1.05 },
+  30: { brightnessCents: -240, velocityToFilterCents: -520, filterEnvelopeScale: 1.05 },
+  31: { brightnessCents: 260, velocityToFilterCents: -700, filterEnvelopeScale: 1.2 },
+};
+
 export class ElectricGuitarSampler {
   private readonly audio: AudioEngine;
   private readonly samples: SampleLibrary;
@@ -65,6 +81,7 @@ export class ElectricGuitarSampler {
     this.samples = samples;
     this.toneBackend = toneBackend;
     this.toneBackend?.setProgram(this.programId, 0);
+    this.toneBackend?.setPerformanceProfile(PERFORMANCE_PROFILE[this.programId]);
   }
 
   get program(): ElectricGuitarProgramId {
@@ -80,8 +97,6 @@ export class ElectricGuitarSampler {
     if (!Number.isInteger(stringNumber) || stringNumber < 1 || stringNumber > 6) return;
     if (!Number.isInteger(note) || note < 0 || note > 127) return;
 
-    // Retriggering a physical string should mute its previous voice quickly;
-    // otherwise long SF2 release tails stack under fast strums and repeated notes.
     this.stopString(stringNumber, 0.018);
     const preset = ELECTRIC_GUITAR_PROGRAMS[this.programId];
     const accentedVelocity = clamp01((velocity / 127) * preset.accent);
@@ -149,6 +164,7 @@ export class ElectricGuitarSampler {
     if (!preset) return false;
     this.programId = preset.id;
     this.toneBackend?.setProgram(preset.id, 0);
+    this.toneBackend?.setPerformanceProfile(PERFORMANCE_PROFILE[preset.id]);
     this.pickup = preset.pickup;
     this.tone = preset.tone;
     this.setVolume(preset.volume);

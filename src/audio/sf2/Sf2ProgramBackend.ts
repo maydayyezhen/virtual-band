@@ -1,5 +1,9 @@
 import type { AudioEngine } from '../AudioEngine';
-import type { ProgramToneBackend, ProgramToneNoteOptions } from '../ProgramToneBackend';
+import type {
+  ProgramToneBackend,
+  ProgramToneNoteOptions,
+  ProgramTonePerformanceProfile,
+} from '../ProgramToneBackend';
 import type { Sf2BankLibrary } from './Sf2BankLibrary';
 import { Sf2Synth } from './Sf2Synth';
 
@@ -14,6 +18,12 @@ export interface Sf2ProgramBackendOptions {
   readonly gain?: number;
 }
 
+interface NormalizedPerformanceProfile {
+  brightnessCents: number;
+  velocityToFilterCents: number;
+  filterEnvelopeScale: number;
+}
+
 export class Sf2ProgramBackend implements ProgramToneBackend {
   readonly synth: Sf2Synth;
 
@@ -21,6 +31,11 @@ export class Sf2ProgramBackend implements ProgramToneBackend {
   private readonly label: string;
   private readonly pitchBendSemitones: number;
   private readonly autoReleaseTimers = new Map<string, number>();
+  private readonly performance: NormalizedPerformanceProfile = {
+    brightnessCents: 0,
+    velocityToFilterCents: 0,
+    filterEnvelopeScale: 1,
+  };
   private preparePromise: Promise<boolean> | null = null;
   private failed = false;
   private programId: number;
@@ -85,6 +100,18 @@ export class Sf2ProgramBackend implements ProgramToneBackend {
     return this.ready ? this.synth.programChange(program, bank) : true;
   }
 
+  setPerformanceProfile(profile: ProgramTonePerformanceProfile): void {
+    if (profile.brightnessCents !== undefined && Number.isFinite(profile.brightnessCents)) {
+      this.performance.brightnessCents = clamp(profile.brightnessCents, -9600, 9600);
+    }
+    if (profile.velocityToFilterCents !== undefined && Number.isFinite(profile.velocityToFilterCents)) {
+      this.performance.velocityToFilterCents = clamp(profile.velocityToFilterCents, -9600, 9600);
+    }
+    if (profile.filterEnvelopeScale !== undefined && Number.isFinite(profile.filterEnvelopeScale)) {
+      this.performance.filterEnvelopeScale = clamp(profile.filterEnvelopeScale, 0, 4);
+    }
+  }
+
   noteOn(
     voiceId: string,
     note: number,
@@ -94,8 +121,9 @@ export class Sf2ProgramBackend implements ProgramToneBackend {
     if (!this.ready) return false;
     const key = voiceKey(this.label, voiceId);
     this.clearAutoRelease(key);
+    const mergedOptions = mergeToneOptions(options, this.performance);
 
-    const started = this.synth.noteOnVoice(key, note, velocity, options) > 0;
+    const started = this.synth.noteOnVoice(key, note, velocity, mergedOptions) > 0;
     if (!started) return false;
 
     const autoReleaseSeconds = options?.autoReleaseSeconds;
@@ -161,6 +189,34 @@ export class Sf2ProgramBackend implements ProgramToneBackend {
   }
 }
 
+function mergeToneOptions(
+  options: ProgramToneNoteOptions | undefined,
+  profile: NormalizedPerformanceProfile,
+): ProgramToneNoteOptions {
+  return {
+    ...options,
+    brightnessCents: clamp(
+      profile.brightnessCents + (options?.brightnessCents ?? 0),
+      -9600,
+      9600,
+    ),
+    velocityToFilterCents: clamp(
+      profile.velocityToFilterCents + (options?.velocityToFilterCents ?? 0),
+      -9600,
+      9600,
+    ),
+    filterEnvelopeScale: clamp(
+      profile.filterEnvelopeScale * (options?.filterEnvelopeScale ?? 1),
+      0,
+      4,
+    ),
+  };
+}
+
 function voiceKey(label: string, voiceId: string): string {
   return `${label}:${voiceId}`;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }

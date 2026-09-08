@@ -34,6 +34,19 @@ export interface Sf2Region {
   readonly scaleTuning: number;
   readonly initialAttenuation: number;
   readonly pan: number;
+  readonly initialFilterFc: number;
+  readonly initialFilterQ: number;
+  readonly modLfoToFilterFc: number;
+  readonly modEnvToFilterFc: number;
+  readonly delayModEnv: number;
+  readonly attackModEnv: number;
+  readonly holdModEnv: number;
+  readonly decayModEnv: number;
+  readonly sustainModEnv: number;
+  readonly releaseModEnv: number;
+  readonly keynumToModEnvHold: number;
+  readonly keynumToModEnvDecay: number;
+  readonly delayVolEnv: number;
   readonly attackVolEnv: number;
   readonly holdVolEnv: number;
   readonly decayVolEnv: number;
@@ -83,8 +96,21 @@ const GEN = {
   startloopAddrsOffset: 2,
   endloopAddrsOffset: 3,
   startAddrsCoarseOffset: 4,
+  initialFilterFc: 8,
+  initialFilterQ: 9,
+  modLfoToFilterFc: 10,
+  modEnvToFilterFc: 11,
   endAddrsCoarseOffset: 12,
   pan: 17,
+  delayModEnv: 25,
+  attackModEnv: 26,
+  holdModEnv: 27,
+  decayModEnv: 28,
+  sustainModEnv: 29,
+  releaseModEnv: 30,
+  keynumToModEnvHold: 31,
+  keynumToModEnvDecay: 32,
+  delayVolEnv: 33,
   attackVolEnv: 34,
   holdVolEnv: 35,
   decayVolEnv: 36,
@@ -117,7 +143,6 @@ const ASSIGN_OPERATORS = new Set<number>([
   GEN.velocity,
   GEN.exclusiveClass,
   GEN.overridingRootKey,
-
 ]);
 
 const ILLEGAL_PRESET_OPERATORS = new Set<number>([
@@ -269,19 +294,32 @@ export class Sf2SoundFont {
           velocityRange: state.velocityRange,
           coarseTune: getValue(state, GEN.coarseTune),
           fineTune: getValue(state, GEN.fineTune),
-          rootKey: overrideRoot !== undefined && overrideRoot >= 0 && overrideRoot <= 127
+          rootKey: overrideRoot >= 0 && overrideRoot <= 127
             ? overrideRoot
             : sample.originalPitch,
           scaleTuning: getValue(state, GEN.scaleTuning),
-          initialAttenuation: getValue(state, GEN.initialAttenuation),
-          pan: getValue(state, GEN.pan),
+          initialAttenuation: Math.max(0, getValue(state, GEN.initialAttenuation)),
+          pan: clamp(getValue(state, GEN.pan), -500, 500),
+          initialFilterFc: clamp(getValue(state, GEN.initialFilterFc), 1500, 13500),
+          initialFilterQ: clamp(getValue(state, GEN.initialFilterQ), 0, 960),
+          modLfoToFilterFc: clamp(getValue(state, GEN.modLfoToFilterFc), -12000, 12000),
+          modEnvToFilterFc: clamp(getValue(state, GEN.modEnvToFilterFc), -12000, 12000),
+          delayModEnv: getValue(state, GEN.delayModEnv),
+          attackModEnv: getValue(state, GEN.attackModEnv),
+          holdModEnv: getValue(state, GEN.holdModEnv),
+          decayModEnv: getValue(state, GEN.decayModEnv),
+          sustainModEnv: clamp(getValue(state, GEN.sustainModEnv), 0, 1000),
+          releaseModEnv: getValue(state, GEN.releaseModEnv),
+          keynumToModEnvHold: clamp(getValue(state, GEN.keynumToModEnvHold), -1200, 1200),
+          keynumToModEnvDecay: clamp(getValue(state, GEN.keynumToModEnvDecay), -1200, 1200),
+          delayVolEnv: getValue(state, GEN.delayVolEnv),
           attackVolEnv: getValue(state, GEN.attackVolEnv),
           holdVolEnv: getValue(state, GEN.holdVolEnv),
           decayVolEnv: getValue(state, GEN.decayVolEnv),
           sustainVolEnv: getValue(state, GEN.sustainVolEnv),
           releaseVolEnv: getValue(state, GEN.releaseVolEnv),
-          keynumToVolEnvHold: getValue(state, GEN.keynumToVolEnvHold),
-          keynumToVolEnvDecay: getValue(state, GEN.keynumToVolEnvDecay),
+          keynumToVolEnvHold: clamp(getValue(state, GEN.keynumToVolEnvHold), -1200, 1200),
+          keynumToVolEnvDecay: clamp(getValue(state, GEN.keynumToVolEnvDecay), -1200, 1200),
         });
       }
     }
@@ -457,8 +495,6 @@ function applyZoneOverrides(state: ZoneState, zone: readonly GeneratorRecord[]):
       const low = generator.rawAmount & 0xff;
       const high = (generator.rawAmount >>> 8) & 0xff;
       const target = generator.operator === GEN.keyRange ? state.keyRange : state.velocityRange;
-      // Global and local range constraints compose by intersection. This keeps a
-      // preset/instrument global range from being widened again by a local zone.
       target[0] = Math.max(target[0], low);
       target[1] = Math.min(target[1], high);
       continue;
@@ -514,8 +550,15 @@ function getValue(state: ZoneState, operator: number): number {
 }
 
 function defaultGeneratorValue(operator: number): number {
+  if (operator === GEN.initialFilterFc) return 13500;
   if (
-    operator === GEN.attackVolEnv
+    operator === GEN.delayModEnv
+    || operator === GEN.attackModEnv
+    || operator === GEN.holdModEnv
+    || operator === GEN.decayModEnv
+    || operator === GEN.releaseModEnv
+    || operator === GEN.delayVolEnv
+    || operator === GEN.attackVolEnv
     || operator === GEN.holdVolEnv
     || operator === GEN.decayVolEnv
     || operator === GEN.releaseVolEnv
@@ -558,4 +601,8 @@ function readFixedString(view: DataView, offset: number, length: number): string
 
 function clampSamplePoint(value: number, samplePointCount: number): number {
   return Math.max(0, Math.min(samplePointCount, Math.trunc(value)));
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }

@@ -5,11 +5,31 @@ import {
   getAcousticGuitarProgram,
   type AcousticGuitarProgramId,
 } from './AcousticGuitarProgram';
-import type { ProgramToneBackend, ProgramToneNoteOptions } from './ProgramToneBackend';
+import type {
+  ProgramToneBackend,
+  ProgramToneNoteOptions,
+  ProgramTonePerformanceProfile,
+} from './ProgramToneBackend';
 import { fluidR3SamplePath, type SampleLibrary } from './SampleLibrary';
 
 const PITCH_BEND_SEMITONES = 2;
 const COMMON_NOTES = [40, 45, 50, 55, 59, 64, 67, 69, 71, 72, 74, 76, 79, 81, 84] as const;
+
+const PERFORMANCE_PROFILE: Readonly<Record<
+  AcousticGuitarProgramId,
+  ProgramTonePerformanceProfile
+>> = {
+  24: {
+    brightnessCents: -240,
+    velocityToFilterCents: -1050,
+    filterEnvelopeScale: 0.9,
+  },
+  25: {
+    brightnessCents: 90,
+    velocityToFilterCents: -850,
+    filterEnvelopeScale: 1,
+  },
+};
 
 type VoiceBackend = 'mp3' | 'tone';
 type GuitarGesture = 'gated' | 'strum';
@@ -41,6 +61,7 @@ export class AcousticGuitarSampler {
     this.toneBackend = toneBackend;
     this.toneBackend?.setGain(this.volume, 0);
     this.toneBackend?.setProgram(this.programId, 0);
+    this.toneBackend?.setPerformanceProfile(PERFORMANCE_PROFILE[this.programId]);
   }
 
   get program(): AcousticGuitarProgramId {
@@ -52,6 +73,7 @@ export class AcousticGuitarSampler {
     if (!preset) return false;
     this.programId = preset.id;
     this.toneBackend?.setProgram(preset.id, 0);
+    this.toneBackend?.setPerformanceProfile(PERFORMANCE_PROFILE[preset.id]);
     void this.preloadProgram(preset.id);
     return true;
   }
@@ -205,10 +227,6 @@ function acousticStrumToneOptions(
   program: AcousticGuitarProgramId,
   note: number,
 ): ProgramToneNoteOptions {
-  // A physical strum is an impulse, not a key that can remain held forever.
-  // These are generous ceilings; the corrected SF2 decay envelope normally
-  // becomes inaudible before the ceiling. Lower notes are allowed to ring a bit
-  // longer, matching real-string damping trends.
   const baseRingSeconds = program === 24 ? 3.4 : 3.9;
   const pitchScale = 2 ** ((60 - clamp(note, 40, 84)) / 72);
   return {
