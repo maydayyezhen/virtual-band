@@ -14,6 +14,7 @@ import type { InstrumentHit, InstrumentInteractionSystem } from '../../instrumen
 import type { ElectricGuitarInstrument } from '../../instruments/electric/ElectricGuitarInstrument';
 import type { PresentationMode } from '../PresentationManager';
 import { ATELIER_ELECTRIC_KEYMAP } from './AtelierElectricKeymap';
+import { guitarKeyboardVelocity, guitarPointerVelocity } from './AtelierGuitarVelocity';
 
 interface CameraState {
   target: THREE.Vector3;
@@ -26,6 +27,7 @@ interface PointerState {
   id: number;
   x: number;
   y: number;
+  velocity: number;
   mode: 'play' | 'pan' | 'orbit';
   hit: InstrumentHit | null;
 }
@@ -221,6 +223,7 @@ export class AtelierElectricShowcaseMode implements PresentationMode {
       id: event.pointerId,
       x: event.clientX,
       y: event.clientY,
+      velocity: guitarPointerVelocity(event, 105),
       mode: hit ? 'play' : (event.shiftKey || event.button !== 0 ? 'pan' : 'orbit'),
       hit: null,
     };
@@ -300,16 +303,22 @@ export class AtelierElectricShowcaseMode implements PresentationMode {
   };
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
-    if (!this.active || event.ctrlKey || event.altKey || event.metaKey) return;
+    if (!this.active || event.ctrlKey || event.metaKey) return;
     const targetTag = event.target instanceof HTMLElement ? event.target.tagName : '';
     if (/INPUT|TEXTAREA|SELECT/.test(targetTag)) return;
 
     const action = ATELIER_ELECTRIC_KEYMAP[event.code];
+    const velocityAction = action?.kind === 'string' || action?.kind === 'chord' || action?.kind === 'strum';
+    if (event.altKey && !velocityAction) return;
     let handled = Boolean(action);
 
     if (action?.kind === 'string') {
       if (!event.repeat && !this.computerKeys.has(event.code)) {
-        const result = this.electric.pluck(action.stringNumber, 104, 0);
+        const result = this.electric.pluck(
+          action.stringNumber,
+          guitarKeyboardVelocity(event, 104),
+          0,
+        );
         if (result) {
           this.computerKeys.set(event.code, {
             note: result.note,
@@ -320,10 +329,10 @@ export class AtelierElectricShowcaseMode implements PresentationMode {
     } else if (action?.kind === 'chord') {
       if (!event.repeat) {
         this.currentChord = action.chordIndex;
-        this.strumCurrentChord(106);
+        this.strumCurrentChord(guitarKeyboardVelocity(event, 106));
       }
     } else if (action?.kind === 'strum') {
-      if (!event.repeat) this.strumCurrentChord(100);
+      if (!event.repeat) this.strumCurrentChord(guitarKeyboardVelocity(event, 100));
     } else if (action?.kind === 'program-step') {
       if (!event.repeat) this.stepProgram(action.delta);
     } else if (action?.kind === 'view') {
@@ -373,12 +382,12 @@ export class AtelierElectricShowcaseMode implements PresentationMode {
     this.releaseHit(pointer);
     pointer.hit = hit;
     if (!hit) return;
-    this.interactions.dispatch(hit, 'start', 105);
+    this.interactions.dispatch(hit, 'start', pointer.velocity);
   }
 
   private releaseHit(pointer: PointerState): void {
     if (!pointer.hit) return;
-    this.interactions.dispatch(pointer.hit, 'end', 105);
+    this.interactions.dispatch(pointer.hit, 'end', pointer.velocity);
     pointer.hit = null;
   }
 
