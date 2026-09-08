@@ -34,10 +34,18 @@ export interface Sf2Region {
   readonly scaleTuning: number;
   readonly initialAttenuation: number;
   readonly pan: number;
+  readonly modLfoToPitch: number;
+  readonly vibLfoToPitch: number;
+  readonly modEnvToPitch: number;
   readonly initialFilterFc: number;
   readonly initialFilterQ: number;
   readonly modLfoToFilterFc: number;
   readonly modEnvToFilterFc: number;
+  readonly modLfoToVolume: number;
+  readonly delayModLFO: number;
+  readonly freqModLFO: number;
+  readonly delayVibLFO: number;
+  readonly freqVibLFO: number;
   readonly delayModEnv: number;
   readonly attackModEnv: number;
   readonly holdModEnv: number;
@@ -96,12 +104,20 @@ const GEN = {
   startloopAddrsOffset: 2,
   endloopAddrsOffset: 3,
   startAddrsCoarseOffset: 4,
+  modLfoToPitch: 5,
+  vibLfoToPitch: 6,
+  modEnvToPitch: 7,
   initialFilterFc: 8,
   initialFilterQ: 9,
   modLfoToFilterFc: 10,
   modEnvToFilterFc: 11,
   endAddrsCoarseOffset: 12,
+  modLfoToVolume: 13,
   pan: 17,
+  delayModLFO: 21,
+  freqModLFO: 22,
+  delayVibLFO: 23,
+  freqVibLFO: 24,
   delayModEnv: 25,
   attackModEnv: 26,
   holdModEnv: 27,
@@ -226,8 +242,8 @@ export class Sf2SoundFont {
       if (!instrumentGenerator) continue;
 
       const instrumentIndex = instrumentGenerator.rawAmount;
-      const nextInstrument = this.instruments[instrumentIndex + 1];
       const instrument = this.instruments[instrumentIndex];
+      const nextInstrument = this.instruments[instrumentIndex + 1];
       if (!instrument || !nextInstrument) continue;
 
       const presetState = mergeZoneOverrides(presetGlobal, presetLocal);
@@ -277,7 +293,6 @@ export class Sf2SoundFont {
             + getValue(state, GEN.endloopAddrsCoarseOffset) * 32768,
           this.samplePointCount,
         );
-
         if (end <= start + 1) continue;
 
         const overrideRoot = getValue(state, GEN.overridingRootKey);
@@ -294,16 +309,22 @@ export class Sf2SoundFont {
           velocityRange: state.velocityRange,
           coarseTune: getValue(state, GEN.coarseTune),
           fineTune: getValue(state, GEN.fineTune),
-          rootKey: overrideRoot >= 0 && overrideRoot <= 127
-            ? overrideRoot
-            : sample.originalPitch,
+          rootKey: overrideRoot >= 0 && overrideRoot <= 127 ? overrideRoot : sample.originalPitch,
           scaleTuning: getValue(state, GEN.scaleTuning),
           initialAttenuation: Math.max(0, getValue(state, GEN.initialAttenuation)),
           pan: clamp(getValue(state, GEN.pan), -500, 500),
+          modLfoToPitch: clamp(getValue(state, GEN.modLfoToPitch), -12000, 12000),
+          vibLfoToPitch: clamp(getValue(state, GEN.vibLfoToPitch), -12000, 12000),
+          modEnvToPitch: clamp(getValue(state, GEN.modEnvToPitch), -12000, 12000),
           initialFilterFc: clamp(getValue(state, GEN.initialFilterFc), 1500, 13500),
           initialFilterQ: clamp(getValue(state, GEN.initialFilterQ), 0, 960),
           modLfoToFilterFc: clamp(getValue(state, GEN.modLfoToFilterFc), -12000, 12000),
           modEnvToFilterFc: clamp(getValue(state, GEN.modEnvToFilterFc), -12000, 12000),
+          modLfoToVolume: clamp(getValue(state, GEN.modLfoToVolume), -960, 960),
+          delayModLFO: getValue(state, GEN.delayModLFO),
+          freqModLFO: clamp(getValue(state, GEN.freqModLFO), -16000, 4500),
+          delayVibLFO: getValue(state, GEN.delayVibLFO),
+          freqVibLFO: clamp(getValue(state, GEN.freqVibLFO), -16000, 4500),
           delayModEnv: getValue(state, GEN.delayModEnv),
           attackModEnv: getValue(state, GEN.attackModEnv),
           holdModEnv: getValue(state, GEN.holdModEnv),
@@ -368,7 +389,8 @@ export function parseSf2(data: ArrayBuffer): Sf2SoundFont {
   if (!smpl) throw new Error('Invalid SF2: missing sdta/smpl');
 
   const pdtaChunks = new Map(
-    scanChunks(view, pdta.dataOffset + 4, pdta.dataOffset + pdta.size).map((chunk) => [chunk.id, chunk] as const),
+    scanChunks(view, pdta.dataOffset + 4, pdta.dataOffset + pdta.size)
+      .map((chunk) => [chunk.id, chunk] as const),
   );
 
   const phdr = requiredChunk(pdtaChunks, 'phdr');
@@ -503,17 +525,11 @@ function applyZoneOverrides(state: ZoneState, zone: readonly GeneratorRecord[]):
     const amount = ASSIGN_OPERATORS.has(generator.operator)
       ? generator.rawAmount
       : generator.signedAmount;
-    // At a given level, local instrument/preset zones supersede their global
-    // zone for an identical generator. IGEN values are absolute; PGEN values
-    // remain offsets until merged with the resolved instrument state.
     state.values.set(generator.operator, amount);
   }
 }
 
-function mergePresetWithInstrument(
-  preset: ZoneState,
-  instrument: ZoneState,
-): ZoneState {
+function mergePresetWithInstrument(preset: ZoneState, instrument: ZoneState): ZoneState {
   const state: ZoneState = {
     values: new Map(instrument.values),
     keyRange: [
@@ -552,7 +568,9 @@ function getValue(state: ZoneState, operator: number): number {
 function defaultGeneratorValue(operator: number): number {
   if (operator === GEN.initialFilterFc) return 13500;
   if (
-    operator === GEN.delayModEnv
+    operator === GEN.delayModLFO
+    || operator === GEN.delayVibLFO
+    || operator === GEN.delayModEnv
     || operator === GEN.attackModEnv
     || operator === GEN.holdModEnv
     || operator === GEN.decayModEnv

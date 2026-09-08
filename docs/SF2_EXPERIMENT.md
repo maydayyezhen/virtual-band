@@ -1,12 +1,12 @@
 # SF2 backend experiment
 
-This branch tests a native TypeScript/Web Audio SoundFont 2 engine behind the V2 sampler boundaries. It began as a violin sustain experiment and has now expanded to the full playable ensemble.
+This branch tests a native TypeScript/Web Audio SoundFont 2 engine behind the V2 sampler boundaries. It began as a violin sustain experiment and now covers the full playable ensemble plus dynamic filter/envelope/LFO behavior.
 
 ## Current goal
 
-The experiment is no longer just proving that an `.sf2` file can be decoded. The current target is a musically usable backend with correct note lifecycle, SoundFont volume envelopes, sustain loops, core filter behavior, percussion choking and instrument-level performance tuning.
+The experiment is no longer just proving that an `.sf2` file can be decoded. The current target is a musically usable backend with correct note lifecycle, SoundFont volume/filter/modulation envelopes, internal LFO behavior, default velocity response, sustain loops, percussion choking and instrument-level performance tuning.
 
-The production decision is still gated on listening quality and runtime cost. `architecture-v2` is not modified by this experiment until the branch is explicitly promoted.
+The production decision remains gated on listening quality and runtime cost. `architecture-v2` is not modified until explicit promotion.
 
 ## Get the test SoundFont
 
@@ -16,13 +16,7 @@ The 148,398,306-byte `FluidR3_GM.sf2` is deliberately not committed because it e
 npm run sf2:fetch
 ```
 
-The file is written to:
-
-```text
-public/soundfonts/FluidR3_GM.sf2
-```
-
-and is ignored by Git.
+The file is written to `public/soundfonts/FluidR3_GM.sf2` and ignored by Git.
 
 ## Implemented scope
 
@@ -36,8 +30,13 @@ Current implementation includes:
 - attenuation and pan;
 - volume delay/attack/hold/decay/sustain/release;
 - key-dependent volume hold/decay;
-- core SF2 low-pass filter cutoff/Q;
-- modulation envelope to filter cutoff with key-dependent hold/decay;
+- core SF2 low-pass cutoff/Q;
+- shared modulation envelope -> filter cutoff and pitch;
+- key-dependent modulation-envelope hold/decay;
+- modulation LFO -> pitch/filter/volume;
+- vibrato LFO -> pitch;
+- LFO delay/frequency generators;
+- default Note-On velocity -> attenuation behavior;
 - sustain pedal and pitch bend;
 - `exclusiveClass` choking;
 - shared `Sf2BankLibrary` fetch/parse cache;
@@ -48,17 +47,15 @@ The volume envelope uses the SF2 96 dB attenuation interpretation rather than a 
 
 ## Explicitly incomplete
 
-The branch does not yet claim complete SoundFont 2.04 compatibility. Missing/high-value areas include:
+The branch does not claim complete SoundFont 2.04 compatibility. Missing/high-value areas include:
 
 - `pmod` / `imod` execution;
-- the full default SoundFont modulator set;
-- modulation and vibrato LFO execution;
-- arbitrary CC and aftertouch routing;
-- LFO-driven filter modulation;
+- arbitrary MIDI CC and aftertouch routing;
+- complete default controller modulator graph;
 - reverb and chorus sends;
 - 24-bit `sm24` support.
 
-The current velocity-to-gain curve is still project-defined. Velocity-dependent filter darkening in guitar profiles is a performance policy, not a claim that the complete SF2 default modulator graph exists.
+The engine now uses the standard default velocity -> attenuation response. Velocity-dependent filter darkening in guitar profiles remains a deliberate performance policy; a global default velocity -> cutoff mapping is not enabled.
 
 ## Verify parser and DSP planning
 
@@ -66,15 +63,10 @@ With Node 22+ and the SF2 file present:
 
 ```powershell
 npm run sf2:verify
-```
-
-Verification resolves real FluidR3 presets/regions for violin, piano, Warm Pad, acoustic guitar, electric guitar and percussion. It also checks volume-envelope math, filter cutoff conversion, filter resonance units, filter-envelope planning, sustain loops and hi-hat exclusive classes.
-
-Build the browser runtime as well:
-
-```powershell
 npm run build
 ```
+
+Verification resolves real FluidR3 presets/regions for violin, piano, Warm Pad, acoustic guitar, electric guitar and percussion. It checks volume-envelope math, filter conversion, modulation-envelope planning, LFO metadata/frequency conversion, default velocity attenuation, sustain loops and hi-hat exclusive classes.
 
 ## Browser listening tests
 
@@ -86,22 +78,22 @@ npm run dev
 
 Useful regression targets:
 
-1. Violin arco can hold well beyond the original MP3 length and releases without a gain jump.
-2. Warm Pad sustains while held and has a long but smooth patch-authored release.
+1. Violin arco can hold beyond the MP3 sample length and releases without a gain jump.
+2. Warm Pad sustains while held and keeps a smooth patch-authored release.
 3. Piano decays naturally and does not behave like a looped pad.
 4. Repeated acoustic/electric strums do not accumulate indefinite old tails.
-5. Palm Muted is clearly shorter than Clean/Drive; Harmonics does not hang indefinitely.
-6. Low-velocity guitar notes are darker than hard strikes.
-7. Filter-envelope patches change brightness over the note instead of only scaling volume.
-8. Open/closed hi-hat choking behaves coherently.
-
-The browser DEV handle can still be used for low-level SF2 inspection where exposed by the app/experiment bootstrap.
+5. Palm Muted is shorter than Clean/Drive; Harmonics does not hang indefinitely.
+6. Soft notes are audibly quieter under the SF2 default velocity attenuation curve.
+7. Guitar performance profiles still make low-velocity plucks darker where intended.
+8. Filter/modulation-envelope patches change brightness and/or pitch during the note.
+9. Patches with authored modulation/vibrato LFO generators produce stable periodic modulation.
+10. Open/closed hi-hat choking behaves coherently.
 
 ## Documentation
 
-- `docs/SF2_AUDIO_ENGINE.md`: engine architecture, DSP semantics, profile boundary and missing features.
+- `docs/SF2_AUDIO_ENGINE.md`: engine architecture, DSP/modulation semantics and missing features.
 - `docs/SF2_FULL_ENSEMBLE.md`: instrument routing and ensemble behavior.
-- `docs/ARCHITECTURE_V2.md`: V2 ownership rules and how the experimental SF2 backend fits without changing donor boundaries.
+- `docs/ARCHITECTURE_V2.md`: V2 ownership rules and experimental SF2 boundary.
 
 ## Promotion gate
 
@@ -109,8 +101,9 @@ Before merging any part of this experiment into `architecture-v2`:
 
 1. `npm run build` passes;
 2. `npm run sf2:verify` passes against the exact FluidR3 binary;
-3. guitar repeated-strum behavior is audibly controlled;
+3. guitar repeated-strum behavior remains audibly controlled;
 4. violin/Pad long-note behavior remains correct;
-5. filter changes improve timbral realism without destabilizing level or CPU use;
-6. branch diff contains no temporary validation workflow or unrelated architecture edits;
-7. documentation matches the actual implemented support boundary.
+5. filter/LFO changes improve realism without unstable gain or CPU use;
+6. default velocity response is musically acceptable across drums, piano, strings and guitars;
+7. branch diff contains no temporary validation workflow or unrelated architecture edits;
+8. documentation matches the actual support boundary.

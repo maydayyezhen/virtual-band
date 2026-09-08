@@ -14,6 +14,17 @@ import {
   scheduleSf2Filter,
   type Sf2FilterPlan,
 } from './Sf2Filter';
+import {
+  buildSf2LfoPlan,
+  buildSf2ModEnvelopePlan,
+  releaseSf2ModEnvelope,
+  scheduleSf2ModEnvelope,
+  startSf2Lfos,
+  velocityAttenuationCentibels,
+  type Sf2LfoPlan,
+  type Sf2LfoRuntime,
+  type Sf2ModEnvelopePlan,
+} from './Sf2Modulation';
 import { parseSf2, type Sf2PresetInfo, type Sf2Region, type Sf2SoundFont } from './Sf2Parser';
 
 interface VoiceEnvelopeState {
@@ -33,6 +44,11 @@ interface ActiveVoice {
   readonly source: AudioBufferSourceNode;
   readonly filter: BiquadFilterNode;
   readonly filterPlan: Sf2FilterPlan;
+  readonly lfoGain: GainNode;
+  readonly lfoPlan: Sf2LfoPlan;
+  readonly lfos: Sf2LfoRuntime;
+  readonly modEnvelopePlan: Sf2ModEnvelopePlan;
+  readonly modEnvToPitchCents: number;
   readonly gain: GainNode;
   readonly panner: StereoPannerNode;
   readonly releaseSeconds: number;
@@ -58,12 +74,21 @@ export interface Sf2RegionInspection {
   readonly decaySeconds: number;
   readonly sustainAttenuationCentibels: number;
   readonly releaseSeconds: number;
+  readonly velocityAttenuationCentibels: number;
   readonly keynumToVolEnvHold: number;
   readonly keynumToVolEnvDecay: number;
   readonly filterCutoffHz: number;
   readonly filterQDb: number;
+  readonly modEnvToPitch: number;
   readonly modEnvToFilterFc: number;
+  readonly modLfoToPitch: number;
+  readonly vibLfoToPitch: number;
   readonly modLfoToFilterFc: number;
+  readonly modLfoToVolume: number;
+  readonly modLfoDelaySeconds: number;
+  readonly modLfoFrequencyHz: number;
+  readonly vibLfoDelaySeconds: number;
+  readonly vibLfoFrequencyHz: number;
   readonly filterEnvelopeDelaySeconds: number;
   readonly filterEnvelopeAttackSeconds: number;
   readonly filterEnvelopeHoldSeconds: number;
@@ -239,6 +264,7 @@ export class Sf2Synth {
     return regions.map((region) => {
       const envelope = buildSf2VolumeEnvelopePlan(region, midi);
       const filter = buildSf2FilterPlan(region, midi, vel, context.sampleRate);
+      const lfo = buildSf2LfoPlan(region);
       return {
         sample: region.sample.name,
         keyRange: region.keyRange,
@@ -253,12 +279,21 @@ export class Sf2Synth {
         decaySeconds: envelope.decaySeconds,
         sustainAttenuationCentibels: envelope.sustainAttenuationCentibels,
         releaseSeconds: envelope.releaseSecondsFromFullScale,
+        velocityAttenuationCentibels: velocityAttenuationCentibels(vel),
         keynumToVolEnvHold: region.keynumToVolEnvHold,
         keynumToVolEnvDecay: region.keynumToVolEnvDecay,
         filterCutoffHz: filter.baseCutoffHz,
         filterQDb: filter.resonanceDb,
+        modEnvToPitch: region.modEnvToPitch,
         modEnvToFilterFc: region.modEnvToFilterFc,
-        modLfoToFilterFc: region.modLfoToFilterFc,
+        modLfoToPitch: lfo.modToPitchCents,
+        vibLfoToPitch: lfo.vibToPitchCents,
+        modLfoToFilterFc: lfo.modToFilterCents,
+        modLfoToVolume: lfo.modToVolumeCentibels,
+        modLfoDelaySeconds: lfo.modDelaySeconds,
+        modLfoFrequencyHz: lfo.modFrequencyHz,
+        vibLfoDelaySeconds: lfo.vibDelaySeconds,
+        vibLfoFrequencyHz: lfo.vibFrequencyHz,
         filterEnvelopeDelaySeconds: filter.envelope.delaySeconds,
         filterEnvelopeAttackSeconds: filter.envelope.attackSeconds,
         filterEnvelopeHoldSeconds: filter.envelope.holdSeconds,
@@ -290,6 +325,7 @@ export class Sf2Synth {
 
     const source = context.createBufferSource();
     const filter = context.createBiquadFilter();
+    const lfoGain = context.createGain();
     const gain = context.createGain();
     const panner = context.createStereoPanner();
     const now = context.currentTime;
@@ -307,10 +343,12 @@ export class Sf2Synth {
       source.loop = false;
     }
 
-    const velocityGain = Math.pow(velocity / 127, 1.35);
-    const attenuationGain = centibelsToGain(Math.max(0, region.initialAttenuation));
+    const velocityAttenuation = velocityAttenuationCentibels(velocity);
+    const attenuationGain = centibelsToGain(
+      clamp(region.initialAttenuation + velocityAttenuation, 0, 1440),
+    );
     const gainScale = clamp(options?.gainScale ?? 1, 0, 4);
-    const peakGain = Math.max(1e-8, Math.min(1, velocityGain * attenuationGain * gainScale));
+    const peakGain = Math.max(1e-8, Math.min(1, attenuationGain * gainScale));
     const envelopePlan = buildSf2VolumeEnvelopePlan(region, note);
     const sustainGain = Math.max(
       peakGain * SF2_SILENCE_GAIN,
@@ -327,11 +365,16 @@ export class Sf2Synth {
       decaySeconds: envelopePlan.decaySeconds,
     };
     const filterPlan = buildSf2FilterPlan(region, note, velocity, context.sampleRate, options);
+    const modEnvelopePlan = buildSf2ModEnvelopePlan(region, note);
+    const lfoPlan = buildSf2LfoPlan(region);
 
     scheduleEnvelope(gain.gain, envelope);
     scheduleSf2Filter(filter, filterPlan, now);
+    scheduleSf2ModEnvelope(source.detune, modEnvelopePlan, region.modEnvToPitch, now, 0);
     panner.pan.value = clamp(region.pan / 500, -1, 1);
-    source.connect(filter).connect(gain).connect(panner).connect(options?.destination ?? this.bus.input);
+    source.connect(filter).connect(lfoGain).connect(gain).connect(panner)
+      .connect(options?.destination ?? this.bus.input);
+    const lfos = startSf2Lfos(context, source, filter, lfoGain, lfoPlan, now);
 
     const voice: ActiveVoice = {
       voiceKey,
@@ -339,6 +382,11 @@ export class Sf2Synth {
       source,
       filter,
       filterPlan,
+      lfoGain,
+      lfoPlan,
+      lfos,
+      modEnvelopePlan,
+      modEnvToPitchCents: region.modEnvToPitch,
       gain,
       panner,
       releaseSeconds: envelopePlan.releaseSecondsFromFullScale,
@@ -385,10 +433,16 @@ export class Sf2Synth {
 
     if (voice.loopMode === 3) voice.source.loop = false;
     releaseSf2Filter(voice.filter, voice.filterPlan, voice.envelope.startTime, now, forcedReleaseSeconds);
+    releaseSf2ModEnvelope(
+      voice.source.detune,
+      voice.modEnvelopePlan,
+      voice.modEnvToPitchCents,
+      voice.envelope.startTime,
+      now,
+      forcedReleaseSeconds,
+      0,
+    );
 
-    // SoundFont volume decay/release is linear in envelope attenuation, which
-    // means exponential in Web Audio gain. Reconstruct the exact audible level
-    // at Note Off, then ramp by constant dB/time down to the -96 dB SF2 floor.
     const floorGain = Math.max(1e-8, voice.envelope.peakGain * SF2_SILENCE_GAIN);
     voice.gain.gain.cancelScheduledValues(now);
     if (currentGain > floorGain * 1.001 && release > 0.001) {
@@ -399,17 +453,19 @@ export class Sf2Synth {
       voice.gain.gain.setValueAtTime(0, now);
     }
 
-    try {
-      voice.source.stop(now + release + 0.006);
-    } catch {}
+    const stopTime = now + release + 0.006;
+    voice.lfos.stop(stopTime);
+    try { voice.source.stop(stopTime); } catch {}
   }
 
   private cleanupVoice(voice: ActiveVoice): void {
     const voiceSet = this.voices.get(voice.voiceKey);
     voiceSet?.delete(voice);
     if (voiceSet?.size === 0) this.voices.delete(voice.voiceKey);
+    voice.lfos.disconnect();
     voice.source.disconnect();
     voice.filter.disconnect();
+    voice.lfoGain.disconnect();
     voice.gain.disconnect();
     voice.panner.disconnect();
   }
@@ -474,8 +530,6 @@ function scheduleEnvelope(param: AudioParam, envelope: VoiceEnvelopeState): void
   if (delaySeconds > 0.001) param.setValueAtTime(0, attackStart);
 
   if (attackSeconds > 0.001) {
-    // SF2 volume attack is convex in envelope/dB space but nominally linear
-    // in audible amplitude, so a linear GainNode attack is appropriate.
     param.linearRampToValueAtTime(peakGain, attackEnd);
   } else {
     param.setValueAtTime(peakGain, attackStart);

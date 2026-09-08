@@ -8,6 +8,11 @@ import {
   absoluteCentsToHz,
   buildSf2FilterPlan,
 } from '../src/audio/sf2/Sf2Filter.ts';
+import {
+  buildSf2LfoPlan,
+  buildSf2ModEnvelopePlan,
+  velocityAttenuationCentibels,
+} from '../src/audio/sf2/Sf2Modulation.ts';
 import { parseSf2 } from '../src/audio/sf2/Sf2Parser.ts';
 
 const file = await readFile(new URL('../public/soundfonts/FluidR3_GM.sf2', import.meta.url));
@@ -63,7 +68,16 @@ for (const region of [
     ['keynumToVolEnvDecay', region.keynumToVolEnvDecay],
     ['initialFilterFc', region.initialFilterFc],
     ['initialFilterQ', region.initialFilterQ],
+    ['modEnvToPitch', region.modEnvToPitch],
+    ['modLfoToPitch', region.modLfoToPitch],
+    ['vibLfoToPitch', region.vibLfoToPitch],
     ['modEnvToFilterFc', region.modEnvToFilterFc],
+    ['modLfoToFilterFc', region.modLfoToFilterFc],
+    ['modLfoToVolume', region.modLfoToVolume],
+    ['delayModLFO', region.delayModLFO],
+    ['freqModLFO', region.freqModLFO],
+    ['delayVibLFO', region.delayVibLFO],
+    ['freqVibLFO', region.freqVibLFO],
     ['keynumToModEnvHold', region.keynumToModEnvHold],
     ['keynumToModEnvDecay', region.keynumToModEnvDecay],
   ]) {
@@ -79,6 +93,7 @@ for (const region of [
 
 verifyEnvelopeMath();
 verifyFilterMath();
+verifyModulationMath();
 
 console.log(`Presets: ${presets.length}`);
 console.log(`Violin preset: ${violin.name}`);
@@ -98,21 +113,25 @@ console.log(`Hi-hat regions closed/open: ${closedHatRegions.length}/${openHatReg
 console.log(`Hi-hat exclusive classes: ${hatExclusiveClasses.length ? hatExclusiveClasses.join(',') : 'none'}`);
 
 for (const region of violinRegions) {
+  const lfo = buildSf2LfoPlan(region);
   console.log({
     sample: region.sample.name,
     loopMode: region.sampleModes,
-    loopStart: region.loopStart,
-    loopEnd: region.loopEnd,
-    sampleRate: region.sample.sampleRate,
     attackTc: region.attackVolEnv,
     releaseTc: region.releaseVolEnv,
     filterFc: region.initialFilterFc,
-    filterQ: region.initialFilterQ,
+    modEnvToPitch: region.modEnvToPitch,
     modEnvToFilterFc: region.modEnvToFilterFc,
+    modLfoHz: lfo.modFrequencyHz,
+    modLfoToPitch: lfo.modToPitchCents,
+    modLfoToFilter: lfo.modToFilterCents,
+    modLfoToVolume: lfo.modToVolumeCentibels,
+    vibLfoHz: lfo.vibFrequencyHz,
+    vibLfoToPitch: lfo.vibToPitchCents,
   });
 }
 
-console.log('Guitar envelope/filter snapshot at E4:');
+console.log('Guitar envelope/filter/modulation snapshot at E4:');
 for (const [label, regions] of [
   ['nylon', nylonRegions],
   ['steel', steelRegions],
@@ -124,15 +143,18 @@ for (const [label, regions] of [
     decayTc: region.decayVolEnv,
     sustainCb: region.sustainVolEnv,
     releaseTc: region.releaseVolEnv,
-    keyToDecay: region.keynumToVolEnvDecay,
     filterFc: region.initialFilterFc,
     filterQ: region.initialFilterQ,
+    modEnvToPitch: region.modEnvToPitch,
     modEnvToFilterFc: region.modEnvToFilterFc,
+    modLfoToPitch: region.modLfoToPitch,
+    vibLfoToPitch: region.vibLfoToPitch,
     modLfoToFilterFc: region.modLfoToFilterFc,
+    modLfoToVolume: region.modLfoToVolume,
   })));
 }
 
-console.log('SF2 full-ensemble parser/envelope/filter verification passed.');
+console.log('SF2 full-ensemble parser/envelope/filter/modulation verification passed.');
 
 function requirePreset(bank, program, label) {
   const preset = presets.find((candidate) => candidate.bank === bank && candidate.program === program);
@@ -213,6 +235,51 @@ function verifyFilterMath() {
   assertApprox(plan.envelopeDepthCents, 600, 0.000001, 'filter envelope scale');
   assertApprox(plan.envelope.sustainLevel, 0.5, 0.000001, 'filter sustain level');
   assertApprox(plan.staticDetuneCents, 100 - 1200 * (63 / 127), 0.000001, 'velocity brightness');
+}
+
+function verifyModulationMath() {
+  assertApprox(velocityAttenuationCentibels(127), 0, 0.000001, 'velocity 127 attenuation');
+  assertApprox(
+    velocityAttenuationCentibels(64),
+    -200 * Math.log10(64 / 127),
+    0.000001,
+    'velocity 64 attenuation',
+  );
+  assertApprox(velocityAttenuationCentibels(0), 960, 0.000001, 'velocity zero attenuation');
+
+  const synthetic = {
+    modLfoToPitch: 35,
+    vibLfoToPitch: 20,
+    modLfoToFilterFc: 600,
+    modLfoToVolume: 60,
+    delayModLFO: -12000,
+    freqModLFO: -1200,
+    delayVibLFO: -7973,
+    freqVibLFO: 0,
+  };
+  const lfo = buildSf2LfoPlan(synthetic);
+  assertApprox(lfo.modDelaySeconds, 2 ** -10, 0.000001, 'mod LFO delay');
+  assertApprox(lfo.modFrequencyHz, 8.176 / 2, 0.001, 'mod LFO frequency');
+  assertApprox(lfo.vibDelaySeconds, 0.01, 0.0002, 'vibrato LFO delay');
+  assertApprox(lfo.vibFrequencyHz, 8.176, 0.001, 'vibrato LFO frequency');
+  assertApprox(lfo.modToPitchCents, 35, 0.000001, 'mod LFO pitch depth');
+  assertApprox(lfo.modToFilterCents, 600, 0.000001, 'mod LFO filter depth');
+  assertApprox(lfo.modToVolumeCentibels, 60, 0.000001, 'mod LFO volume depth');
+  assertApprox(lfo.vibToPitchCents, 20, 0.000001, 'vibrato pitch depth');
+
+  const env = buildSf2ModEnvelopePlan({
+    delayModEnv: -12000,
+    attackModEnv: -12000,
+    holdModEnv: -7973,
+    decayModEnv: 0,
+    sustainModEnv: 500,
+    releaseModEnv: 0,
+    keynumToModEnvHold: 50,
+    keynumToModEnvDecay: 50,
+  }, 60);
+  assertApprox(env.holdSeconds, 0.01, 0.0002, 'mod envelope hold');
+  assertApprox(env.decaySeconds, 1, 0.000001, 'mod envelope full decay time');
+  assertApprox(env.sustainLevel, 0.5, 0.000001, 'mod envelope sustain');
 }
 
 function assertApprox(actual, expected, tolerance, label) {

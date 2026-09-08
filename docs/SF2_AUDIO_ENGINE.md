@@ -1,6 +1,6 @@
 # SF2 Audio Engine
 
-This document describes the native TypeScript/Web Audio SoundFont 2 path on `experiment/sf2-backend`. The branch keeps the V2 runtime ownership rules intact: 3D instrument adapters emit musical intent, samplers own instrument semantics, and the SF2 engine remains an audio backend rather than leaking into donor geometry or UI code.
+This document describes the native TypeScript/Web Audio SoundFont 2 path on `experiment/sf2-backend`. The branch keeps the V2 ownership rules intact: 3D instrument adapters emit musical intent, samplers own instrument semantics, and the SF2 engine remains an audio backend rather than leaking into donor geometry or UI code.
 
 ## Runtime boundary
 
@@ -16,6 +16,7 @@ Performance profile
 Sf2Synth
 ├── Sf2Envelope
 ├── Sf2Filter
+├── Sf2Modulation
 ├── Sf2Parser
 └── Sf2BankLibrary
         ↓
@@ -42,10 +43,13 @@ The current parser/synth implements the following high-value SF2 behavior:
 - `initialFilterFc`, `initialFilterQ` and `modEnvToFilterFc`;
 - modulation-envelope delay/attack/hold/decay/sustain/release;
 - `keynumToModEnvHold` and `keynumToModEnvDecay`;
+- modulation envelope to pitch (`modEnvToPitch`);
+- modulation LFO to pitch/filter/volume;
+- vibrato LFO to pitch;
+- LFO delay and frequency generators;
+- default Note-On velocity to initial attenuation behavior;
 - sustain pedal and pitch bend;
 - `exclusiveClass` voice choking, including GM hi-hat behavior.
-
-`modLfoToFilterFc` is parsed and exposed for inspection but the modulation LFO itself is not yet executed.
 
 ## Volume-envelope model
 
@@ -53,16 +57,18 @@ SoundFont volume decay/release is treated as attenuation changing at a constant 
 
 For example, if a region has a nominal 1 second decay time but its sustain attenuation is 12 dB, the audible decay stage uses 12/96 = 12.5% of that nominal time. Web Audio gain automation uses an exponential ramp so the amplitude curve follows the constant-dB envelope.
 
-When Note Off arrives during attack/hold/decay, the engine reconstructs the current envelope level before starting release. Release duration is shortened according to how much of the 96 dB attenuation range has already been traversed, which avoids a gain jump and avoids replaying an unnecessarily long full release from a quiet state.
+When Note Off arrives during attack/hold/decay, the engine reconstructs the current envelope level before starting release. Release duration is shortened according to how much of the 96 dB attenuation range has already been traversed.
 
-## Filter model
+## Filter and modulation-envelope model
 
-Each SF2 region can insert a Web Audio `BiquadFilterNode` before its volume envelope:
+Each SF2 region can insert a Web Audio low-pass filter before its volume envelope:
 
 ```text
 AudioBufferSource
       ↓
 SF2 low-pass filter
+      ↓
+LFO volume stage
       ↓
 volume envelope
       ↓
@@ -71,9 +77,43 @@ pan
 instrument destination / AudioEngine bus
 ```
 
-`initialFilterFc` is converted from absolute cents to Hz. `initialFilterQ` is converted from centibels to dB for the Web Audio low-pass resonance parameter. The modulation envelope drives filter cutoff through `detune`, which is already expressed in cents and therefore maps naturally to the SoundFont cutoff modulation units.
+`initialFilterFc` is converted from absolute cents to Hz. `initialFilterQ` is converted from centibels to dB for Web Audio resonance. The shared modulation envelope can drive both filter cutoff and sample pitch. Filter cutoff modulation uses `BiquadFilterNode.detune`; pitch modulation uses `AudioBufferSourceNode.detune`.
 
-The filter envelope has its own delay/attack/hold/decay/sustain/release and key-dependent hold/decay timing. Note Off reconstructs the current filter-envelope level before ramping back to the static cutoff position.
+The modulation envelope has delay/attack/hold/decay/sustain/release and key-dependent hold/decay timing. Note Off reconstructs the current envelope level before releasing back toward the static value.
+
+## Internal LFO behavior
+
+SoundFont defines two triangular low-frequency oscillators:
+
+- Modulation LFO: can drive pitch, filter cutoff and volume;
+- Vibrato LFO: drives pitch.
+
+The engine now parses and executes:
+
+- `modLfoToPitch`
+- `vibLfoToPitch`
+- `modLfoToFilterFc`
+- `modLfoToVolume`
+- `delayModLFO` / `freqModLFO`
+- `delayVibLFO` / `freqVibLFO`
+
+LFO frequency uses SoundFont absolute cents, where 0 corresponds to about 8.176 Hz. Delay uses timecents. LFOs are voice-local and stop/disconnect with the voice.
+
+Volume LFO is implemented in a separate gain stage so it does not fight volume-envelope automation. The dB-domain triangle is converted to multiplicative gain through a `WaveShaperNode`. Extreme tremolo depth is browser-safety bounded; normal musical depths such as 6 dB are preserved.
+
+## Default velocity behavior
+
+The previous synth used a project-specific `velocity^1.35` gain curve. The SF2 path now applies the standard default Note-On velocity -> initial attenuation relationship: a negative-unipolar concave mapping with a 960 cB amount. In closed form the attenuation is equivalent to:
+
+```text
+attenuation_cB = -200 * log10(velocity / 127)
+```
+
+clamped to the SoundFont 96 dB range.
+
+This is engine behavior and therefore applies consistently to piano, pads, violin sustain, guitars and percussion.
+
+The controversial SoundFont default velocity -> filter cutoff modulator is not enabled globally. FluidSynth also disables that default mapping because the specification is internally inconsistent. Guitar `PerformanceProfile` settings may still deliberately darken low-velocity notes as an instrument policy.
 
 ## Performance profiles
 
@@ -85,19 +125,7 @@ Current profile controls are:
 - `velocityToFilterCents`: extra low-velocity cutoff reduction that fades to zero at velocity 127;
 - `filterEnvelopeScale`: multiplier for the SoundFont `modEnvToFilterFc` depth.
 
-Per-note options can add temporary offsets on top of the active profile. This separation is deliberate:
-
-```text
-SoundFont authoring
-      ↓
-SF2 parser/synth
-      ↓
-Instrument performance profile
-      ↓
-Per-note gesture policy
-```
-
-Guitar programs use profiles to differentiate nylon/steel and the six electric-guitar programs without placing guitar knowledge in `Sf2Parser` or `Sf2Synth`.
+Per-note options can add temporary offsets on top of the active profile.
 
 ## Plucked-string lifecycle
 
@@ -105,26 +133,43 @@ A guitar strum is treated as an impulse with a finite physical ring ceiling, not
 
 Retriggering the same physical string quickly chokes its previous voice so repeated strums cannot accumulate many old release tails. Program-specific ring ceilings remain a performance policy and do not rewrite SoundFont envelopes.
 
-## Velocity status
+## MIDI controller boundary
 
-Region velocity ranges are fully respected. The synth still uses a project velocity-to-gain curve rather than implementing the complete SoundFont default modulator graph. Guitar performance profiles additionally make low-velocity notes darker through cutoff modulation.
+This phase implements sound-engine defaults that should work even without an external MIDI controller. The full external control graph is intentionally deferred until MIDI integration.
 
-This is intentionally documented as partial support: the current result should not be described as a complete SF2 default-modulator implementation.
+Already available as direct runtime controls:
+
+- Note On / Note Off + velocity;
+- program/bank selection;
+- sustain;
+- pitch bend.
+
+Deferred controller/modulator work includes:
+
+- CC1 Mod Wheel -> LFO depth;
+- CC7 Volume;
+- CC10 Pan;
+- CC11 Expression;
+- CC64 routing through a channel-controller layer (the synth already has sustain semantics);
+- CC74 brightness/filter;
+- CC91 reverb send;
+- CC93 chorus send;
+- channel/key aftertouch;
+- pitch-bend sensitivity via RPN;
+- SoundFont `pmod` / `imod` execution and arbitrary source/destination modulator chaining.
+
+The intended boundary is: the synth should sound correct by itself first; MIDI later supplies external hands/knobs to parameters that already have stable engine semantics.
 
 ## Not implemented yet
 
 The following remain outside the current compatibility set:
 
 - `pmod` / `imod` modulator execution;
-- modulation and vibrato LFO execution;
 - arbitrary MIDI CC / aftertouch modulation routing;
-- full default SoundFont modulator set;
-- filter modulation driven by the unimplemented LFO;
+- full default controller modulator set;
 - reverb and chorus sends;
 - 24-bit `sm24` sample extension;
 - a full SoundFont 2.04 compliance pass.
-
-These are future engine work, not sampler work.
 
 ## Validation
 
@@ -135,10 +180,10 @@ npm run build
 npm run sf2:verify
 ```
 
-`sf2:verify` checks real FluidR3 preset/region resolution across violin, piano, Warm Pad, acoustic/electric guitars and percussion. It also validates volume-envelope math, filter conversion math, filter metadata ranges, sustain loops and hi-hat exclusive classes.
+`sf2:verify` checks real FluidR3 preset/region resolution across violin, piano, Warm Pad, acoustic/electric guitars and percussion. It validates volume-envelope math, filter conversion math, modulation-envelope metadata, LFO generator metadata/frequency conversion, default velocity attenuation, sustain loops and hi-hat exclusive classes.
 
-Listening validation should include long violin/Pad holds, piano decay, repeated guitar strums, guitar harmonics/palm mute, hi-hat choke, velocity contrast and sustain-pedal release.
+Listening validation should include long violin/Pad holds, piano decay, repeated guitar strums, guitar harmonics/palm mute, hi-hat choke, velocity contrast, patches with vibrato/tremolo and sustain-pedal release.
 
 ## Next compatibility work
 
-The next high-value engine step is the SoundFont modulator layer: default velocity-to-attenuation behavior, LFO execution and selected CC mappings. Those should be added beneath the same backend boundary rather than creating instrument-specific DSP branches in the 3D adapters.
+The next major layer is the external controller/modulator graph. It should be built beneath the same backend boundary and map MIDI CC/aftertouch/RPN sources onto existing pitch, gain, filter and LFO parameters rather than creating instrument-specific controller code in 3D adapters.
