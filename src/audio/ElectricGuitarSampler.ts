@@ -20,12 +20,13 @@ const PITCH_BEND_SEMITONES = 2;
 const COMMON_NOTES = [40, 45, 50, 55, 59, 64, 67, 69, 71, 74, 76, 79, 83, 86] as const;
 
 type VoiceBackend = 'mp3' | 'tone';
-type GuitarGesture = 'gated' | 'strum';
+type GuitarGesture = 'gated' | 'pluck' | 'strum';
 
 interface VoiceState {
   voice: AudioVoice | null;
   released: boolean;
   backend: VoiceBackend;
+  gesture: GuitarGesture;
 }
 
 interface ToneChain {
@@ -108,9 +109,9 @@ export class ElectricGuitarSampler {
     const backendVelocity = Math.round(accentedVelocity * 127);
     const baseGain = Math.pow(accentedVelocity, 1.16) * 0.82;
     const chain = this.ensureToneChain();
-    const toneOptions = gesture === 'strum'
-      ? electricStrumToneOptions(this.programId, note, chain.input)
-      : { destination: chain.input, gainScale: 0.82 };
+    const toneOptions = gesture === 'gated'
+      ? { destination: chain.input, gainScale: 0.82 }
+      : electricImpulseToneOptions(this.programId, note, chain.input);
 
     if (this.toneBackend?.noteOn(
       voiceId(stringNumber),
@@ -122,6 +123,7 @@ export class ElectricGuitarSampler {
         voice: null,
         released: false,
         backend: 'tone',
+        gesture,
       });
       return;
     }
@@ -130,6 +132,7 @@ export class ElectricGuitarSampler {
       voice: null,
       released: false,
       backend: 'mp3',
+      gesture,
     };
     this.voices.set(stringNumber, state);
 
@@ -152,7 +155,7 @@ export class ElectricGuitarSampler {
 
   noteOff(stringNumber: number): void {
     const state = this.voices.get(stringNumber);
-    if (!state) return;
+    if (!state || state.gesture !== 'gated') return;
     state.released = true;
 
     if (state.backend === 'tone') {
@@ -162,6 +165,11 @@ export class ElectricGuitarSampler {
     }
 
     if (!this.sustain) this.stopString(stringNumber, 0.10);
+  }
+
+  muteString(stringNumber: number, fadeSeconds = 0.04): void {
+    if (!Number.isInteger(stringNumber) || stringNumber < 1 || stringNumber > 6) return;
+    this.stopString(stringNumber, Math.max(0, fadeSeconds));
   }
 
   setProgram(value: number): boolean {
@@ -355,7 +363,7 @@ export class ElectricGuitarSampler {
   }
 }
 
-function electricStrumToneOptions(
+function electricImpulseToneOptions(
   program: ElectricGuitarProgramId,
   note: number,
   destination: AudioNode,
