@@ -64,6 +64,13 @@ export class AtelierStudioVenue implements Venue {
       rotation: [0, 0, 0] as [number, number, number],
       scale: 1,
     },
+    // The acoustic donor was authored against a y=-4.01 studio floor. Keep its
+    // procedural body/string geometry intact and normalize only at the Venue edge.
+    'acoustic.main': {
+      position: [0, 3.998, 0] as [number, number, number],
+      rotation: [0, 0, 0] as [number, number, number],
+      scale: 1,
+    },
   };
 
   readonly cameraViews = [
