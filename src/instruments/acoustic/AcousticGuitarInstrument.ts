@@ -2,6 +2,10 @@ import * as THREE from 'three';
 import type { AcousticGuitarSampler } from '../../audio/AcousticGuitarSampler';
 import type { Instrument, InstrumentFrameResult, InstrumentInteraction } from '../Instrument';
 import {
+  applyFingeringMarkerStyle,
+  FINGERING_MARKER_STYLES,
+} from '../shared/FingeringMarkerStyle';
+import {
   buildLegacyAcousticAsset,
   type AcousticStrumDirection,
   type LegacyAcousticController,
@@ -109,7 +113,9 @@ export class AcousticGuitarInstrument implements Instrument {
   }
 
   update(dt: number): InstrumentFrameResult {
-    return this.controller.tick(dt);
+    const result = this.controller.tick(dt);
+    applyFingeringMarkerStyle(this.model.strings.values(), FINGERING_MARKER_STYLES.acousticGuitar);
+    return result;
   }
 
   reset(): void {

@@ -7,6 +7,10 @@ import {
 } from '../../audio/ElectricGuitarProgram';
 import type { Instrument, InstrumentFrameResult, InstrumentInteraction } from '../Instrument';
 import {
+  applyFingeringMarkerStyle,
+  FINGERING_MARKER_STYLES,
+} from '../shared/FingeringMarkerStyle';
+import {
   buildLegacyElectricAsset,
   type ElectricControlId,
   type ElectricStrumDirection,
@@ -138,7 +142,9 @@ export class ElectricGuitarInstrument implements Instrument {
   }
 
   update(dt: number): InstrumentFrameResult {
-    return this.controller.tick(dt);
+    const result = this.controller.tick(dt);
+    applyFingeringMarkerStyle(this.model.strings.values(), FINGERING_MARKER_STYLES.electricGuitar);
+    return result;
   }
 
   reset(): void {

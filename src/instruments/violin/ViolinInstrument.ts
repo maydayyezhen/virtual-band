@@ -2,6 +2,10 @@ import * as THREE from 'three';
 import type { ViolinSampler } from '../../audio/ViolinSampler';
 import type { Instrument, InstrumentFrameResult, InstrumentInteraction } from '../Instrument';
 import {
+  applyFingeringMarkerStyle,
+  FINGERING_MARKER_STYLES,
+} from '../shared/FingeringMarkerStyle';
+import {
   buildLegacyViolinAsset,
   type LegacyViolinController,
   type LegacyViolinHitEvent,
@@ -108,7 +112,9 @@ export class ViolinInstrument implements Instrument {
   }
 
   update(dt: number): InstrumentFrameResult {
-    return this.controller.tick(dt);
+    const result = this.controller.tick(dt);
+    applyFingeringMarkerStyle(this.model.strings.values(), FINGERING_MARKER_STYLES.violin);
+    return result;
   }
 
   reset(): void {
