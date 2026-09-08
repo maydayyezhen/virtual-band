@@ -1,6 +1,15 @@
 import type { AudioBus, AudioEngine } from '../AudioEngine';
 import { parseSf2, type Sf2PresetInfo, type Sf2Region, type Sf2SoundFont } from './Sf2Parser';
 
+interface VoiceEnvelopeState {
+  readonly startTime: number;
+  readonly peakGain: number;
+  readonly sustainGain: number;
+  readonly attackSeconds: number;
+  readonly holdSeconds: number;
+  readonly decaySeconds: number;
+}
+
 interface ActiveVoice {
   readonly voiceKey: string;
   readonly note: number;
@@ -10,6 +19,7 @@ interface ActiveVoice {
   readonly releaseSeconds: number;
   readonly loopMode: number;
   readonly basePlaybackRate: number;
+  readonly envelope: VoiceEnvelopeState;
   keyReleased: boolean;
   stopped: boolean;
 }
@@ -228,8 +238,16 @@ export class Sf2Synth {
     const hold = timecentsToSeconds(region.holdVolEnv);
     const decay = timecentsToSeconds(region.decayVolEnv);
     const release = timecentsToSeconds(region.releaseVolEnv);
+    const envelope: VoiceEnvelopeState = {
+      startTime: now,
+      peakGain,
+      sustainGain,
+      attackSeconds: attack,
+      holdSeconds: hold,
+      decaySeconds: decay,
+    };
 
-    scheduleEnvelope(gain.gain, now, peakGain, sustainGain, attack, hold, decay);
+    scheduleEnvelope(gain.gain, envelope);
     panner.pan.value = clamp(region.pan / 500, -1, 1);
     source.connect(gain).connect(panner).connect(this.bus.input);
 
@@ -242,6 +260,7 @@ export class Sf2Synth {
       releaseSeconds: release,
       loopMode,
       basePlaybackRate,
+      envelope,
       keyReleased: false,
       stopped: false,
     };
@@ -257,9 +276,16 @@ export class Sf2Synth {
     const context = this.audio.getContext();
     const now = context.currentTime;
     const release = clamp(forcedReleaseSeconds ?? voice.releaseSeconds, 0.005, 30);
+    const currentGain = envelopeGainAt(voice.envelope, now);
 
     if (voice.loopMode === 3) voice.source.loop = false;
-    holdAudioParam(voice.gain.gain, now);
+
+    // Do not rely on AudioParam.value after cancelling scheduled automation: in
+    // some browser paths it reflects a scheduled endpoint rather than the audible
+    // instantaneous level. Reconstruct the envelope level explicitly, pin that
+    // exact value at Note Off, then fade continuously to silence.
+    voice.gain.gain.cancelScheduledValues(now);
+    voice.gain.gain.setValueAtTime(currentGain, now);
     voice.gain.gain.linearRampToValueAtTime(0, now + release);
     try {
       voice.source.stop(now + release + 0.025);
@@ -314,37 +340,52 @@ function playbackRateForRegion(region: Sf2Region, note: number): number {
   return 2 ** ((keyDistanceCents + tuningCents) / 1200);
 }
 
-function scheduleEnvelope(
-  param: AudioParam,
-  now: number,
-  peakGain: number,
-  sustainGain: number,
-  attack: number,
-  hold: number,
-  decay: number,
-): void {
-  param.cancelScheduledValues(now);
-  if (attack > 0.001) {
-    param.setValueAtTime(0.000001, now);
-    param.linearRampToValueAtTime(peakGain, now + attack);
+function scheduleEnvelope(param: AudioParam, envelope: VoiceEnvelopeState): void {
+  const {
+    startTime,
+    peakGain,
+    sustainGain,
+    attackSeconds,
+    holdSeconds,
+    decaySeconds,
+  } = envelope;
+
+  param.cancelScheduledValues(startTime);
+  if (attackSeconds > 0.001) {
+    param.setValueAtTime(0.000001, startTime);
+    param.linearRampToValueAtTime(peakGain, startTime + attackSeconds);
   } else {
-    param.setValueAtTime(peakGain, now);
+    param.setValueAtTime(peakGain, startTime);
   }
 
-  const holdEnd = now + attack + hold;
+  const holdEnd = startTime + attackSeconds + holdSeconds;
   param.setValueAtTime(peakGain, holdEnd);
-  if (decay > 0.001) param.linearRampToValueAtTime(sustainGain, holdEnd + decay);
+  if (decaySeconds > 0.001) param.linearRampToValueAtTime(sustainGain, holdEnd + decaySeconds);
   else param.setValueAtTime(sustainGain, holdEnd);
 }
 
-function holdAudioParam(param: AudioParam, now: number): void {
-  if (typeof param.cancelAndHoldAtTime === 'function') {
-    param.cancelAndHoldAtTime(now);
-    return;
+function envelopeGainAt(envelope: VoiceEnvelopeState, time: number): number {
+  const elapsed = Math.max(0, time - envelope.startTime);
+  const attackEnd = envelope.attackSeconds;
+  if (envelope.attackSeconds > 0.001 && elapsed < attackEnd) {
+    const t = clamp(elapsed / envelope.attackSeconds, 0, 1);
+    return lerp(0.000001, envelope.peakGain, t);
   }
-  const current = param.value;
-  param.cancelScheduledValues(now);
-  param.setValueAtTime(current, now);
+
+  const holdEnd = attackEnd + envelope.holdSeconds;
+  if (elapsed < holdEnd) return envelope.peakGain;
+
+  const decayEnd = holdEnd + envelope.decaySeconds;
+  if (envelope.decaySeconds > 0.001 && elapsed < decayEnd) {
+    const t = clamp((elapsed - holdEnd) / envelope.decaySeconds, 0, 1);
+    return lerp(envelope.peakGain, envelope.sustainGain, t);
+  }
+
+  return envelope.sustainGain;
+}
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
 }
 
 function timecentsToSeconds(timecents: number): number {
