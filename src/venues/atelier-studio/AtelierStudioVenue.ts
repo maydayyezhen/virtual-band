@@ -56,6 +56,14 @@ export class AtelierStudioVenue implements Venue {
       rotation: [0, 0, 0] as [number, number, number],
       scale: 1,
     },
+    // The electric donor's stand sits on its original y=-3.555 studio floor.
+    // Align that authored floor to the shared Atelier floor without touching the
+    // guitar, stand, cable, string geometry or instrument-local saved views.
+    'electric.main': {
+      position: [0, 3.543, 0] as [number, number, number],
+      rotation: [0, 0, 0] as [number, number, number],
+      scale: 1,
+    },
   };
 
   readonly cameraViews = [
