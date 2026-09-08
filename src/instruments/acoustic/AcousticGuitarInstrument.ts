@@ -1,5 +1,10 @@
 import * as THREE from 'three';
 import type { AcousticGuitarSampler } from '../../audio/AcousticGuitarSampler';
+import {
+  DEFAULT_ACOUSTIC_GUITAR_PROGRAM,
+  getAcousticGuitarProgram,
+  type AcousticGuitarProgramId,
+} from '../../audio/AcousticGuitarProgram';
 import type { Instrument, InstrumentFrameResult, InstrumentInteraction } from '../Instrument';
 import {
   applyFingeringMarkerStyle,
@@ -47,6 +52,7 @@ export class AcousticGuitarInstrument implements Instrument {
       onHit: (event) => instrument?.playAudio(event),
     });
     instrument = new AcousticGuitarInstrument(model, controller, sampler);
+    instrument.setProgram(DEFAULT_ACOUSTIC_GUITAR_PROGRAM);
     return instrument;
   }
 
@@ -77,6 +83,20 @@ export class AcousticGuitarInstrument implements Instrument {
       this.sampler.noteOff(stringNumber);
     }
     return true;
+  }
+
+  get program(): AcousticGuitarProgramId {
+    return this.sampler.program;
+  }
+
+  setProgram(value: number): boolean {
+    const preset = getAcousticGuitarProgram(value);
+    if (!preset) return false;
+    return this.sampler.setProgram(preset.id);
+  }
+
+  programChange(value: number): boolean {
+    return this.setProgram(value);
   }
 
   setPitchBend(value: number): boolean {

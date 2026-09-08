@@ -1,7 +1,11 @@
 import type { AudioEngine, AudioVoice } from './AudioEngine';
+import {
+  DEFAULT_ACOUSTIC_GUITAR_PROGRAM,
+  getAcousticGuitarProgram,
+  type AcousticGuitarProgramId,
+} from './AcousticGuitarProgram';
 
-const SAMPLE_BASE =
-  'https://paulrosen.github.io/midi-js-soundfonts/FluidR3_GM/acoustic_guitar_steel-mp3/';
+const SAMPLE_ROOT = 'https://paulrosen.github.io/midi-js-soundfonts/FluidR3_GM/';
 const FLAT_NAMES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
 const PITCH_BEND_SEMITONES = 2;
 
@@ -13,26 +17,41 @@ interface VoiceState {
 
 export class AcousticGuitarSampler {
   private readonly audio: AudioEngine;
-  private readonly buffers = new Map<number, Promise<AudioBuffer | null>>();
+  private readonly buffers = new Map<string, Promise<AudioBuffer | null>>();
   private readonly voices = new Map<number, VoiceState>();
   private sustain = false;
   private volume = 0.86;
   private pitchBend = 0;
+  private programId: AcousticGuitarProgramId = DEFAULT_ACOUSTIC_GUITAR_PROGRAM;
 
   constructor(audio: AudioEngine) {
     this.audio = audio;
+  }
+
+  get program(): AcousticGuitarProgramId {
+    return this.programId;
+  }
+
+  setProgram(value: number): boolean {
+    const preset = getAcousticGuitarProgram(value);
+    if (!preset) return false;
+    this.programId = preset.id;
+    return true;
   }
 
   noteOn(stringNumber: number, note: number, velocity: number): void {
     if (!Number.isInteger(stringNumber) || stringNumber < 1 || stringNumber > 6) return;
     if (!Number.isInteger(note) || note < 0 || note > 127) return;
 
+    const preset = getAcousticGuitarProgram(this.programId);
+    if (!preset) return;
+
     this.stopString(stringNumber, 0.014);
     const baseGain = Math.pow(clamp01(velocity / 127), 1.12) * 0.86;
     const state: VoiceState = { voice: null, released: false, baseGain };
     this.voices.set(stringNumber, state);
 
-    void this.load(note).then((buffer) => {
+    void this.load(preset.sampleSet, note).then((buffer) => {
       if (!buffer || this.voices.get(stringNumber) !== state) return;
       if (state.released && !this.sustain) {
         this.voices.delete(stringNumber);
@@ -81,8 +100,10 @@ export class AcousticGuitarSampler {
   }
 
   async preloadCommon(): Promise<void> {
+    const preset = getAcousticGuitarProgram(this.programId);
+    if (!preset) return;
     const notes = [40, 45, 50, 55, 59, 64, 67, 69, 71, 72, 74, 76, 79, 81, 84];
-    await Promise.allSettled(notes.map((note) => this.load(note)));
+    await Promise.allSettled(notes.map((note) => this.load(preset.sampleSet, note)));
   }
 
   reset(): void {
@@ -102,20 +123,21 @@ export class AcousticGuitarSampler {
     state.voice?.stop(fadeSeconds);
   }
 
-  private load(note: number): Promise<AudioBuffer | null> {
-    const existing = this.buffers.get(note);
+  private load(sampleSet: string, note: number): Promise<AudioBuffer | null> {
+    const key = `${sampleSet}:${note}`;
+    const existing = this.buffers.get(key);
     if (existing) return existing;
 
     const promise = (async () => {
       try {
-        const response = await fetch(`${SAMPLE_BASE}${midiFlatName(note)}.mp3`);
+        const response = await fetch(`${SAMPLE_ROOT}${sampleSet}-mp3/${midiFlatName(note)}.mp3`);
         if (!response.ok) return null;
         return await this.audio.decode(await response.arrayBuffer());
       } catch {
         return null;
       }
     })();
-    this.buffers.set(note, promise);
+    this.buffers.set(key, promise);
     return promise;
   }
 }

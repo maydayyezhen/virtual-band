@@ -320,6 +320,15 @@ export class AtelierAcousticShowcaseMode implements PresentationMode {
       }
     } else if (action?.kind === 'strum') {
       if (!event.repeat) this.strumCurrentChord(100, action.direction);
+    } else if (action?.kind === 'program-toggle') {
+      if (!event.repeat) {
+        const nextProgram = this.acoustic.program === 24 ? 25 : 24;
+        if (this.acoustic.setProgram(nextProgram)) {
+          console.info(
+            `[Virtual Band V2] acoustic program ${nextProgram} · ${nextProgram === 24 ? 'Nylon' : 'Steel'}`,
+          );
+        }
+      }
     } else if (action?.kind === 'view') {
       this.selectView(action.view);
     } else if (action?.kind === 'panic') {

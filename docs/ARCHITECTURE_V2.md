@@ -65,6 +65,8 @@ The drum kit uses `DrumsInstrument + DrumSampler`; the dual stage keyboard uses 
 
 The violin keeps the donor's four physical strings, continuous fretless fingerboard positioning, independent string vibration, bow engagement, adjacent-string double-stop bow logic, vibrato, pitch-bend animation and arco/pizzicato articulation state. The electric guitar keeps its six independently animated strings, 22-fret fingering, pick animation, tremolo/pitch-bend motion, sustain state, volume/tone/pickup controls and delayed down/up strum controller. The acoustic guitar keeps the authored spruce/rosewood model and 20-fret geometry while its V2 adapter adds six dynamic playable strings, fretting markers, animated plectrum motion, pitch-bend deformation and delayed down/up strum behavior based on the old acoustic visual semantics. Their original page renderers, lighting, UI, RAF and DOM controls are not imported into V2.
 
+Audio compatibility may intentionally cover a wider set of programs than the current authored geometry. Such cases must be documented rather than hidden behind runtime geometry patches. The current acoustic model is visually a steel-string guitar: GM 25 Steel is aligned with that model, while GM 24 Nylon is supported as an audio-compatibility mode and knowingly reuses the same steel-string visual asset. See `docs/INSTRUMENT_FIDELITY.md` for the explicit mismatch and future resolution policy.
+
 Audio receives the same semantic note events as visual animation. Mouse, computer keyboard, presentation demos and future MIDI routing therefore converge on instrument APIs instead of maintaining separate sound and animation paths. Sample sourcing stays inside sampler classes rather than inside 3D models.
 
 ## Data direction
