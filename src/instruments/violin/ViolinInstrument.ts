@@ -93,7 +93,10 @@ export class ViolinInstrument implements Instrument {
   }
 
   setPitchBend(value: number): boolean {
-    return this.controller.api.setPitchBend(value);
+    const visualHandled = this.controller.api.setPitchBend(value);
+    if (!visualHandled) return false;
+    this.sampler.setPitchBend(value);
+    return true;
   }
 
   controlChange(cc: number, value: number): boolean {
