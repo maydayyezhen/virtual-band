@@ -10,12 +10,19 @@ import {
   type LegacyViolinController,
   type LegacyViolinHitEvent,
   type LegacyViolinModel,
+  type LegacyViolinStringRecord,
   type ViolinArticulation,
 } from './legacyViolinAsset';
 
 interface InteractionVoice {
   note: number;
   stringNumber: number;
+}
+
+interface VisualReleaseTail {
+  readonly durationSeconds: number;
+  readonly startEnergy: number;
+  elapsedSeconds: number;
 }
 
 export class ViolinInstrument implements Instrument {
@@ -28,6 +35,7 @@ export class ViolinInstrument implements Instrument {
   private readonly controller: LegacyViolinController;
   private readonly sampler: ViolinSampler;
   private readonly interactionVoices = new Map<string, InteractionVoice>();
+  private readonly releaseTails = new Map<number, VisualReleaseTail>();
 
   private constructor(
     model: LegacyViolinModel,
@@ -56,7 +64,9 @@ export class ViolinInstrument implements Instrument {
       .filter((string) => string.held && string.note === note)
       .map((string) => string.number);
     if (!this.controller.api.noteOff(note)) return;
-    for (const stringNumber of affectedStrings) this.sampler.noteOff(stringNumber);
+    for (const stringNumber of affectedStrings) {
+      this.beginReleaseTail(stringNumber, this.sampler.noteOff(stringNumber));
+    }
   }
 
   playString(stringNumber: number, velocity = 100, semitones = 0): LegacyViolinHitEvent | false {
@@ -71,6 +81,7 @@ export class ViolinInstrument implements Instrument {
     // Audio is an adapter around the donor performance state. If articulation is
     // changed while notes are held, replace the sounding sample on each physical
     // string without touching the donor fingering/bow state.
+    this.releaseTails.clear();
     this.sampler.reset();
     for (const string of this.model.strings.values()) {
       if (!string.held || string.note === null) continue;
@@ -102,7 +113,10 @@ export class ViolinInstrument implements Instrument {
   controlChange(cc: number, value: number): boolean {
     const handled = this.controller.api.controlChange(cc, value);
     if (!handled) return false;
-    if (cc === 120 || cc === 123) this.sampler.reset();
+    if (cc === 120 || cc === 123) {
+      this.releaseTails.clear();
+      this.sampler.reset();
+    }
     return true;
   }
 
@@ -116,11 +130,16 @@ export class ViolinInstrument implements Instrument {
 
   update(dt: number): InstrumentFrameResult {
     const result = this.controller.tick(dt);
+    const releaseMoved = this.syncReleaseTailVisuals(dt);
     applyFingeringMarkerStyle(this.model.strings.values(), FINGERING_MARKER_STYLES.violin);
-    return result;
+    return {
+      moved: result.moved || releaseMoved,
+      animating: result.animating || this.releaseTails.size > 0,
+    };
   }
 
   reset(): void {
+    this.releaseTails.clear();
     this.controller.api.panic();
     this.sampler.reset();
     this.interactionVoices.clear();
@@ -179,7 +198,7 @@ export class ViolinInstrument implements Instrument {
       if (!voice) return true;
       this.interactionVoices.delete(partId);
       this.controller.api.noteOff(voice.note);
-      this.sampler.noteOff(voice.stringNumber);
+      this.beginReleaseTail(voice.stringNumber, this.sampler.noteOff(voice.stringNumber));
       return true;
     }
 
@@ -190,7 +209,7 @@ export class ViolinInstrument implements Instrument {
     const previous = this.interactionVoices.get(partId);
     if (previous) {
       this.controller.api.noteOff(previous.note);
-      this.sampler.noteOff(previous.stringNumber);
+      this.beginReleaseTail(previous.stringNumber, this.sampler.noteOff(previous.stringNumber));
     }
 
     const result = this.playString(stringNumber, velocity, semitones);
@@ -228,11 +247,85 @@ export class ViolinInstrument implements Instrument {
   }
 
   private playAudio(result: LegacyViolinHitEvent): void {
+    this.releaseTails.delete(result.string);
     this.sampler.noteOn(
       result.string,
       result.note,
       result.velocity,
       this.controller.api.articulation,
     );
+  }
+
+  private beginReleaseTail(stringNumber: number, durationSeconds: number): void {
+    const string = this.model.strings.get(stringNumber);
+    if (!string || durationSeconds <= 0 || this.controller.api.articulation !== 'arco') {
+      this.releaseTails.delete(stringNumber);
+      return;
+    }
+
+    this.releaseTails.set(stringNumber, {
+      durationSeconds,
+      startEnergy: Math.max(0, string.energy),
+      elapsedSeconds: 0,
+    });
+  }
+
+  private syncReleaseTailVisuals(dt: number): boolean {
+    if (this.releaseTails.size === 0) return false;
+    const frameDt = THREE.MathUtils.clamp(Number.isFinite(dt) ? dt : 0, 0, 0.05);
+    let moved = false;
+
+    for (const [stringNumber, tail] of [...this.releaseTails]) {
+      const string = this.model.strings.get(stringNumber);
+      if (!string || string.held) {
+        this.releaseTails.delete(stringNumber);
+        continue;
+      }
+
+      tail.elapsedSeconds = Math.min(tail.durationSeconds, tail.elapsedSeconds + frameDt);
+      const progress = tail.durationSeconds > 0
+        ? Math.max(0, 1 - tail.elapsedSeconds / tail.durationSeconds)
+        : 0;
+      string.energy = tail.startEnergy * progress;
+      this.redrawStringVibration(string);
+      moved = true;
+
+      if (progress <= 0) this.releaseTails.delete(stringNumber);
+    }
+
+    return moved;
+  }
+
+  /**
+   * The frozen donor already exposes stringPoint(), so the adapter can redraw the
+   * dynamic tube after overriding only release-tail energy. This keeps donor code
+   * frozen and avoids making the audio backend aware of Three.js visuals.
+   */
+  private redrawStringVibration(string: LegacyViolinStringRecord): void {
+    const positions = string.mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+    for (let row = 0; row <= string.rows; row += 1) {
+      const y = THREE.MathUtils.lerp(string.saddle.y, string.nut.y, row / string.rows);
+      const point = this.controller.stringPoint(string, y, true);
+      for (let side = 0; side <= string.sides; side += 1) {
+        const angle = side / string.sides * Math.PI * 2;
+        positions.setXYZ(
+          row * (string.sides + 1) + side,
+          point.x + Math.cos(angle) * string.radius,
+          y,
+          point.z + Math.sin(angle) * string.radius,
+        );
+      }
+    }
+    positions.needsUpdate = true;
+    string.mesh.geometry.computeBoundingSphere();
+
+    const materials = Array.isArray(string.mesh.material)
+      ? string.mesh.material
+      : [string.mesh.material];
+    for (const material of materials) {
+      if ('emissiveIntensity' in material) {
+        (material as THREE.MeshStandardMaterial).emissiveIntensity = string.energy * 0.12;
+      }
+    }
   }
 }

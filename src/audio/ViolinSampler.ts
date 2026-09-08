@@ -8,6 +8,7 @@ const SAMPLE_SET: Record<ViolinArticulation, string> = {
   pizzicato: 'pizzicato_strings',
 };
 const COMMON_NOTES = [55, 62, 67, 69, 71, 74, 76, 81, 88] as const;
+const MP3_ARCO_RELEASE_SECONDS = 0.11;
 
 type VoiceBackend = 'mp3' | 'sustain';
 
@@ -84,18 +85,27 @@ export class ViolinSampler {
     });
   }
 
-  noteOff(stringNumber: number): void {
+  /**
+   * Returns the audible release-tail duration for this physical string. The 3D
+   * adapter can use that timing without knowing whether the audio came from SF2
+   * or the MP3 fallback.
+   */
+  noteOff(stringNumber: number): number {
     const state = this.voices.get(stringNumber);
-    if (!state) return;
+    if (!state) return 0;
     state.released = true;
 
     if (state.backend === 'sustain') {
       this.voices.delete(stringNumber);
-      this.sustainBackend?.noteOff(stringNumber);
-      return;
+      return this.sustainBackend?.noteOff(stringNumber).durationSeconds ?? 0;
     }
 
-    if (state.articulation === 'arco') this.stopString(stringNumber, 0.11);
+    if (state.articulation === 'arco') {
+      this.stopString(stringNumber, MP3_ARCO_RELEASE_SECONDS);
+      return MP3_ARCO_RELEASE_SECONDS;
+    }
+
+    return 0;
   }
 
   setPitchBend(value: number): boolean {
