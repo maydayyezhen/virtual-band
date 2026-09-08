@@ -6,6 +6,8 @@ import { DrumSampler } from '../audio/DrumSampler';
 import { ElectricGuitarSampler } from '../audio/ElectricGuitarSampler';
 import { KeyboardSampler } from '../audio/KeyboardSampler';
 import { SampleLibrary } from '../audio/SampleLibrary';
+import { Sf2BankLibrary } from '../audio/sf2/Sf2BankLibrary';
+import { Sf2KeyboardBackend } from '../audio/sf2/Sf2KeyboardBackend';
 import { Sf2ViolinBackend } from '../audio/sf2/Sf2ViolinBackend';
 import { ViolinSampler } from '../audio/ViolinSampler';
 import { CameraRegistry } from '../camera/CameraRegistry';
@@ -43,11 +45,13 @@ export class VirtualBandApp {
   readonly transport = new Transport();
   readonly audio = new AudioEngine();
   readonly samples = new SampleLibrary(this.audio);
+  readonly sf2Banks = new Sf2BankLibrary();
   readonly drumSampler = new DrumSampler(this.audio, this.samples);
   readonly electricSampler = new ElectricGuitarSampler(this.audio, this.samples);
   readonly acousticSampler = new AcousticGuitarSampler(this.audio, this.samples);
-  readonly keyboardSampler = new KeyboardSampler(this.audio, this.samples);
-  readonly violinSf2 = new Sf2ViolinBackend(this.audio);
+  readonly keyboardSf2 = new Sf2KeyboardBackend(this.audio, this.sf2Banks);
+  readonly keyboardSampler = new KeyboardSampler(this.audio, this.samples, this.keyboardSf2);
+  readonly violinSf2 = new Sf2ViolinBackend(this.audio, this.sf2Banks);
   readonly violinSampler = new ViolinSampler(this.audio, this.samples, this.violinSf2);
   readonly instruments = new InstrumentRegistry();
   readonly cameraRegistry = new CameraRegistry();
@@ -115,8 +119,8 @@ export class VirtualBandApp {
     this.state.patch({ error: null });
 
     try {
-      // MP3 preload and the experimental SF2 violin warmup run in parallel with
-      // donor/model setup. The visual scene never waits for the 148 MB SF2 bank.
+      // MP3 preload and experimental SF2 keyboard/violin warmup run in parallel
+      // with donor/model setup. The visual scene never waits for the 148 MB bank.
       void this.prepareShowcaseAudio();
 
       const [drums, keyboard, violin, electric, acoustic] = await Promise.all([
@@ -322,7 +326,9 @@ export class VirtualBandApp {
     this.violin = null;
     this.electric = null;
     this.acoustic = null;
+    this.keyboardSampler.dispose();
     this.violinSampler.dispose();
+    this.sf2Banks.dispose();
     this.samples.dispose();
     this.audio.dispose();
     this.instrumentLayer.removeFromParent();
