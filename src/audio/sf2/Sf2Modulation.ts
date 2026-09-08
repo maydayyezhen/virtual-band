@@ -29,6 +29,11 @@ export interface Sf2LfoRuntime {
   disconnect(): void;
 }
 
+interface ScheduledOscillator {
+  readonly node: OscillatorNode;
+  readonly startTime: number;
+}
+
 export function buildSf2ModEnvelopePlan(
   region: Pick<
     Sf2Region,
@@ -165,7 +170,7 @@ export function startSf2Lfos(
   plan: Sf2LfoPlan,
   startTime: number,
 ): Sf2LfoRuntime {
-  const oscillators: OscillatorNode[] = [];
+  const oscillators: ScheduledOscillator[] = [];
   const supportNodes: AudioNode[] = [];
   volumeModGain.gain.setValueAtTime(1, startTime);
 
@@ -175,9 +180,10 @@ export function startSf2Lfos(
     || Math.abs(plan.modToVolumeCentibels) > 0.001
   ) {
     const oscillator = context.createOscillator();
+    const oscillatorStart = startTime + plan.modDelaySeconds;
     oscillator.type = 'triangle';
     oscillator.frequency.setValueAtTime(plan.modFrequencyHz, startTime);
-    oscillators.push(oscillator);
+    oscillators.push({ node: oscillator, startTime: oscillatorStart });
 
     if (Math.abs(plan.modToPitchCents) > 0.001) {
       const depth = context.createGain();
@@ -201,29 +207,33 @@ export function startSf2Lfos(
       supportNodes.push(curve);
     }
 
-    oscillator.start(startTime + plan.modDelaySeconds);
+    oscillator.start(oscillatorStart);
   }
 
   if (Math.abs(plan.vibToPitchCents) > 0.001) {
     const oscillator = context.createOscillator();
     const depth = context.createGain();
+    const oscillatorStart = startTime + plan.vibDelaySeconds;
     oscillator.type = 'triangle';
     oscillator.frequency.setValueAtTime(plan.vibFrequencyHz, startTime);
     depth.gain.setValueAtTime(plan.vibToPitchCents, startTime);
     oscillator.connect(depth).connect(source.detune);
-    oscillators.push(oscillator);
+    oscillators.push({ node: oscillator, startTime: oscillatorStart });
     supportNodes.push(depth);
-    oscillator.start(startTime + plan.vibDelaySeconds);
+    oscillator.start(oscillatorStart);
   }
 
   return {
     stop(atTime: number): void {
       for (const oscillator of oscillators) {
-        try { oscillator.stop(atTime); } catch {}
+        // A short voice may be released before a delayed LFO has started. Web
+        // Audio rejects stop times before the scheduled start, so clamp it.
+        const safeStopTime = Math.max(atTime, oscillator.startTime + 0.001);
+        try { oscillator.node.stop(safeStopTime); } catch {}
       }
     },
     disconnect(): void {
-      for (const oscillator of oscillators) oscillator.disconnect();
+      for (const oscillator of oscillators) oscillator.node.disconnect();
       for (const node of supportNodes) node.disconnect();
     },
   };
@@ -232,10 +242,12 @@ export function startSf2Lfos(
 export function velocityAttenuationCentibels(velocity: number): number {
   const midi = clamp(Math.round(velocity), 0, 127);
   if (midi <= 0) return DEFAULT_VELOCITY_ATTENUATION_CENTIBELS;
-  // Closed-form equivalent of the SF2 default negative-unipolar concave
-  // Note-On velocity -> initial attenuation modulator (amount 960 cB).
+  // SF2's implicit Note-On velocity -> initial attenuation modulator is a
+  // negative-unipolar concave source with amount 960 cB. Under the standard
+  // 96 dB concave convention this is the familiar near-square-law amplitude
+  // response. For example, velocity 111 is ~2.34 dB below velocity 127.
   return clamp(
-    -200 * Math.log10(midi / 127),
+    -400 * Math.log10(midi / 127),
     0,
     DEFAULT_VELOCITY_ATTENUATION_CENTIBELS,
   );
@@ -245,9 +257,9 @@ export function absoluteCentsToHz(cents: number): number {
   return 8.176 * 2 ** (cents / 1200);
 }
 
-function buildTremoloGainOffsetCurve(depthCentibels: number): Float32Array {
+function buildTremoloGainOffsetCurve(depthCentibels: number): Float32Array<ArrayBuffer> {
   const samples = 257;
-  const curve = new Float32Array(samples);
+  const curve = new Float32Array(new ArrayBuffer(samples * Float32Array.BYTES_PER_ELEMENT));
   const requestedDb = depthCentibels / 10;
   const safeDb = clamp(requestedDb, -MAX_BROWSER_TREMOLO_DB, MAX_BROWSER_TREMOLO_DB);
   for (let index = 0; index < samples; index += 1) {

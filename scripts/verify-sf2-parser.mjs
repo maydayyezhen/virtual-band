@@ -240,8 +240,14 @@ function verifyFilterMath() {
 function verifyModulationMath() {
   assertApprox(velocityAttenuationCentibels(127), 0, 0.000001, 'velocity 127 attenuation');
   assertApprox(
+    velocityAttenuationCentibels(111) / 10,
+    2.34,
+    0.02,
+    'SF2 velocity 127-to-111 attenuation difference',
+  );
+  assertApprox(
     velocityAttenuationCentibels(64),
-    -200 * Math.log10(64 / 127),
+    -400 * Math.log10(64 / 127),
     0.000001,
     'velocity 64 attenuation',
   );

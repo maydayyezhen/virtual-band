@@ -103,13 +103,13 @@ Volume LFO is implemented in a separate gain stage so it does not fight volume-e
 
 ## Default velocity behavior
 
-The previous synth used a project-specific `velocity^1.35` gain curve. The SF2 path now applies the standard default Note-On velocity -> initial attenuation relationship: a negative-unipolar concave mapping with a 960 cB amount. In closed form the attenuation is equivalent to:
+The previous synth used a project-specific `velocity^1.35` gain curve. The SF2 path now applies the implicit default Note-On velocity -> initial attenuation modulator: negative-unipolar, concave, with a 960 cB amount. Under the standard 96 dB concave convention used by SoundFont compliance tests, the equivalent attenuation is:
 
 ```text
-attenuation_cB = -200 * log10(velocity / 127)
+attenuation_cB = -400 * log10(velocity / 127)
 ```
 
-clamped to the SoundFont 96 dB range.
+clamped to the SoundFont 96 dB range. This gives the expected near-square-law amplitude response; for example velocity 111 is about 2.34 dB below velocity 127.
 
 This is engine behavior and therefore applies consistently to piano, pads, violin sustain, guitars and percussion.
 
