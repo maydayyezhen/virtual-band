@@ -1,4 +1,5 @@
 import type { AudioBus, AudioEngine, AudioVoice } from './AudioEngine';
+import { mixGain } from './AudioMixProfile';
 import {
   DEFAULT_ELECTRIC_GUITAR_PROGRAM,
   ELECTRIC_GUITAR_PROGRAM_IDS,
@@ -167,7 +168,7 @@ export class ElectricGuitarSampler {
     this.toneBackend?.setPerformanceProfile(PERFORMANCE_PROFILE[preset.id]);
     this.pickup = preset.pickup;
     this.tone = preset.tone;
-    this.setVolume(preset.volume);
+    this.volume = preset.volume;
     this.updateToneChain();
     void this.preloadProgram(preset.id);
     return true;
@@ -210,7 +211,7 @@ export class ElectricGuitarSampler {
 
   setVolume(value: number): void {
     this.volume = clamp01(value);
-    this.toneChain?.bus.setGain(this.volume, 0.025);
+    this.toneChain?.bus.setGain(this.outputGain(), 0.025);
   }
 
   preloadCommon(): Promise<void> {
@@ -249,6 +250,10 @@ export class ElectricGuitarSampler {
     chain.bus.disconnect();
   }
 
+  private outputGain(): number {
+    return this.volume * mixGain('electric', this.programId);
+  }
+
   private ensureToneChain(): ToneChain {
     if (this.toneChain) return this.toneChain;
 
@@ -265,7 +270,7 @@ export class ElectricGuitarSampler {
     tone.type = 'lowpass';
     tone.Q.value = 0.48;
 
-    const bus = this.audio.createBus(this.volume);
+    const bus = this.audio.createBus(this.outputGain());
     pickupLow.connect(pickupHigh).connect(tone).connect(bus.input);
 
     this.toneChain = {
@@ -297,7 +302,7 @@ export class ElectricGuitarSampler {
     rampParam(chain.pickupLow.gain, profile.low, now, 0.025);
     rampParam(chain.pickupHigh.gain, profile.high, now, 0.025);
     rampParam(chain.tone.frequency, cutoff, now, 0.025);
-    chain.bus.setGain(this.volume, 0.025);
+    chain.bus.setGain(this.outputGain(), 0.025);
   }
 
   private stopString(stringNumber: number, fadeSeconds: number): void {

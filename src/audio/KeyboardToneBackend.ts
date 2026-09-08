@@ -7,6 +7,7 @@ export interface KeyboardToneBackend {
   noteOff(tier: KeyboardTier, voiceId: string): void;
   setSustain(tier: KeyboardTier, pressed: boolean): void;
   setPitchBend(tier: KeyboardTier, value: number): boolean;
+  setGain(tier: KeyboardTier, value: number, rampSeconds?: number): void;
   reset(): void;
   dispose(): void;
 }

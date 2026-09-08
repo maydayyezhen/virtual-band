@@ -77,6 +77,10 @@ export class Sf2KeyboardBackend implements KeyboardToneBackend {
     return this.synth(tier).setPitchBend(value, 2);
   }
 
+  setGain(tier: KeyboardTier, value: number, rampSeconds = 0.025): void {
+    this.synth(tier).setOutputGain(value, rampSeconds);
+  }
+
   reset(): void {
     this.lower.allNotesOff(0.03);
     this.upper.allNotesOff(0.03);

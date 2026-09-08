@@ -83,6 +83,10 @@ export class Sf2ViolinBackend implements ViolinSustainBackend {
     return this.synth.setPitchBend(value, 2);
   }
 
+  setGain(value: number, rampSeconds = 0.025): void {
+    this.synth.setOutputGain(value, rampSeconds);
+  }
+
   reset(): void {
     this.activeStrings.clear();
     if (!this.ready) return;

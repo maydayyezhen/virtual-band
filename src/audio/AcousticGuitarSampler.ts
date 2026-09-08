@@ -1,4 +1,5 @@
 import type { AudioEngine, AudioVoice } from './AudioEngine';
+import { mixGain } from './AudioMixProfile';
 import {
   ACOUSTIC_GUITAR_PROGRAM_IDS,
   DEFAULT_ACOUSTIC_GUITAR_PROGRAM,
@@ -47,7 +48,7 @@ export class AcousticGuitarSampler {
   private readonly toneBackend: ProgramToneBackend | null;
   private readonly voices = new Map<number, VoiceState>();
   private sustain = false;
-  private volume = 0.86;
+  private volume = 1;
   private pitchBend = 0;
   private programId: AcousticGuitarProgramId = DEFAULT_ACOUSTIC_GUITAR_PROGRAM;
 
@@ -59,9 +60,9 @@ export class AcousticGuitarSampler {
     this.audio = audio;
     this.samples = samples;
     this.toneBackend = toneBackend;
-    this.toneBackend?.setGain(this.volume, 0);
     this.toneBackend?.setProgram(this.programId, 0);
     this.toneBackend?.setPerformanceProfile(PERFORMANCE_PROFILE[this.programId]);
+    this.applyOutputGain(0);
   }
 
   get program(): AcousticGuitarProgramId {
@@ -74,6 +75,7 @@ export class AcousticGuitarSampler {
     this.programId = preset.id;
     this.toneBackend?.setProgram(preset.id, 0);
     this.toneBackend?.setPerformanceProfile(PERFORMANCE_PROFILE[preset.id]);
+    this.applyOutputGain(0.025);
     void this.preloadProgram(preset.id);
     return true;
   }
@@ -90,10 +92,8 @@ export class AcousticGuitarSampler {
     const preset = getAcousticGuitarProgram(this.programId);
     if (!preset) return;
 
-    // A new strike on the same physical string mutes the previous string voice
-    // quickly. Do not let the old SF2 release tail pile underneath the new note.
     this.stopString(stringNumber, 0.014);
-    const baseGain = Math.pow(clamp01(velocity / 127), 1.12) * 0.86;
+    const baseGain = Math.pow(clamp01(velocity / 127), 1.12);
     const toneOptions = gesture === 'strum'
       ? acousticStrumToneOptions(this.programId, note)
       : undefined;
@@ -123,7 +123,7 @@ export class AcousticGuitarSampler {
         return;
       }
 
-      const voice = this.audio.playBuffer(buffer, baseGain * this.volume);
+      const voice = this.audio.playBuffer(buffer, baseGain * this.outputGain());
       state.voice = voice;
       voice?.setPlaybackRate(pitchRate(this.pitchBend), 0);
       voice?.onEnded(() => {
@@ -159,9 +159,10 @@ export class AcousticGuitarSampler {
 
   setVolume(value: number): void {
     this.volume = clamp01(value);
-    this.toneBackend?.setGain(this.volume, 0.025);
+    this.applyOutputGain(0.025);
+    const gain = this.outputGain();
     for (const state of this.voices.values()) {
-      if (state.backend === 'mp3') state.voice?.setGain(state.baseGain * this.volume, 0.025);
+      if (state.backend === 'mp3') state.voice?.setGain(state.baseGain * gain, 0.025);
     }
   }
 
@@ -203,6 +204,14 @@ export class AcousticGuitarSampler {
   dispose(): void {
     this.reset();
     this.toneBackend?.dispose();
+  }
+
+  private outputGain(): number {
+    return this.volume * mixGain('acoustic', this.programId);
+  }
+
+  private applyOutputGain(rampSeconds: number): void {
+    this.toneBackend?.setGain(this.outputGain(), rampSeconds);
   }
 
   private stopString(stringNumber: number, fadeSeconds: number): void {

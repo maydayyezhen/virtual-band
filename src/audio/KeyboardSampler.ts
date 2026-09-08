@@ -1,4 +1,5 @@
 import type { AudioEngine, AudioVoice } from './AudioEngine';
+import { mixGain } from './AudioMixProfile';
 import type { KeyboardTier } from '../instruments/keyboard/legacyKeyboardAsset';
 import type { KeyboardToneBackend } from './KeyboardToneBackend';
 import { fluidR3SamplePath, type SampleLibrary } from './SampleLibrary';
@@ -33,6 +34,8 @@ export class KeyboardSampler {
     this.audio = audio;
     this.samples = samples;
     this.toneBackend = toneBackend;
+    this.toneBackend?.setGain('lower', keyboardGain('lower'), 0);
+    this.toneBackend?.setGain('upper', keyboardGain('upper'), 0);
   }
 
   noteOn(tier: KeyboardTier, note: number, velocity: number, source = 'runtime'): void {
@@ -57,7 +60,7 @@ export class KeyboardSampler {
       tier,
     };
     this.voices.set(id, state);
-    const gain = Math.pow(clamp01(velocity / 127), 1.35) * (tier === 'lower' ? 0.82 : 0.68);
+    const gain = Math.pow(clamp01(velocity / 127), 1.35) * keyboardGain(tier);
 
     void this.load(tier, note).then((buffer) => {
       if (!buffer || this.voices.get(id) !== state) return;
@@ -141,6 +144,10 @@ export class KeyboardSampler {
   private load(tier: KeyboardTier, note: number): Promise<AudioBuffer | null> {
     return this.samples.load(fluidR3SamplePath(SAMPLE_SET[tier], note));
   }
+}
+
+function keyboardGain(tier: KeyboardTier): number {
+  return mixGain(tier === 'lower' ? 'keyboard.lower' : 'keyboard.upper');
 }
 
 function voiceId(tier: KeyboardTier, note: number, source: string): string {

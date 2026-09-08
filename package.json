@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
+    "mix:verify": "node --experimental-strip-types scripts/verify-audio-mix.mjs",
     "sf2:fetch": "node scripts/fetch-fluidr3-sf2.mjs",
     "sf2:verify": "node --experimental-strip-types scripts/verify-sf2-parser.mjs"
   },

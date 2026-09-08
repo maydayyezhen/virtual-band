@@ -1,4 +1,5 @@
 import type { AudioEngine, AudioVoice } from './AudioEngine';
+import { mixGain } from './AudioMixProfile';
 import type { ViolinArticulation } from '../instruments/violin/legacyViolinAsset';
 import { fluidR3SamplePath, type SampleLibrary } from './SampleLibrary';
 import type { ViolinSustainBackend } from './ViolinSustainBackend';
@@ -35,6 +36,7 @@ export class ViolinSampler {
     this.audio = audio;
     this.samples = samples;
     this.sustainBackend = sustainBackend;
+    this.sustainBackend?.setGain(mixGain('violin.arco'), 0);
   }
 
   noteOn(
@@ -68,7 +70,8 @@ export class ViolinSampler {
     };
     this.voices.set(stringNumber, state);
 
-    const gain = Math.pow(clamp01(velocity / 127), 1.18) * (articulation === 'arco' ? 0.74 : 0.88);
+    const target = articulation === 'arco' ? 'violin.arco' : 'violin.pizzicato';
+    const gain = Math.pow(clamp01(velocity / 127), 1.18) * mixGain(target);
     void this.load(articulation, note).then((buffer) => {
       if (!buffer || this.voices.get(stringNumber) !== state) return;
       if (state.released && articulation === 'arco') {
@@ -85,11 +88,7 @@ export class ViolinSampler {
     });
   }
 
-  /**
-   * Returns the audible release-tail duration for this physical string. The 3D
-   * adapter can use that timing without knowing whether the audio came from SF2
-   * or the MP3 fallback.
-   */
+  /** Returns the audible release-tail duration for this physical string. */
   noteOff(stringNumber: number): number {
     const state = this.voices.get(stringNumber);
     if (!state) return 0;

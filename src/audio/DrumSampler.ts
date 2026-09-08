@@ -1,4 +1,5 @@
 import type { AudioEngine, AudioVoice } from './AudioEngine';
+import { mixGain } from './AudioMixProfile';
 import type { ProgramToneBackend } from './ProgramToneBackend';
 import { percussionSamplePath, type SampleLibrary } from './SampleLibrary';
 
@@ -13,6 +14,7 @@ export const DEFAULT_DRUM_NOTES = [36, 38, 42, 43, 44, 46, 47, 49, 50, 51, 55, 5
 const CLOSED_MAX = 0.16;
 const OPEN_MIN = 0.68;
 const CHOKE_THRESHOLD = 0.2;
+const DRUM_MIX_GAIN = mixGain('drums');
 
 export class DrumSampler {
   private readonly audio: AudioEngine;
@@ -33,6 +35,7 @@ export class DrumSampler {
     this.audio = audio;
     this.samples = samples;
     this.toneBackend = toneBackend;
+    this.toneBackend?.setGain(DRUM_MIX_GAIN, 0);
   }
 
   async preload(notes: Iterable<number> = DEFAULT_DRUM_NOTES): Promise<void> {
@@ -90,8 +93,6 @@ export class DrumSampler {
     const toneScale = Math.sin(mix * Math.PI * 0.5);
 
     if (this.toneBackend?.ready) {
-      // A single SF2 voice avoids fighting SoundFont exclusiveClass semantics.
-      // The tail is shortened according to physical openness, matching the donor.
       this.playOpenHat(velocity, sustain, 0.055 + mix * 0.12, Math.max(0.2, toneScale));
       return;
     }
@@ -173,8 +174,6 @@ export class DrumSampler {
     generation = this.hiHatGeneration,
   ): void {
     this.playSample(HI_HAT_NOTES.open, gain, (voice) => {
-      // If the pedal closed while a sample was still decoding, do not let
-      // a stale open-hat tail begin after the choke event.
       if (generation !== this.hiHatGeneration && this.hiHatOpenness <= CHOKE_THRESHOLD) {
         voice.stop(0.01);
         return;
@@ -190,7 +189,7 @@ export class DrumSampler {
     const midi = clampMidi(note);
     void this.load(midi).then((buffer) => {
       if (!buffer) return;
-      const voice = this.audio.playBuffer(buffer, gain);
+      const voice = this.audio.playBuffer(buffer, gain * DRUM_MIX_GAIN);
       if (voice) onVoice?.(voice);
     });
   }
