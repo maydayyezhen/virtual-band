@@ -163,10 +163,16 @@ export class AcousticGuitarInstrument implements Instrument {
 
   resolveHit(intersection: THREE.Intersection): string | null {
     const point = this.root.worldToLocal(intersection.point.clone());
+    const lastFret = this.model.frets.length - 1;
+    const bodyPluckZone = point.y <= this.model.frets[lastFret] - 0.04;
+
     if (
-      point.z < 0.48
-      || point.y < this.model.bridgeY - 0.16
+      point.y < this.model.bridgeY - 0.16
       || point.y > this.model.nutY + 0.08
+      || (
+        point.z < 0.48
+        && !(bodyPluckZone && isFrontFacingInteraction(intersection, this.root))
+      )
     ) return null;
 
     const t = THREE.MathUtils.clamp(
@@ -183,10 +189,10 @@ export class AcousticGuitarInstrument implements Instrument {
     if (!string) return null;
 
     const stringX = THREE.MathUtils.lerp(string.a.x, string.b.x, t);
-    if (Math.abs(point.x - stringX) > 0.072) return null;
+    const hitTolerance = bodyPluckZone ? 0.105 : 0.072;
+    if (Math.abs(point.x - stringX) > hitTolerance) return null;
 
     let fret = 0;
-    const lastFret = this.model.frets.length - 1;
     if (point.y > this.model.frets[lastFret] - 0.04 && point.y < this.model.nutY - 0.025) {
       for (let index = 1; index <= lastFret; index += 1) {
         if (point.y <= this.model.frets[index - 1] && point.y > this.model.frets[index]) {
@@ -195,7 +201,7 @@ export class AcousticGuitarInstrument implements Instrument {
         }
       }
       if (point.y <= this.model.frets[lastFret]) fret = lastFret;
-    } else if (point.y <= this.model.frets[lastFret] - 0.04) {
+    } else if (bodyPluckZone) {
       const held = this.controller.api.getFingering().find((item) => item.string === string.number);
       fret = held?.fret ?? 0;
     }
@@ -281,4 +287,17 @@ function strumStringOrder(
   return indices
     .filter((index) => frets[index] !== null)
     .map((index) => 6 - index);
+}
+
+function isFrontFacingInteraction(
+  intersection: THREE.Intersection,
+  root: THREE.Object3D,
+): boolean {
+  if (!intersection.face) return false;
+
+  const normalMatrix = new THREE.Matrix3().getNormalMatrix(intersection.object.matrixWorld);
+  const worldNormal = intersection.face.normal.clone().applyMatrix3(normalMatrix).normalize();
+  const rootWorldRotation = root.getWorldQuaternion(new THREE.Quaternion()).invert();
+  const localNormal = worldNormal.applyQuaternion(rootWorldRotation);
+  return localNormal.z > 0.15;
 }
