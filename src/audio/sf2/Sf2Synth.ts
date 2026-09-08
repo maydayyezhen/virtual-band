@@ -2,6 +2,7 @@ import type { AudioBus, AudioEngine } from '../AudioEngine';
 import { parseSf2, type Sf2PresetInfo, type Sf2Region, type Sf2SoundFont } from './Sf2Parser';
 
 interface ActiveVoice {
+  readonly voiceKey: string;
   readonly note: number;
   readonly source: AudioBufferSourceNode;
   readonly gain: GainNode;
@@ -29,7 +30,7 @@ export class Sf2Synth {
   private readonly audio: AudioEngine;
   private readonly bus: AudioBus;
   private readonly audioBuffers = new Map<string, AudioBuffer>();
-  private readonly voices = new Map<number, Set<ActiveVoice>>();
+  private readonly voices = new Map<string, Set<ActiveVoice>>();
   private font: Sf2SoundFont | null = null;
   private bank = 0;
   private program = 0;
@@ -104,11 +105,31 @@ export class Sf2Synth {
   }
 
   noteOn(note: number, velocity = 100): number {
-    const font = this.requireFont();
     const midi = clampMidi(note);
     const vel = clampMidi(velocity);
     if (vel === 0) {
       this.noteOff(midi);
+      return 0;
+    }
+    return this.noteOnVoice(midiVoiceKey(midi), midi, vel);
+  }
+
+  noteOff(note: number, forcedReleaseSeconds?: number): void {
+    this.noteOffVoice(midiVoiceKey(clampMidi(note)), forcedReleaseSeconds);
+  }
+
+  /**
+   * Starts a note under a caller-owned voice key. This is useful for physical
+   * instruments where two strings can legitimately resolve to the same MIDI note.
+   * The normal MIDI noteOn/noteOff API remains note-keyed.
+   */
+  noteOnVoice(voiceKey: string, note: number, velocity = 100): number {
+    const font = this.requireFont();
+    const key = normalizeVoiceKey(voiceKey);
+    const midi = clampMidi(note);
+    const vel = clampMidi(velocity);
+    if (vel === 0) {
+      this.noteOffVoice(key);
       return 0;
     }
 
@@ -116,21 +137,21 @@ export class Sf2Synth {
     if (regions.length === 0) return 0;
 
     void this.audio.resume();
-    this.noteOff(midi, 0.015);
+    this.noteOffVoice(key, 0.015);
 
     const voiceSet = new Set<ActiveVoice>();
-    this.voices.set(midi, voiceSet);
+    this.voices.set(key, voiceSet);
     for (const region of regions) {
-      const voice = this.startRegionVoice(region, midi, vel);
+      const voice = this.startRegionVoice(key, region, midi, vel);
       if (voice) voiceSet.add(voice);
     }
-    if (voiceSet.size === 0) this.voices.delete(midi);
+    if (voiceSet.size === 0) this.voices.delete(key);
     return voiceSet.size;
   }
 
-  noteOff(note: number, forcedReleaseSeconds?: number): void {
-    const midi = clampMidi(note);
-    const voiceSet = this.voices.get(midi);
+  noteOffVoice(voiceKey: string, forcedReleaseSeconds?: number): void {
+    const key = normalizeVoiceKey(voiceKey);
+    const voiceSet = this.voices.get(key);
     if (!voiceSet) return;
     for (const voice of [...voiceSet]) {
       voice.keyReleased = true;
@@ -171,7 +192,12 @@ export class Sf2Synth {
     this.bus.disconnect();
   }
 
-  private startRegionVoice(region: Sf2Region, note: number, velocity: number): ActiveVoice | null {
+  private startRegionVoice(
+    voiceKey: string,
+    region: Sf2Region,
+    note: number,
+    velocity: number,
+  ): ActiveVoice | null {
     const context = this.audio.getContext();
     const buffer = this.getAudioBuffer(region);
     if (!buffer) return null;
@@ -208,6 +234,7 @@ export class Sf2Synth {
     source.connect(gain).connect(panner).connect(this.bus.input);
 
     const voice: ActiveVoice = {
+      voiceKey,
       note,
       source,
       gain,
@@ -240,9 +267,9 @@ export class Sf2Synth {
   }
 
   private cleanupVoice(voice: ActiveVoice): void {
-    const voiceSet = this.voices.get(voice.note);
+    const voiceSet = this.voices.get(voice.voiceKey);
     voiceSet?.delete(voice);
-    if (voiceSet?.size === 0) this.voices.delete(voice.note);
+    if (voiceSet?.size === 0) this.voices.delete(voice.voiceKey);
     voice.source.disconnect();
     voice.gain.disconnect();
     voice.panner.disconnect();
@@ -269,6 +296,16 @@ export class Sf2Synth {
     if (!this.font) throw new Error('SF2 is not loaded. Run sf2Experiment.load() first.');
     return this.font;
   }
+}
+
+function midiVoiceKey(note: number): string {
+  return `midi:${note}`;
+}
+
+function normalizeVoiceKey(value: string): string {
+  const key = value.trim();
+  if (!key) throw new Error('SF2 voice key must not be empty');
+  return key;
 }
 
 function playbackRateForRegion(region: Sf2Region, note: number): number {
