@@ -33,13 +33,14 @@ const PERFORMANCE_PROFILE: Readonly<Record<
 };
 
 type VoiceBackend = 'mp3' | 'tone';
-type GuitarGesture = 'gated' | 'strum';
+type GuitarGesture = 'gated' | 'pluck' | 'strum';
 
 interface VoiceState {
   voice: AudioVoice | null;
   released: boolean;
   baseGain: number;
   backend: VoiceBackend;
+  gesture: GuitarGesture;
 }
 
 export class AcousticGuitarSampler {
@@ -94,9 +95,9 @@ export class AcousticGuitarSampler {
 
     this.stopString(stringNumber, 0.014);
     const baseGain = Math.pow(clamp01(velocity / 127), 1.12);
-    const toneOptions = gesture === 'strum'
-      ? acousticStrumToneOptions(this.programId, note)
-      : undefined;
+    const toneOptions = gesture === 'gated'
+      ? undefined
+      : acousticImpulseToneOptions(this.programId, note);
 
     if (this.toneBackend?.noteOn(voiceId(stringNumber), note, velocity, toneOptions)) {
       this.voices.set(stringNumber, {
@@ -104,6 +105,7 @@ export class AcousticGuitarSampler {
         released: false,
         baseGain,
         backend: 'tone',
+        gesture,
       });
       return;
     }
@@ -113,6 +115,7 @@ export class AcousticGuitarSampler {
       released: false,
       baseGain,
       backend: 'mp3',
+      gesture,
     };
     this.voices.set(stringNumber, state);
 
@@ -135,7 +138,7 @@ export class AcousticGuitarSampler {
 
   noteOff(stringNumber: number): void {
     const state = this.voices.get(stringNumber);
-    if (!state) return;
+    if (!state || state.gesture !== 'gated') return;
     state.released = true;
 
     if (state.backend === 'tone') {
@@ -145,6 +148,11 @@ export class AcousticGuitarSampler {
     }
 
     if (!this.sustain) this.stopString(stringNumber, 0.14);
+  }
+
+  muteString(stringNumber: number, fadeSeconds = 0.04): void {
+    if (!Number.isInteger(stringNumber) || stringNumber < 1 || stringNumber > 6) return;
+    this.stopString(stringNumber, Math.max(0, fadeSeconds));
   }
 
   setSustain(pressed: boolean): void {
@@ -232,7 +240,7 @@ export class AcousticGuitarSampler {
   }
 }
 
-function acousticStrumToneOptions(
+function acousticImpulseToneOptions(
   program: AcousticGuitarProgramId,
   note: number,
 ): ProgramToneNoteOptions {
