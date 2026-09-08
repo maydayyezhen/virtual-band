@@ -1,13 +1,16 @@
 import * as THREE from 'three';
 import { AppState } from './AppState';
+import { DEFAULT_ACOUSTIC_GUITAR_PROGRAM } from '../audio/AcousticGuitarProgram';
 import { AcousticGuitarSampler } from '../audio/AcousticGuitarSampler';
 import { AudioEngine } from '../audio/AudioEngine';
 import { DrumSampler } from '../audio/DrumSampler';
+import { DEFAULT_ELECTRIC_GUITAR_PROGRAM } from '../audio/ElectricGuitarProgram';
 import { ElectricGuitarSampler } from '../audio/ElectricGuitarSampler';
 import { KeyboardSampler } from '../audio/KeyboardSampler';
 import { SampleLibrary } from '../audio/SampleLibrary';
 import { Sf2BankLibrary } from '../audio/sf2/Sf2BankLibrary';
 import { Sf2KeyboardBackend } from '../audio/sf2/Sf2KeyboardBackend';
+import { Sf2ProgramBackend } from '../audio/sf2/Sf2ProgramBackend';
 import { Sf2ViolinBackend } from '../audio/sf2/Sf2ViolinBackend';
 import { ViolinSampler } from '../audio/ViolinSampler';
 import { CameraRegistry } from '../camera/CameraRegistry';
@@ -46,9 +49,37 @@ export class VirtualBandApp {
   readonly audio = new AudioEngine();
   readonly samples = new SampleLibrary(this.audio);
   readonly sf2Banks = new Sf2BankLibrary();
-  readonly drumSampler = new DrumSampler(this.audio, this.samples);
-  readonly electricSampler = new ElectricGuitarSampler(this.audio, this.samples);
-  readonly acousticSampler = new AcousticGuitarSampler(this.audio, this.samples);
+
+  readonly drumsSf2 = new Sf2ProgramBackend(this.audio, this.sf2Banks, {
+    bank: 128,
+    program: 0,
+    label: 'drums',
+  });
+  readonly drumSampler = new DrumSampler(this.audio, this.samples, this.drumsSf2);
+
+  readonly electricSf2 = new Sf2ProgramBackend(this.audio, this.sf2Banks, {
+    bank: 0,
+    program: DEFAULT_ELECTRIC_GUITAR_PROGRAM,
+    label: 'electric',
+  });
+  readonly electricSampler = new ElectricGuitarSampler(
+    this.audio,
+    this.samples,
+    this.electricSf2,
+  );
+
+  readonly acousticSf2 = new Sf2ProgramBackend(this.audio, this.sf2Banks, {
+    bank: 0,
+    program: DEFAULT_ACOUSTIC_GUITAR_PROGRAM,
+    label: 'acoustic',
+    gain: 0.86,
+  });
+  readonly acousticSampler = new AcousticGuitarSampler(
+    this.audio,
+    this.samples,
+    this.acousticSf2,
+  );
+
   readonly keyboardSf2 = new Sf2KeyboardBackend(this.audio, this.sf2Banks);
   readonly keyboardSampler = new KeyboardSampler(this.audio, this.samples, this.keyboardSf2);
   readonly violinSf2 = new Sf2ViolinBackend(this.audio, this.sf2Banks);
@@ -119,8 +150,8 @@ export class VirtualBandApp {
     this.state.patch({ error: null });
 
     try {
-      // MP3 preload and experimental SF2 keyboard/violin warmup run in parallel
-      // with donor/model setup. The visual scene never waits for the 148 MB bank.
+      // One shared SF2 bank warms in parallel with MP3 fallback samples and donor
+      // setup. The visual scene never waits for the 148 MB SoundFont to parse.
       void this.prepareShowcaseAudio();
 
       const [drums, keyboard, violin, electric, acoustic] = await Promise.all([
@@ -326,8 +357,11 @@ export class VirtualBandApp {
     this.violin = null;
     this.electric = null;
     this.acoustic = null;
+    this.drumSampler.dispose();
     this.keyboardSampler.dispose();
     this.violinSampler.dispose();
+    this.electricSampler.dispose();
+    this.acousticSampler.dispose();
     this.sf2Banks.dispose();
     this.samples.dispose();
     this.audio.dispose();

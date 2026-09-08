@@ -7,16 +7,19 @@ import {
   type ElectricGuitarProgramId,
   type ElectricPickupPosition,
 } from './ElectricGuitarProgram';
+import type { ProgramToneBackend } from './ProgramToneBackend';
 import { fluidR3SamplePath, type SampleLibrary } from './SampleLibrary';
 
 const DEFAULT_PRESET = ELECTRIC_GUITAR_PROGRAMS[DEFAULT_ELECTRIC_GUITAR_PROGRAM];
 const PITCH_BEND_SEMITONES = 2;
 const COMMON_NOTES = [40, 45, 50, 55, 59, 64, 67, 69, 71, 74, 76, 79, 83, 86] as const;
 
+type VoiceBackend = 'mp3' | 'tone';
+
 interface VoiceState {
   voice: AudioVoice | null;
   released: boolean;
-  baseGain: number;
+  backend: VoiceBackend;
 }
 
 interface ToneChain {
@@ -30,6 +33,7 @@ interface ToneChain {
 export class ElectricGuitarSampler {
   private readonly audio: AudioEngine;
   private readonly samples: SampleLibrary;
+  private readonly toneBackend: ProgramToneBackend | null;
   private readonly voices = new Map<number, VoiceState>();
   private sustain = false;
   private volume = DEFAULT_PRESET.volume;
@@ -39,9 +43,15 @@ export class ElectricGuitarSampler {
   private pitchBend = 0;
   private toneChain: ToneChain | null = null;
 
-  constructor(audio: AudioEngine, samples: SampleLibrary) {
+  constructor(
+    audio: AudioEngine,
+    samples: SampleLibrary,
+    toneBackend: ProgramToneBackend | null = null,
+  ) {
     this.audio = audio;
     this.samples = samples;
+    this.toneBackend = toneBackend;
+    this.toneBackend?.setProgram(this.programId, 0);
   }
 
   get program(): ElectricGuitarProgramId {
@@ -55,8 +65,29 @@ export class ElectricGuitarSampler {
     this.stopString(stringNumber, 0.018);
     const preset = ELECTRIC_GUITAR_PROGRAMS[this.programId];
     const accentedVelocity = clamp01((velocity / 127) * preset.accent);
+    const backendVelocity = Math.round(accentedVelocity * 127);
     const baseGain = Math.pow(accentedVelocity, 1.16) * 0.82;
-    const state: VoiceState = { voice: null, released: false, baseGain };
+    const chain = this.ensureToneChain();
+
+    if (this.toneBackend?.noteOn(
+      voiceId(stringNumber),
+      note,
+      backendVelocity,
+      { destination: chain.input, gainScale: 0.82 },
+    )) {
+      this.voices.set(stringNumber, {
+        voice: null,
+        released: false,
+        backend: 'tone',
+      });
+      return;
+    }
+
+    const state: VoiceState = {
+      voice: null,
+      released: false,
+      backend: 'mp3',
+    };
     this.voices.set(stringNumber, state);
 
     void this.load(preset.sampleSet, note).then((buffer) => {
@@ -66,8 +97,7 @@ export class ElectricGuitarSampler {
         return;
       }
 
-      const chain = this.ensureToneChain();
-      const voice = this.audio.playBuffer(buffer, baseGain * this.volume, undefined, chain.input);
+      const voice = this.audio.playBuffer(buffer, baseGain, undefined, chain.input);
       state.voice = voice;
       voice?.setPlaybackRate(pitchRate(this.pitchBend), 0);
       voice?.onEnded(() => {
@@ -81,6 +111,13 @@ export class ElectricGuitarSampler {
     const state = this.voices.get(stringNumber);
     if (!state) return;
     state.released = true;
+
+    if (state.backend === 'tone') {
+      this.voices.delete(stringNumber);
+      this.toneBackend?.noteOff(voiceId(stringNumber));
+      return;
+    }
+
     if (!this.sustain) this.stopString(stringNumber, 0.10);
   }
 
@@ -88,6 +125,7 @@ export class ElectricGuitarSampler {
     const preset = getElectricGuitarProgram(value);
     if (!preset) return false;
     this.programId = preset.id;
+    this.toneBackend?.setProgram(preset.id, 0);
     this.pickup = preset.pickup;
     this.tone = preset.tone;
     this.setVolume(preset.volume);
@@ -113,25 +151,27 @@ export class ElectricGuitarSampler {
   setPitchBend(value: number): boolean {
     if (!Number.isFinite(value) || value < -1 || value > 1) return false;
     this.pitchBend = value;
+    this.toneBackend?.setPitchBend(value);
     const rate = pitchRate(value);
-    for (const state of this.voices.values()) state.voice?.setPlaybackRate(rate, 0.018);
+    for (const state of this.voices.values()) {
+      if (state.backend === 'mp3') state.voice?.setPlaybackRate(rate, 0.018);
+    }
     return true;
   }
 
   setSustain(pressed: boolean): void {
     if (this.sustain === pressed) return;
     this.sustain = pressed;
+    this.toneBackend?.setSustain(pressed);
     if (pressed) return;
     for (const [stringNumber, state] of this.voices) {
-      if (state.released) this.stopString(stringNumber, 0.11);
+      if (state.backend === 'mp3' && state.released) this.stopString(stringNumber, 0.11);
     }
   }
 
   setVolume(value: number): void {
     this.volume = clamp01(value);
-    for (const state of this.voices.values()) {
-      state.voice?.setGain(state.baseGain * this.volume, 0.025);
-    }
+    this.toneChain?.bus.setGain(this.volume, 0.025);
   }
 
   preloadCommon(): Promise<void> {
@@ -145,19 +185,22 @@ export class ElectricGuitarSampler {
   }
 
   async preloadShowcase(): Promise<void> {
-    await Promise.allSettled(
-      ELECTRIC_GUITAR_PROGRAM_IDS.map((program) => this.preloadProgram(program)),
-    );
+    await Promise.allSettled([
+      this.toneBackend?.prepare() ?? Promise.resolve(false),
+      ...ELECTRIC_GUITAR_PROGRAM_IDS.map((program) => this.preloadProgram(program)),
+    ]);
   }
 
   reset(): void {
     this.sustain = false;
     this.pitchBend = 0;
+    this.toneBackend?.reset();
     for (const stringNumber of [...this.voices.keys()]) this.stopString(stringNumber, 0.025);
   }
 
   dispose(): void {
     this.reset();
+    this.toneBackend?.dispose();
     const chain = this.toneChain;
     this.toneChain = null;
     if (!chain) return;
@@ -183,7 +226,7 @@ export class ElectricGuitarSampler {
     tone.type = 'lowpass';
     tone.Q.value = 0.48;
 
-    const bus = this.audio.createBus();
+    const bus = this.audio.createBus(this.volume);
     pickupLow.connect(pickupHigh).connect(tone).connect(bus.input);
 
     this.toneChain = {
@@ -215,18 +258,29 @@ export class ElectricGuitarSampler {
     rampParam(chain.pickupLow.gain, profile.low, now, 0.025);
     rampParam(chain.pickupHigh.gain, profile.high, now, 0.025);
     rampParam(chain.tone.frequency, cutoff, now, 0.025);
+    chain.bus.setGain(this.volume, 0.025);
   }
 
   private stopString(stringNumber: number, fadeSeconds: number): void {
     const state = this.voices.get(stringNumber);
     if (!state) return;
     this.voices.delete(stringNumber);
+
+    if (state.backend === 'tone') {
+      this.toneBackend?.noteOff(voiceId(stringNumber));
+      return;
+    }
+
     state.voice?.stop(fadeSeconds);
   }
 
   private load(sampleSet: string, note: number): Promise<AudioBuffer | null> {
     return this.samples.load(fluidR3SamplePath(sampleSet, note));
   }
+}
+
+function voiceId(stringNumber: number): string {
+  return `string:${stringNumber}`;
 }
 
 function pitchRate(value: number): number {

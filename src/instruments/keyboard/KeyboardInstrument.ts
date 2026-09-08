@@ -102,6 +102,7 @@ export class KeyboardInstrument implements Instrument {
     if (cc === 121) {
       layer.pitchWheel.target = 0;
       layer.modWheel.target = 0;
+      this.sampler.setPitchBend(tier, 0);
       this.setSustain(false, tier, `midi:${tier}`);
       return true;
     }
@@ -112,7 +113,9 @@ export class KeyboardInstrument implements Instrument {
     if (!Number.isFinite(value)) return false;
     const layer = this.model.layers[tier];
     if (!layer) return false;
-    layer.pitchWheel.target = Math.max(-1, Math.min(1, value));
+    const next = Math.max(-1, Math.min(1, value));
+    layer.pitchWheel.target = next;
+    this.sampler.setPitchBend(tier, next);
     return true;
   }
 

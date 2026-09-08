@@ -25,6 +25,7 @@ export interface Sf2Region {
   readonly loopStart: number;
   readonly loopEnd: number;
   readonly sampleModes: number;
+  readonly exclusiveClass: number;
   readonly keyRange: readonly [number, number];
   readonly velocityRange: readonly [number, number];
   readonly coarseTune: number;
@@ -241,6 +242,7 @@ export class Sf2SoundFont {
           loopStart: Math.max(start, Math.min(end, loopStart)),
           loopEnd: Math.max(start, Math.min(end, loopEnd)),
           sampleModes: getValue(state, GEN.sampleModes) & 0x3,
+          exclusiveClass: getValue(state, GEN.exclusiveClass),
           keyRange: state.keyRange,
           velocityRange: state.velocityRange,
           coarseTune: getValue(state, GEN.coarseTune),

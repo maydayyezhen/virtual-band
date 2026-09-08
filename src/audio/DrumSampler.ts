@@ -1,4 +1,5 @@
 import type { AudioEngine, AudioVoice } from './AudioEngine';
+import type { ProgramToneBackend } from './ProgramToneBackend';
 import { percussionSamplePath, type SampleLibrary } from './SampleLibrary';
 
 export const HI_HAT_NOTES = Object.freeze({
@@ -16,18 +17,29 @@ const CHOKE_THRESHOLD = 0.2;
 export class DrumSampler {
   private readonly audio: AudioEngine;
   private readonly samples: SampleLibrary;
+  private readonly toneBackend: ProgramToneBackend | null;
   private readonly openHatVoices = new Set<AudioVoice>();
 
   private hiHatOpenness = 0;
   private hiHatGeneration = 0;
+  private openHatSerial = 0;
+  private voiceSerial = 0;
 
-  constructor(audio: AudioEngine, samples: SampleLibrary) {
+  constructor(
+    audio: AudioEngine,
+    samples: SampleLibrary,
+    toneBackend: ProgramToneBackend | null = null,
+  ) {
     this.audio = audio;
     this.samples = samples;
+    this.toneBackend = toneBackend;
   }
 
-  preload(notes: Iterable<number> = DEFAULT_DRUM_NOTES): Promise<void> {
-    return this.samples.preload([...notes].map((note) => percussionSamplePath(clampMidi(note))));
+  async preload(notes: Iterable<number> = DEFAULT_DRUM_NOTES): Promise<void> {
+    await Promise.allSettled([
+      this.samples.preload([...notes].map((note) => percussionSamplePath(clampMidi(note)))),
+      this.toneBackend?.prepare() ?? Promise.resolve(false),
+    ]);
   }
 
   noteOn(note: number, velocity = 100): void {
@@ -35,58 +47,61 @@ export class DrumSampler {
 
     if (midi === HI_HAT_NOTES.closed) {
       this.setHiHatOpenness(0);
-      this.playSample(midi, velocityGain(velocity));
+      this.playDiscrete(midi, velocity);
       return;
     }
 
     if (midi === HI_HAT_NOTES.pedal) {
       this.setHiHatOpenness(0);
-      this.playSample(midi, velocityGain(velocity));
+      this.playDiscrete(midi, velocity);
       return;
     }
 
     if (midi === HI_HAT_NOTES.open) {
       this.hiHatOpenness = Math.max(0.78, this.hiHatOpenness);
-      this.playOpenHat(velocityGain(velocity));
+      this.playOpenHat(velocity);
       return;
     }
 
-    this.playSample(midi, velocityGain(velocity));
+    this.playDiscrete(midi, velocity);
   }
 
   /**
    * Plays the physical hi-hat according to its current continuous pedal opening.
-   * The source library has discrete Closed / Pedal / Open samples, so the middle
-   * range is represented by an equal-power Closed/Open blend with a shortened
-   * open tail. Visual openness can still remain fully continuous.
+   * The SF2 percussion bank is discrete, so partial opening keeps the project's
+   * shortened open-tail model while closed/open endpoints use native SF2 voices.
    */
   hitHiHat(openness: number, velocity = 100): void {
     const amount = clamp01(openness);
     this.hiHatOpenness = amount;
-    const gain = velocityGain(velocity);
 
     if (amount <= CLOSED_MAX) {
-      this.playSample(HI_HAT_NOTES.closed, gain);
+      this.playDiscrete(HI_HAT_NOTES.closed, velocity);
       return;
     }
 
     if (amount >= OPEN_MIN) {
-      this.playOpenHat(gain);
+      this.playOpenHat(velocity);
       return;
     }
 
     const mix = (amount - CLOSED_MAX) / (OPEN_MIN - CLOSED_MAX);
+    const sustain = 0.10 + mix * 0.52;
+    const toneScale = Math.sin(mix * Math.PI * 0.5);
+
+    if (this.toneBackend?.ready) {
+      // A single SF2 voice avoids fighting SoundFont exclusiveClass semantics.
+      // The tail is shortened according to physical openness, matching the donor.
+      this.playOpenHat(velocity, sustain, 0.055 + mix * 0.12, Math.max(0.2, toneScale));
+      return;
+    }
+
+    const gain = velocityGain(velocity);
     const closedGain = gain * Math.cos(mix * Math.PI * 0.5);
     const openGain = gain * Math.sin(mix * Math.PI * 0.5);
 
     if (closedGain > 0.01) this.playSample(HI_HAT_NOTES.closed, closedGain);
-    if (openGain > 0.01) {
-      // A half-open hi-hat rings longer as the cymbals separate. The sample itself
-      // stays untouched; only its tail is progressively shortened toward closed.
-      const sustain = 0.10 + mix * 0.52;
-      const fade = 0.055 + mix * 0.12;
-      this.playOpenHat(openGain, sustain, fade);
-    }
+    if (openGain > 0.01) this.playOpenHatSample(openGain, sustain, 0.055 + mix * 0.12);
   }
 
   setHiHatOpenness(openness: number): void {
@@ -102,6 +117,8 @@ export class DrumSampler {
 
   chokeHiHat(fadeSeconds = 0.035): void {
     this.hiHatGeneration += 1;
+    this.openHatSerial += 1;
+    this.toneBackend?.noteOff('hihat:open');
     for (const voice of this.openHatVoices) voice.stop(fadeSeconds);
   }
 
@@ -110,8 +127,51 @@ export class DrumSampler {
     this.chokeHiHat(0.02);
   }
 
-  private playOpenHat(gain: number, sustain?: number, fade?: number): void {
+  dispose(): void {
+    this.resetHiHat();
+    this.toneBackend?.dispose();
+  }
+
+  private playDiscrete(note: number, velocity: number): void {
+    const midi = clampMidi(note);
+    const id = `hit:${midi}:${++this.voiceSerial}`;
+    if (this.toneBackend?.noteOn(id, midi, velocity, { gainScale: 0.8 })) return;
+    this.playSample(midi, velocityGain(velocity));
+  }
+
+  private playOpenHat(
+    velocity: number,
+    sustain?: number,
+    fade = 0.08,
+    gainScale = 0.8,
+  ): void {
+    const serial = ++this.openHatSerial;
     const generation = this.hiHatGeneration;
+
+    if (this.toneBackend?.noteOn(
+      'hihat:open',
+      HI_HAT_NOTES.open,
+      velocity,
+      { gainScale },
+    )) {
+      if (sustain !== undefined) {
+        window.setTimeout(() => {
+          if (generation !== this.hiHatGeneration || serial !== this.openHatSerial) return;
+          this.toneBackend?.noteOff('hihat:open');
+        }, Math.max(0, sustain + fade) * 1000);
+      }
+      return;
+    }
+
+    this.playOpenHatSample(velocityGain(velocity), sustain, fade, generation);
+  }
+
+  private playOpenHatSample(
+    gain: number,
+    sustain?: number,
+    fade = 0.08,
+    generation = this.hiHatGeneration,
+  ): void {
     this.playSample(HI_HAT_NOTES.open, gain, (voice) => {
       // If the pedal closed while a sample was still decoding, do not let
       // a stale open-hat tail begin after the choke event.
@@ -122,7 +182,7 @@ export class DrumSampler {
 
       this.openHatVoices.add(voice);
       voice.onEnded(() => this.openHatVoices.delete(voice));
-      if (sustain !== undefined) voice.stop(fade ?? 0.08, sustain);
+      if (sustain !== undefined) voice.stop(fade, sustain);
     });
   }
 

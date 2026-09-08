@@ -1,4 +1,5 @@
 import type { AudioBus, AudioEngine } from '../AudioEngine';
+import type { ProgramToneNoteOptions } from '../ProgramToneBackend';
 import type { Sf2BankLibrary } from './Sf2BankLibrary';
 import { parseSf2, type Sf2PresetInfo, type Sf2Region, type Sf2SoundFont } from './Sf2Parser';
 
@@ -19,6 +20,7 @@ interface ActiveVoice {
   readonly panner: StereoPannerNode;
   readonly releaseSeconds: number;
   readonly loopMode: number;
+  readonly exclusiveClass: number;
   readonly basePlaybackRate: number;
   readonly envelope: VoiceEnvelopeState;
   keyReleased: boolean;
@@ -30,6 +32,7 @@ export interface Sf2RegionInspection {
   readonly keyRange: readonly [number, number];
   readonly velocityRange: readonly [number, number];
   readonly loopMode: number;
+  readonly exclusiveClass: number;
   readonly loopStartSeconds: number;
   readonly loopEndSeconds: number;
   readonly attackSeconds: number;
@@ -98,6 +101,10 @@ export class Sf2Synth {
     return true;
   }
 
+  setOutputGain(value: number, rampSeconds = 0.025): void {
+    this.bus.setGain(clamp(value, 0, 1), Math.max(0, rampSeconds));
+  }
+
   setPitchBend(value: number, semitones = this.pitchBendSemitones): boolean {
     if (!Number.isFinite(value) || value < -1 || value > 1) return false;
     if (!Number.isFinite(semitones) || semitones <= 0 || semitones > 24) return false;
@@ -145,7 +152,12 @@ export class Sf2Synth {
    * instruments where two strings can legitimately resolve to the same MIDI note.
    * The normal MIDI noteOn/noteOff API remains note-keyed.
    */
-  noteOnVoice(voiceKey: string, note: number, velocity = 100): number {
+  noteOnVoice(
+    voiceKey: string,
+    note: number,
+    velocity = 100,
+    options?: ProgramToneNoteOptions,
+  ): number {
     const font = this.requireFont();
     const key = normalizeVoiceKey(voiceKey);
     const midi = clampMidi(note);
@@ -160,11 +172,12 @@ export class Sf2Synth {
 
     void this.audio.resume();
     this.noteOffVoice(key, 0.015);
+    this.chokeExclusiveClasses(regions);
 
     const voiceSet = new Set<ActiveVoice>();
     this.voices.set(key, voiceSet);
     for (const region of regions) {
-      const voice = this.startRegionVoice(key, region, midi, vel);
+      const voice = this.startRegionVoice(key, region, midi, vel, options);
       if (voice) voiceSet.add(voice);
     }
     if (voiceSet.size === 0) this.voices.delete(key);
@@ -198,6 +211,7 @@ export class Sf2Synth {
       keyRange: region.keyRange,
       velocityRange: region.velocityRange,
       loopMode: region.sampleModes,
+      exclusiveClass: region.exclusiveClass,
       loopStartSeconds: Math.max(0, (region.loopStart - region.start) / region.sample.sampleRate),
       loopEndSeconds: Math.max(0, (region.loopEnd - region.start) / region.sample.sampleRate),
       attackSeconds: timecentsToSeconds(region.attackVolEnv),
@@ -219,6 +233,7 @@ export class Sf2Synth {
     region: Sf2Region,
     note: number,
     velocity: number,
+    options?: ProgramToneNoteOptions,
   ): ActiveVoice | null {
     const context = this.audio.getContext();
     const buffer = this.getAudioBuffer(region);
@@ -244,7 +259,8 @@ export class Sf2Synth {
 
     const velocityGain = Math.pow(velocity / 127, 1.35);
     const attenuationGain = centibelsToGain(Math.max(0, region.initialAttenuation));
-    const peakGain = Math.min(1, velocityGain * attenuationGain);
+    const gainScale = clamp(options?.gainScale ?? 1, 0, 4);
+    const peakGain = Math.min(1, velocityGain * attenuationGain * gainScale);
     const sustainGain = peakGain * centibelsToGain(Math.max(0, region.sustainVolEnv));
     const attack = timecentsToSeconds(region.attackVolEnv);
     const hold = timecentsToSeconds(region.holdVolEnv);
@@ -261,7 +277,7 @@ export class Sf2Synth {
 
     scheduleEnvelope(gain.gain, envelope);
     panner.pan.value = clamp(region.pan / 500, -1, 1);
-    source.connect(gain).connect(panner).connect(this.bus.input);
+    source.connect(gain).connect(panner).connect(options?.destination ?? this.bus.input);
 
     const voice: ActiveVoice = {
       voiceKey,
@@ -271,6 +287,7 @@ export class Sf2Synth {
       panner,
       releaseSeconds: release,
       loopMode,
+      exclusiveClass: region.exclusiveClass,
       basePlaybackRate,
       envelope,
       keyReleased: false,
@@ -280,6 +297,19 @@ export class Sf2Synth {
     source.addEventListener('ended', () => this.cleanupVoice(voice), { once: true });
     source.start(now);
     return voice;
+  }
+
+  private chokeExclusiveClasses(regions: readonly Sf2Region[]): void {
+    const classes = new Set(
+      regions.map((region) => region.exclusiveClass).filter((value) => value > 0),
+    );
+    if (classes.size === 0) return;
+
+    for (const voiceSet of this.voices.values()) {
+      for (const voice of [...voiceSet]) {
+        if (classes.has(voice.exclusiveClass)) this.releaseVoice(voice, 0.008);
+      }
+    }
   }
 
   private releaseVoice(voice: ActiveVoice, forcedReleaseSeconds?: number): void {

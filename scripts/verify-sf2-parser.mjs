@@ -11,6 +11,12 @@ if (presets.length < 128) throw new Error(`Expected at least 128 presets, got ${
 const violin = requirePreset(0, 40, 'GM violin');
 const piano = requirePreset(0, 0, 'GM acoustic grand piano');
 const warmPad = requirePreset(0, 89, 'GM warm pad');
+const nylon = requirePreset(0, 24, 'GM nylon guitar');
+const steel = requirePreset(0, 25, 'GM steel guitar');
+const electricPrograms = [26, 27, 28, 29, 30, 31].map(
+  (program) => requirePreset(0, program, `GM electric guitar ${program}`),
+);
+const percussion = requirePreset(128, 0, 'GM percussion');
 
 const violinRegions = requireRegions(0, 40, 69, 100, 'Violin A4');
 const violinLooped = violinRegions.filter(hasSustainLoop);
@@ -21,13 +27,36 @@ const padRegions = requireRegions(0, 89, 60, 100, 'Warm Pad C4');
 const padLooped = padRegions.filter(hasSustainLoop);
 if (padLooped.length === 0) throw new Error('Warm Pad C4 has no valid sustain-loop region');
 
+const nylonRegions = requireRegions(0, 24, 64, 100, 'Nylon guitar E4');
+const steelRegions = requireRegions(0, 25, 64, 100, 'Steel guitar E4');
+const electricRegionCounts = [26, 27, 28, 29, 30, 31].map(
+  (program) => requireRegions(0, program, 64, 100, `Electric guitar program ${program} E4`).length,
+);
+const kickRegions = requireRegions(128, 0, 36, 100, 'Kick drum');
+const closedHatRegions = requireRegions(128, 0, 42, 100, 'Closed hi-hat');
+const openHatRegions = requireRegions(128, 0, 46, 100, 'Open hi-hat');
+const hatExclusiveClasses = [...new Set(
+  [...closedHatRegions, ...openHatRegions]
+    .map((region) => region.exclusiveClass)
+    .filter((value) => value > 0),
+)];
+
 console.log(`Presets: ${presets.length}`);
 console.log(`Violin preset: ${violin.name}`);
 console.log(`Piano preset: ${piano.name}`);
 console.log(`Warm Pad preset: ${warmPad.name}`);
+console.log(`Nylon guitar preset: ${nylon.name}`);
+console.log(`Steel guitar preset: ${steel.name}`);
+console.log(`Electric guitar presets: ${electricPrograms.map((preset) => preset.name).join(' | ')}`);
+console.log(`Percussion preset: ${percussion.name}`);
 console.log(`Violin A4 regions: ${violinRegions.length}`);
 console.log(`Piano C4 regions: ${pianoRegions.length}`);
 console.log(`Warm Pad C4 regions: ${padRegions.length} (${padLooped.length} looped)`);
+console.log(`Nylon/Steel E4 regions: ${nylonRegions.length}/${steelRegions.length}`);
+console.log(`Electric E4 region counts: ${electricRegionCounts.join('/')}`);
+console.log(`Kick regions: ${kickRegions.length}`);
+console.log(`Hi-hat regions closed/open: ${closedHatRegions.length}/${openHatRegions.length}`);
+console.log(`Hi-hat exclusive classes: ${hatExclusiveClasses.length ? hatExclusiveClasses.join(',') : 'none'}`);
 for (const region of violinRegions) {
   console.log({
     sample: region.sample.name,
@@ -39,7 +68,7 @@ for (const region of violinRegions) {
     releaseTc: region.releaseVolEnv,
   });
 }
-console.log('SF2 parser verification passed.');
+console.log('SF2 full-ensemble parser verification passed.');
 
 function requirePreset(bank, program, label) {
   const preset = presets.find((candidate) => candidate.bank === bank && candidate.program === program);

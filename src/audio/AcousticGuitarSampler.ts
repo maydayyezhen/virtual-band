@@ -5,29 +5,41 @@ import {
   getAcousticGuitarProgram,
   type AcousticGuitarProgramId,
 } from './AcousticGuitarProgram';
+import type { ProgramToneBackend } from './ProgramToneBackend';
 import { fluidR3SamplePath, type SampleLibrary } from './SampleLibrary';
 
 const PITCH_BEND_SEMITONES = 2;
 const COMMON_NOTES = [40, 45, 50, 55, 59, 64, 67, 69, 71, 72, 74, 76, 79, 81, 84] as const;
 
+type VoiceBackend = 'mp3' | 'tone';
+
 interface VoiceState {
   voice: AudioVoice | null;
   released: boolean;
   baseGain: number;
+  backend: VoiceBackend;
 }
 
 export class AcousticGuitarSampler {
   private readonly audio: AudioEngine;
   private readonly samples: SampleLibrary;
+  private readonly toneBackend: ProgramToneBackend | null;
   private readonly voices = new Map<number, VoiceState>();
   private sustain = false;
   private volume = 0.86;
   private pitchBend = 0;
   private programId: AcousticGuitarProgramId = DEFAULT_ACOUSTIC_GUITAR_PROGRAM;
 
-  constructor(audio: AudioEngine, samples: SampleLibrary) {
+  constructor(
+    audio: AudioEngine,
+    samples: SampleLibrary,
+    toneBackend: ProgramToneBackend | null = null,
+  ) {
     this.audio = audio;
     this.samples = samples;
+    this.toneBackend = toneBackend;
+    this.toneBackend?.setGain(this.volume, 0);
+    this.toneBackend?.setProgram(this.programId, 0);
   }
 
   get program(): AcousticGuitarProgramId {
@@ -38,6 +50,7 @@ export class AcousticGuitarSampler {
     const preset = getAcousticGuitarProgram(value);
     if (!preset) return false;
     this.programId = preset.id;
+    this.toneBackend?.setProgram(preset.id, 0);
     void this.preloadProgram(preset.id);
     return true;
   }
@@ -51,7 +64,23 @@ export class AcousticGuitarSampler {
 
     this.stopString(stringNumber, 0.014);
     const baseGain = Math.pow(clamp01(velocity / 127), 1.12) * 0.86;
-    const state: VoiceState = { voice: null, released: false, baseGain };
+
+    if (this.toneBackend?.noteOn(voiceId(stringNumber), note, velocity)) {
+      this.voices.set(stringNumber, {
+        voice: null,
+        released: false,
+        baseGain,
+        backend: 'tone',
+      });
+      return;
+    }
+
+    const state: VoiceState = {
+      voice: null,
+      released: false,
+      baseGain,
+      backend: 'mp3',
+    };
     this.voices.set(stringNumber, state);
 
     void this.load(preset.sampleSet, note).then((buffer) => {
@@ -75,30 +104,42 @@ export class AcousticGuitarSampler {
     const state = this.voices.get(stringNumber);
     if (!state) return;
     state.released = true;
+
+    if (state.backend === 'tone') {
+      this.voices.delete(stringNumber);
+      this.toneBackend?.noteOff(voiceId(stringNumber));
+      return;
+    }
+
     if (!this.sustain) this.stopString(stringNumber, 0.14);
   }
 
   setSustain(pressed: boolean): void {
     if (this.sustain === pressed) return;
     this.sustain = pressed;
+    this.toneBackend?.setSustain(pressed);
     if (pressed) return;
     for (const [stringNumber, state] of this.voices) {
-      if (state.released) this.stopString(stringNumber, 0.14);
+      if (state.backend === 'mp3' && state.released) this.stopString(stringNumber, 0.14);
     }
   }
 
   setVolume(value: number): void {
     this.volume = clamp01(value);
+    this.toneBackend?.setGain(this.volume, 0.025);
     for (const state of this.voices.values()) {
-      state.voice?.setGain(state.baseGain * this.volume, 0.025);
+      if (state.backend === 'mp3') state.voice?.setGain(state.baseGain * this.volume, 0.025);
     }
   }
 
   setPitchBend(value: number): boolean {
     if (!Number.isFinite(value) || value < -1 || value > 1) return false;
     this.pitchBend = value;
+    this.toneBackend?.setPitchBend(value);
     const rate = pitchRate(value);
-    for (const state of this.voices.values()) state.voice?.setPlaybackRate(rate, 0.018);
+    for (const state of this.voices.values()) {
+      if (state.backend === 'mp3') state.voice?.setPlaybackRate(rate, 0.018);
+    }
     return true;
   }
 
@@ -113,31 +154,44 @@ export class AcousticGuitarSampler {
   }
 
   async preloadShowcase(): Promise<void> {
-    await Promise.allSettled(
-      ACOUSTIC_GUITAR_PROGRAM_IDS.map((program) => this.preloadProgram(program)),
-    );
+    await Promise.allSettled([
+      this.toneBackend?.prepare() ?? Promise.resolve(false),
+      ...ACOUSTIC_GUITAR_PROGRAM_IDS.map((program) => this.preloadProgram(program)),
+    ]);
   }
 
   reset(): void {
     this.sustain = false;
     this.pitchBend = 0;
+    this.toneBackend?.reset();
     for (const stringNumber of [...this.voices.keys()]) this.stopString(stringNumber, 0.03);
   }
 
   dispose(): void {
     this.reset();
+    this.toneBackend?.dispose();
   }
 
   private stopString(stringNumber: number, fadeSeconds: number): void {
     const state = this.voices.get(stringNumber);
     if (!state) return;
     this.voices.delete(stringNumber);
+
+    if (state.backend === 'tone') {
+      this.toneBackend?.noteOff(voiceId(stringNumber));
+      return;
+    }
+
     state.voice?.stop(fadeSeconds);
   }
 
   private load(sampleSet: string, note: number): Promise<AudioBuffer | null> {
     return this.samples.load(fluidR3SamplePath(sampleSet, note));
   }
+}
+
+function voiceId(stringNumber: number): string {
+  return `string:${stringNumber}`;
 }
 
 function pitchRate(value: number): number {
