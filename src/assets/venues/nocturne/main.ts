@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { DustLightingDirector, type DustLightingStatus, type LightingStage } from './lighting/DustLightingDirector';
 import sourcePart01 from './source/nocturne-stage-source-01.js?raw';
 import sourcePart02 from './source/nocturne-stage-source-02.js?raw';
 import sourcePart03 from './source/nocturne-stage-source-03.js?raw';
@@ -10,19 +11,12 @@ import sourcePart07 from './source/nocturne-stage-source-07.js?raw';
 const SOURCE_LENGTH = 127_767;
 const sourceParts = [sourcePart01, sourcePart02, sourcePart03, sourcePart04, sourcePart05, sourcePart06, sourcePart07];
 
-type NocturneStage = {
-  demo: boolean;
-  paused: boolean;
-  setStageMode: (mode: 'nocturne' | 'aurora' | 'amber' | 'blackout') => unknown;
-  setDemo: (enabled: boolean) => unknown;
-  setPaused: (paused: boolean) => unknown;
-};
-
 declare global {
   interface Window {
     THREE: typeof THREE;
-    stage?: NocturneStage;
-    stageReady?: Promise<NocturneStage>;
+    stage?: LightingStage;
+    stageReady?: Promise<LightingStage>;
+    dustLighting?: DustLightingDirector;
   }
 }
 
@@ -60,18 +54,50 @@ function patchForAssetViewer(source: string): string {
   );
 }
 
-function bindAssetControls(stage: NocturneStage): void {
+function formatTime(seconds: number): string {
+  const value = Math.max(0, Math.floor(seconds));
+  return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
+}
+
+function updateDustStatus(status: DustLightingStatus): void {
+  const statusNode = document.getElementById('dustStatus');
+  if (statusNode) {
+    statusNode.textContent = `${formatTime(status.time)} / ${formatTime(status.duration)} · bar ${status.bar + 1} · ${status.cue} · ${status.focus}`;
+  }
+  const playButton = document.getElementById('dustPlay') as HTMLButtonElement | null;
+  if (playButton) {
+    playButton.textContent = status.playing ? '暂停 Dust' : '播放 Dust';
+    playButton.classList.toggle('active', status.playing);
+  }
+}
+
+function bindAssetControls(stage: LightingStage, director: DustLightingDirector): void {
   const modeButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-mode]')];
   for (const button of modeButtons) {
     button.addEventListener('click', () => {
-      const mode = button.dataset.mode as 'nocturne' | 'aurora' | 'amber' | 'blackout';
+      director.stop(false);
+      const mode = button.dataset.mode ?? 'nocturne';
       stage.setStageMode(mode);
       for (const candidate of modeButtons) candidate.classList.toggle('active', candidate === button);
     });
   }
 
+  const dustPlay = document.getElementById('dustPlay') as HTMLButtonElement | null;
+  dustPlay?.addEventListener('click', () => {
+    for (const candidate of modeButtons) candidate.classList.remove('active');
+    if (director.isPlaying) director.pause();
+    else director.play();
+  });
+
+  const dustRestart = document.getElementById('dustRestart') as HTMLButtonElement | null;
+  dustRestart?.addEventListener('click', () => {
+    for (const candidate of modeButtons) candidate.classList.remove('active');
+    director.restart(true);
+  });
+
   const demoToggle = document.getElementById('demoToggle') as HTMLButtonElement | null;
   demoToggle?.addEventListener('click', () => {
+    director.stop(false);
     stage.setDemo(!stage.demo);
     if (demoToggle) demoToggle.textContent = stage.demo ? '停止演示' : '开始演示';
   });
@@ -86,10 +112,15 @@ function bindAssetControls(stage: NocturneStage): void {
 async function start(): Promise<void> {
   window.THREE = THREE;
   const source = await decodeSource();
-  (0, Function)(patchForAssetViewer(source))();
+  Function(patchForAssetViewer(source))();
   if (!window.stageReady) throw new Error('NOCTURNE stageReady was not created');
   const stage = await window.stageReady;
-  bindAssetControls(stage);
+
+  const director = await DustLightingDirector.create(stage, updateDustStatus);
+  window.dustLighting = director;
+  bindAssetControls(stage, director);
+  document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((button) => button.classList.remove('active'));
+  director.play();
   document.getElementById('viewport')?.focus();
 }
 
