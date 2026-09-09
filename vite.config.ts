@@ -6,7 +6,18 @@ export default defineConfig({
   plugins: [react(), audioMixDevPlugin()],
   build: {
     rollupOptions: {
-      input: ['index.html', 'calibration.html', 'mix.html', 'layout.html'],
+      input: [
+        'index.html',
+        'assets/instruments/index.html',
+        'assets/venues/index.html',
+        'studio/layout/index.html',
+        'tools/audio/calibration/index.html',
+        'tools/audio/mix/index.html',
+        // Compatibility entry points for old local URLs.
+        'layout.html',
+        'calibration.html',
+        'mix.html',
+      ],
     },
   },
 });
