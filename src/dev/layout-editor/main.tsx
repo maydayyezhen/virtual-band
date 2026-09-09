@@ -1,9 +1,11 @@
 import { createRoot } from 'react-dom/client';
 import { LayoutEditorApp } from './LayoutEditorApp';
+import { installHideAtelierSurfaces } from './HideAtelierSurfaces';
 import { installLayoutEditorCameraPan } from './LayoutEditorCameraPan';
 import { installNocturneStaticBackdrop } from './NocturneStaticBackdrop';
 import './layout-editor.css';
 
+installHideAtelierSurfaces();
 installNocturneStaticBackdrop();
 installLayoutEditorCameraPan();
 
