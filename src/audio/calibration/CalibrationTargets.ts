@@ -1,7 +1,8 @@
 import {
-  mixTrimDb,
+  mixTrimComponents,
   type AudioMixTarget,
-} from '../AudioMixProfile';
+  type AudioMixTrimComponents,
+} from '../AudioMixProfile.ts';
 
 export type CalibrationTargetKind =
   | 'drums'
@@ -10,12 +11,17 @@ export type CalibrationTargetKind =
   | 'acoustic'
   | 'electric';
 
+export type CalibrationComparisonGroup =
+  | 'acoustic.programs'
+  | 'electric.programs';
+
 export interface CalibrationTarget {
   readonly id: string;
   readonly label: string;
   readonly family: string;
   readonly kind: CalibrationTargetKind;
   readonly mixTarget: AudioMixTarget;
+  readonly comparisonGroup?: CalibrationComparisonGroup;
   readonly program?: number;
   readonly tier?: 'lower' | 'upper';
   readonly articulation?: 'arco' | 'pizzicato';
@@ -79,6 +85,7 @@ export const CALIBRATION_TARGETS: readonly CalibrationTarget[] = Object.freeze([
     family: 'Acoustic Guitar',
     kind: 'acoustic',
     mixTarget: 'acoustic',
+    comparisonGroup: 'acoustic.programs',
     program: 24,
     tailSeconds: 1.6,
     description: 'Nylon guitar single-note velocities plus open-string strum.',
@@ -89,6 +96,7 @@ export const CALIBRATION_TARGETS: readonly CalibrationTarget[] = Object.freeze([
     family: 'Acoustic Guitar',
     kind: 'acoustic',
     mixTarget: 'acoustic',
+    comparisonGroup: 'acoustic.programs',
     program: 25,
     tailSeconds: 1.6,
     description: 'Steel guitar single-note velocities plus open-string strum.',
@@ -99,6 +107,7 @@ export const CALIBRATION_TARGETS: readonly CalibrationTarget[] = Object.freeze([
     family: 'Electric Guitar',
     kind: 'electric',
     mixTarget: 'electric',
+    comparisonGroup: 'electric.programs',
     program: 26,
     tailSeconds: 1.6,
     description: 'Jazz guitar reference notes and strum.',
@@ -109,6 +118,7 @@ export const CALIBRATION_TARGETS: readonly CalibrationTarget[] = Object.freeze([
     family: 'Electric Guitar',
     kind: 'electric',
     mixTarget: 'electric',
+    comparisonGroup: 'electric.programs',
     program: 27,
     tailSeconds: 1.6,
     description: 'Clean guitar reference notes and strum.',
@@ -119,6 +129,7 @@ export const CALIBRATION_TARGETS: readonly CalibrationTarget[] = Object.freeze([
     family: 'Electric Guitar',
     kind: 'electric',
     mixTarget: 'electric',
+    comparisonGroup: 'electric.programs',
     program: 28,
     tailSeconds: 0.8,
     description: 'Palm-muted guitar reference notes and short strum.',
@@ -129,6 +140,7 @@ export const CALIBRATION_TARGETS: readonly CalibrationTarget[] = Object.freeze([
     family: 'Electric Guitar',
     kind: 'electric',
     mixTarget: 'electric',
+    comparisonGroup: 'electric.programs',
     program: 29,
     tailSeconds: 1.8,
     description: 'Overdrive guitar reference notes and strum.',
@@ -139,6 +151,7 @@ export const CALIBRATION_TARGETS: readonly CalibrationTarget[] = Object.freeze([
     family: 'Electric Guitar',
     kind: 'electric',
     mixTarget: 'electric',
+    comparisonGroup: 'electric.programs',
     program: 30,
     tailSeconds: 1.8,
     description: 'Distortion guitar reference notes and strum.',
@@ -149,6 +162,7 @@ export const CALIBRATION_TARGETS: readonly CalibrationTarget[] = Object.freeze([
     family: 'Electric Guitar',
     kind: 'electric',
     mixTarget: 'electric',
+    comparisonGroup: 'electric.programs',
     program: 31,
     tailSeconds: 1.5,
     description: 'Guitar harmonics reference notes and ringing strum.',
@@ -163,6 +177,24 @@ export function calibrationTarget(id: string): CalibrationTarget {
   return target;
 }
 
+export function calibrationTargetsInGroup(
+  group: CalibrationComparisonGroup,
+): readonly CalibrationTarget[] {
+  return CALIBRATION_TARGETS.filter((target) => target.comparisonGroup === group);
+}
+
+export function calibrationComparisonGroupTargets(
+  target: CalibrationTarget,
+): readonly CalibrationTarget[] {
+  return target.comparisonGroup
+    ? calibrationTargetsInGroup(target.comparisonGroup)
+    : [target];
+}
+
+export function currentCalibrationMix(target: CalibrationTarget): AudioMixTrimComponents {
+  return mixTrimComponents(target.mixTarget, target.program);
+}
+
 export function currentCalibrationTrimDb(target: CalibrationTarget): number {
-  return mixTrimDb(target.mixTarget, target.program);
+  return currentCalibrationMix(target).effectiveTrimDb;
 }

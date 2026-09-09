@@ -71,7 +71,7 @@ code {
 }
 
 .calibration-shell {
-  width: min(1500px, calc(100vw - 64px));
+  width: min(1760px, calc(100vw - 64px));
   margin: 0 auto;
   padding: 48px 0 60px;
 }
@@ -96,7 +96,7 @@ code {
 }
 
 .lede {
-  max-width: 900px;
+  max-width: 1040px;
   color: #aab3c2;
   font-size: 16px;
   line-height: 1.75;
@@ -123,7 +123,8 @@ code {
 .results-card,
 .audition-card,
 .run-status,
-.status-card {
+.status-card,
+.family-plan-card {
   background: rgba(14, 19, 27, 0.86);
   border: 1px solid rgba(255, 255, 255, 0.085);
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.18);
@@ -132,7 +133,7 @@ code {
 
 .control-card {
   display: grid;
-  grid-template-columns: minmax(280px, 1.4fr) minmax(210px, 0.8fr) auto;
+  grid-template-columns: minmax(280px, 1.4fr) minmax(240px, 0.8fr) auto;
   gap: 20px;
   align-items: end;
   padding: 20px;
@@ -145,7 +146,8 @@ code {
 }
 
 .control-card label > span,
-.status-card > span {
+.status-card > span,
+.family-plan-card > div > span {
   color: #7f8a9a;
   font-size: 12px;
   font-weight: 700;
@@ -182,13 +184,13 @@ input {
 
 .status-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 14px;
   margin: 14px 0;
 }
 
 .status-card {
-  min-height: 116px;
+  min-height: 122px;
   border-radius: 14px;
   padding: 18px;
   display: flex;
@@ -200,7 +202,8 @@ input {
   font-size: 17px;
 }
 
-.status-card small {
+.status-card small,
+.family-plan-card small {
   color: #8994a4;
   line-height: 1.55;
 }
@@ -226,6 +229,56 @@ input {
   border-color: rgba(255, 105, 120, 0.35);
 }
 
+.family-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 14px 0;
+}
+
+.family-plan-card {
+  border-radius: 14px;
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+}
+
+.family-plan-card > div {
+  display: grid;
+  gap: 5px;
+}
+
+.family-plan-card > div > strong {
+  font-size: 18px;
+}
+
+.family-plan-card dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.family-plan-card dl div {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.025);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.family-plan-card dt {
+  color: #727e8f;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.family-plan-card dd {
+  margin: 4px 0 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
 .results-card {
   border-radius: 18px;
   overflow: hidden;
@@ -248,8 +301,9 @@ input {
 
 table {
   width: 100%;
+  min-width: 1660px;
   border-collapse: collapse;
-  table-layout: fixed;
+  table-layout: auto;
 }
 
 th,
@@ -271,7 +325,7 @@ th {
 
 th:first-child,
 td:first-child {
-  width: 225px;
+  min-width: 220px;
   text-align: left;
 }
 
@@ -306,6 +360,50 @@ td.lower {
   color: #f2a4ad;
 }
 
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.status-pill.ready {
+  color: #9bd8b4;
+  border-color: rgba(107, 210, 151, 0.3);
+  background: rgba(107, 210, 151, 0.07);
+}
+
+.status-pill.headroom-anchor {
+  color: #f2ca86;
+  border-color: rgba(239, 181, 83, 0.32);
+  background: rgba(239, 181, 83, 0.08);
+}
+
+.status-pill.range-limited,
+.status-pill.invalid {
+  color: #f2a4ad;
+  border-color: rgba(255, 105, 120, 0.32);
+  background: rgba(255, 105, 120, 0.08);
+}
+
+.status-pill.awaiting-family {
+  color: #b7c8e4;
+  border-color: rgba(132, 164, 214, 0.28);
+  background: rgba(132, 164, 214, 0.07);
+}
+
+.status-pill.diagnostic-only {
+  color: #a3acba;
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.035);
+}
+
 .audition-card {
   margin-top: 14px;
   padding: 22px;
@@ -320,6 +418,11 @@ td.lower {
   margin: 9px 0 0;
   color: #9aa5b5;
   line-height: 1.65;
+}
+
+.audition-card .subtle-note {
+  color: #748093;
+  font-size: 13px;
 }
 
 .audition-actions {
@@ -337,7 +440,7 @@ footer strong {
   color: #9ba9bc;
 }
 
-@media (max-width: 1280px) {
+@media (max-width: 1380px) {
   body {
     min-width: 980px;
   }
@@ -347,7 +450,7 @@ footer strong {
   }
 
   .control-card {
-    grid-template-columns: 1fr 220px;
+    grid-template-columns: 1fr 240px;
   }
 
   .control-actions {
@@ -355,6 +458,6 @@ footer strong {
   }
 
   .status-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
   }
 }

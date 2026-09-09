@@ -6,7 +6,7 @@ import { CalibrationAudioRuntime, type CalibrationAudioSource } from './Calibrat
 import { CalibrationMeter } from './CalibrationMeter';
 import {
   calibrationTarget,
-  currentCalibrationTrimDb,
+  currentCalibrationMix,
   type CalibrationTarget,
 } from './CalibrationTargets';
 import {
@@ -21,14 +21,10 @@ export interface AudioCalibrationResult {
   readonly targetId: string;
   readonly label: string;
   readonly source: CalibrationAudioSource;
+  readonly currentInstrumentTrimDb: number;
+  readonly currentProgramTrimDb: number;
   readonly currentTrimDb: number;
   readonly metrics: CalibrationMetrics;
-}
-
-export interface CalibrationRecommendation {
-  readonly referenceLufs: number;
-  readonly adjustmentDb: number;
-  readonly suggestedTrimDb: number;
 }
 
 export interface CalibrationRunProgress {
@@ -40,8 +36,6 @@ export interface CalibrationRunProgress {
 }
 
 export type CalibrationProgressListener = (progress: CalibrationRunProgress) => void;
-
-const MAX_SINGLE_PASS_ADJUSTMENT_DB = 6;
 
 export class AudioCalibrationHarness {
   readonly runtime = new CalibrationAudioRuntime();
@@ -98,12 +92,15 @@ export class AudioCalibrationHarness {
 
       const metrics = await this.meter.stop();
       meterRunning = false;
+      const mix = currentCalibrationMix(target);
 
       return {
         targetId: target.id,
         label: target.label,
         source,
-        currentTrimDb: currentCalibrationTrimDb(target),
+        currentInstrumentTrimDb: mix.instrumentTrimDb,
+        currentProgramTrimDb: mix.programTrimDb,
+        currentTrimDb: mix.effectiveTrimDb,
         metrics,
       };
     } finally {
@@ -115,11 +112,14 @@ export class AudioCalibrationHarness {
     }
   }
 
+  /**
+   * Auditioning deliberately accepts a plain dB compensation rather than a
+   * calibration policy object. The harness owns audio resources; the pure
+   * CalibrationPlan module owns recommendation policy.
+   */
   async audition(
     targetId: string,
-    mode: 'current' | 'suggested',
-    result?: AudioCalibrationResult,
-    referenceLufs = -22,
+    adjustmentDb = 0,
     signal?: AbortSignal,
   ): Promise<void> {
     this.assertAlive();
@@ -129,10 +129,6 @@ export class AudioCalibrationHarness {
     throwIfAborted(signal);
 
     this.runtime.resetAll();
-    const recommendation = result?.targetId === targetId
-      ? recommendCalibration(result, referenceLufs)
-      : null;
-    const adjustmentDb = mode === 'suggested' ? recommendation?.adjustmentDb ?? 0 : 0;
     this.runtime.audio.setMasterGain(
       DEFAULT_AUDIO_MASTER_GAIN * dbToGain(adjustmentDb),
       0.02,
@@ -159,36 +155,6 @@ export class AudioCalibrationHarness {
   }
 }
 
-export function recommendCalibration(
-  result: Pick<AudioCalibrationResult, 'currentTrimDb' | 'metrics'>,
-  referenceLufs: number,
-): CalibrationRecommendation {
-  const reference = normalizeReference(referenceLufs);
-  const measuredLufs = result.metrics.integratedLufs;
-  if (!Number.isFinite(measuredLufs)) {
-    return {
-      referenceLufs: reference,
-      adjustmentDb: 0,
-      suggestedTrimDb: result.currentTrimDb,
-    };
-  }
-
-  const desired = clamp(
-    reference - measuredLufs,
-    -MAX_SINGLE_PASS_ADJUSTMENT_DB,
-    MAX_SINGLE_PASS_ADJUSTMENT_DB,
-  );
-  // Keep the same headroom invariant as AudioMixProfile: calibration itself
-  // never boosts above unity. If a target needs more than 0 dB, lower the
-  // ensemble reference or attenuate louder peers instead.
-  const suggestedTrimDb = Math.min(0, result.currentTrimDb + desired);
-  return {
-    referenceLufs: reference,
-    adjustmentDb: suggestedTrimDb - result.currentTrimDb,
-    suggestedTrimDb,
-  };
-}
-
 function sequenceProgress(
   target: CalibrationTarget,
   progress: CalibrationSequenceProgress,
@@ -202,15 +168,6 @@ function sequenceProgress(
   };
 }
 
-function normalizeReference(value: number): number {
-  if (!Number.isFinite(value)) return -22;
-  return clamp(value, -36, -12);
-}
-
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException('Calibration run aborted', 'AbortError');
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
 }
