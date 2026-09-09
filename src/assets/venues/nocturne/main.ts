@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { DustLightingDirector, type DustLightingStatus, type LightingStage } from './lighting/DustLightingDirector';
+import dustMidiUrl from './lighting/dust.json.gz?url';
 import sourcePart01 from './source/nocturne-stage-source-01.js?raw';
 import sourcePart02 from './source/nocturne-stage-source-02.js?raw';
 import sourcePart03 from './source/nocturne-stage-source-03.js?raw';
@@ -115,6 +116,24 @@ function bindAssetControls(stage: LightingStage, director: DustLightingDirector)
   });
 }
 
+async function createDustDirector(stage: LightingStage): Promise<DustLightingDirector> {
+  const nativeFetch = window.fetch.bind(window);
+  const routedFetch: typeof window.fetch = (input, init) => {
+    const requested = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (requested === '/nocturne-lighting/dust.json.gz' || requested.endsWith('/nocturne-lighting/dust.json.gz')) {
+      return nativeFetch(dustMidiUrl, init);
+    }
+    return nativeFetch(input, init);
+  };
+
+  window.fetch = routedFetch;
+  try {
+    return await DustLightingDirector.create(stage, updateDustStatus);
+  } finally {
+    window.fetch = nativeFetch;
+  }
+}
+
 async function start(): Promise<void> {
   window.THREE = THREE;
   const source = await decodeSource();
@@ -122,7 +141,7 @@ async function start(): Promise<void> {
   if (!window.stageReady) throw new Error('NOCTURNE stageReady was not created');
   const stage = await window.stageReady;
 
-  const director = await DustLightingDirector.create(stage, updateDustStatus);
+  const director = await createDustDirector(stage);
   window.dustLighting = director;
   bindAssetControls(stage, director);
   document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((button) => button.classList.remove('active'));
