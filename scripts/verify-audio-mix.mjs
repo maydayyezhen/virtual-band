@@ -20,6 +20,9 @@ const rows = [
   ['electric', 29],
   ['electric', 30],
   ['electric', 31],
+  ['bass', 33],
+  ['bass', 34],
+  ['bass', 36],
 ];
 
 for (const [target, program] of rows) {

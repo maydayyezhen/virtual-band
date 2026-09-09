@@ -120,9 +120,8 @@ export class InstrumentInteractionSystem {
     this.pendingFingeringClicks.clear();
   }
 
-  allowsDragRetarget(hit: InstrumentHit): boolean {
-    const instrument = this.instruments.get(hit.instrumentId);
-    return instrument?.interactionDragBehavior?.(hit.partId) !== 'lock';
+  allowsDragTransition(from: InstrumentHit | null, to: InstrumentHit | null): boolean {
+    return !this.isDragLocked(from) && !this.isDragLocked(to);
   }
 
   dispose(): void {
@@ -167,6 +166,12 @@ export class InstrumentInteractionSystem {
 
     this.previewHit = hit;
     if (hit) this.instruments.get(hit.instrumentId)?.previewInteraction?.(hit.partId);
+  }
+
+  private isDragLocked(hit: InstrumentHit | null): boolean {
+    if (!hit) return false;
+    const instrument = this.instruments.get(hit.instrumentId);
+    return instrument?.interactionDragBehavior?.(hit.partId) === 'lock';
   }
 }
 

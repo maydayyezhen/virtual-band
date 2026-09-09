@@ -34,3 +34,9 @@ In the Atelier acoustic showcase:
 - Program changes affect newly triggered notes; already sounding sample voices are allowed to finish naturally.
 
 Future MIDI routing should call `AcousticGuitarInstrument.programChange(program)` for GM 24/25 rather than reaching into the sampler or Presentation layer directly.
+
+## Four-string bass: Fingered / Picked / Slap
+
+`bass.main` is the authored four-string Jazz-style electric bass with E1/A1/D2/G2 tuning and 21 frets. GM 33 Fingered Bass is the default and is the closest match to the visible instrument.
+
+The sampler exposes the three performance sounds that fit this model: GM 33 Fingered Bass, GM 34 Picked Bass and GM 36 Slap Bass. `Q` / `E` step through those programs in the Atelier Bass showcase, while `A` / `S` / `D` / `F` pluck the four physical strings from low to high.

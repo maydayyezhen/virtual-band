@@ -18,10 +18,12 @@ const INSTRUMENT_TARGETS = [
   'violin.pizzicato',
   'acoustic',
   'electric',
+  'bass',
 ] as const;
 
 const ACOUSTIC_PROGRAMS = [24, 25] as const;
 const ELECTRIC_PROGRAMS = [26, 27, 28, 29, 30, 31] as const;
+const BASS_PROGRAMS = [33, 34, 36] as const;
 
 interface AudioMixConfigJson {
   schemaVersion: 1;
@@ -30,6 +32,7 @@ interface AudioMixConfigJson {
   programTrimDb: {
     acoustic: Record<string, number>;
     electric: Record<string, number>;
+    bass: Record<string, number>;
   };
 }
 
@@ -113,6 +116,7 @@ function normalizeConfig(value: unknown): AudioMixConfigJson {
   const programs = requireObject(root.programTrimDb, 'programTrimDb');
   const acoustic = requireObject(programs.acoustic, 'programTrimDb.acoustic');
   const electric = requireObject(programs.electric, 'programTrimDb.electric');
+  const bass = requireObject(programs.bass, 'programTrimDb.bass');
 
   return {
     schemaVersion: 1,
@@ -131,6 +135,12 @@ function normalizeConfig(value: unknown): AudioMixConfigJson {
         ELECTRIC_PROGRAMS.map((program) => {
           const key = String(program);
           return [key, finiteDb(electric[key], `programTrimDb.electric.${key}`)];
+        }),
+      ),
+      bass: Object.fromEntries(
+        BASS_PROGRAMS.map((program) => {
+          const key = String(program);
+          return [key, finiteDb(bass[key], `programTrimDb.bass.${key}`)];
         }),
       ),
     },

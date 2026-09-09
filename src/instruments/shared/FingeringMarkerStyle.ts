@@ -20,6 +20,12 @@ export const FINGERING_MARKER_STYLES = {
     previewScale: 0.86,
     previewOpacity: 0.52,
   },
+  bass: {
+    scale: [0.041, 0.057, 0.017],
+    attackPulse: 0.022,
+    previewScale: 0.86,
+    previewOpacity: 0.52,
+  },
   violin: {
     scale: [0.027, 0.045, 0.010],
     attackPulse: 0.015,

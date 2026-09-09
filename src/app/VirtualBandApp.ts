@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { AppState } from './AppState';
 import { DEFAULT_ACOUSTIC_GUITAR_PROGRAM } from '../audio/AcousticGuitarProgram';
 import { AcousticGuitarSampler } from '../audio/AcousticGuitarSampler';
+import { DEFAULT_BASS_PROGRAM } from '../audio/BassProgram';
+import { BassSampler } from '../audio/BassSampler';
 import { AudioEngine } from '../audio/AudioEngine';
 import { DrumSampler } from '../audio/DrumSampler';
 import { DEFAULT_ELECTRIC_GUITAR_PROGRAM } from '../audio/ElectricGuitarProgram';
@@ -16,6 +18,7 @@ import { ViolinSampler } from '../audio/ViolinSampler';
 import { CameraRegistry } from '../camera/CameraRegistry';
 import { CameraSystem } from '../camera/CameraSystem';
 import { ATELIER_ACOUSTIC_VIEWS } from '../camera/presets/AtelierAcousticViews';
+import { ATELIER_BASS_VIEWS } from '../camera/presets/AtelierBassViews';
 import { ATELIER_DRUM_VIEWS } from '../camera/presets/AtelierDrumViews';
 import { ATELIER_ELECTRIC_VIEWS } from '../camera/presets/AtelierElectricViews';
 import { ATELIER_KEYBOARD_VIEWS } from '../camera/presets/AtelierKeyboardViews';
@@ -23,6 +26,7 @@ import { ATELIER_VIOLIN_VIEWS } from '../camera/presets/AtelierViolinViews';
 import { Engine } from '../engine/Engine';
 import { RendererHost } from '../engine/RendererHost';
 import { AcousticGuitarInstrument } from '../instruments/acoustic/AcousticGuitarInstrument';
+import { BassInstrument } from '../instruments/bass/BassInstrument';
 import { InstrumentRegistry } from '../instruments/Instrument';
 import { InstrumentInteractionSystem } from '../instruments/InstrumentInteractionSystem';
 import { DrumsInstrument } from '../instruments/drums/DrumsInstrument';
@@ -30,6 +34,7 @@ import { ElectricGuitarInstrument } from '../instruments/electric/ElectricGuitar
 import { KeyboardInstrument } from '../instruments/keyboard/KeyboardInstrument';
 import { ViolinInstrument } from '../instruments/violin/ViolinInstrument';
 import { AtelierAcousticShowcaseMode } from '../presentation/atelier/AtelierAcousticShowcaseMode';
+import { AtelierBassShowcaseMode } from '../presentation/atelier/AtelierBassShowcaseMode';
 import { AtelierDrumShowcaseMode } from '../presentation/atelier/AtelierDrumShowcaseMode';
 import { AtelierElectricShowcaseMode } from '../presentation/atelier/AtelierElectricShowcaseMode';
 import { AtelierKeyboardShowcaseMode } from '../presentation/atelier/AtelierKeyboardShowcaseMode';
@@ -80,6 +85,13 @@ export class VirtualBandApp {
     this.acousticSf2,
   );
 
+  readonly bassSf2 = new Sf2ProgramBackend(this.audio, this.sf2Banks, {
+    bank: 0,
+    program: DEFAULT_BASS_PROGRAM,
+    label: 'bass',
+  });
+  readonly bassSampler = new BassSampler(this.bassSf2);
+
   readonly keyboardSf2 = new Sf2KeyboardBackend(this.audio, this.sf2Banks);
   readonly keyboardSampler = new KeyboardSampler(this.audio, this.samples, this.keyboardSf2);
   readonly violinSf2 = new Sf2ViolinBackend(this.audio, this.sf2Banks);
@@ -101,11 +113,13 @@ export class VirtualBandApp {
   private violin: ViolinInstrument | null = null;
   private electric: ElectricGuitarInstrument | null = null;
   private acoustic: AcousticGuitarInstrument | null = null;
+  private bass: BassInstrument | null = null;
   private atelierMode: AtelierDrumShowcaseMode | null = null;
   private keyboardMode: AtelierKeyboardShowcaseMode | null = null;
   private violinMode: AtelierViolinShowcaseMode | null = null;
   private electricMode: AtelierElectricShowcaseMode | null = null;
   private acousticMode: AtelierAcousticShowcaseMode | null = null;
+  private bassMode: AtelierBassShowcaseMode | null = null;
   private showcaseSwitch: ShowcaseSwitchController | null = null;
   private started = false;
   private lastStateTime = -Infinity;
@@ -154,25 +168,28 @@ export class VirtualBandApp {
       // setup. The visual scene never waits for the 148 MB SoundFont to parse.
       void this.prepareShowcaseAudio();
 
-      const [drums, keyboard, violin, electric, acoustic] = await Promise.all([
+      const [drums, keyboard, violin, electric, acoustic, bass] = await Promise.all([
         DrumsInstrument.create(this.drumSampler),
         KeyboardInstrument.create(this.keyboardSampler),
         ViolinInstrument.create(this.violinSampler),
         ElectricGuitarInstrument.create(this.electricSampler),
         AcousticGuitarInstrument.create(this.acousticSampler),
+        BassInstrument.create(this.bassSampler),
       ]);
       this.drums = drums;
       this.keyboard = keyboard;
       this.violin = violin;
       this.electric = electric;
       this.acoustic = acoustic;
+      this.bass = bass;
 
       this.instruments.register(drums);
       this.instruments.register(keyboard);
       this.instruments.register(violin);
       this.instruments.register(electric);
       this.instruments.register(acoustic);
-      this.instrumentLayer.add(drums.root, keyboard.root, violin.root, electric.root, acoustic.root);
+      this.instruments.register(bass);
+      this.instrumentLayer.add(drums.root, keyboard.root, violin.root, electric.root, acoustic.root, bass.root);
 
       // Saved views are reusable camera assets, not presentation-mode data.
       this.cameraRegistry.setInstrumentViews(drums.id, ATELIER_DRUM_VIEWS);
@@ -180,6 +197,7 @@ export class VirtualBandApp {
       this.cameraRegistry.setInstrumentViews(violin.id, ATELIER_VIOLIN_VIEWS);
       this.cameraRegistry.setInstrumentViews(electric.id, ATELIER_ELECTRIC_VIEWS);
       this.cameraRegistry.setInstrumentViews(acoustic.id, ATELIER_ACOUSTIC_VIEWS);
+      this.cameraRegistry.setInstrumentViews(bass.id, ATELIER_BASS_VIEWS);
 
       this.activateVenue('atelier-studio');
 
@@ -218,16 +236,25 @@ export class VirtualBandApp {
         acoustic,
         interactions: this.interactions,
       });
+      const bassMode = new AtelierBassShowcaseMode({
+        element: this.renderer.renderer.domElement,
+        camera: this.camera,
+        cameraRegistry: this.cameraRegistry,
+        bass,
+        interactions: this.interactions,
+      });
       this.atelierMode = drumMode;
       this.keyboardMode = keyboardMode;
       this.violinMode = violinMode;
       this.electricMode = electricMode;
       this.acousticMode = acousticMode;
+      this.bassMode = bassMode;
       this.presentation.register(drumMode);
       this.presentation.register(keyboardMode);
       this.presentation.register(violinMode);
       this.presentation.register(electricMode);
       this.presentation.register(acousticMode);
+      this.presentation.register(bassMode);
 
       this.showcaseSwitch = new ShowcaseSwitchController({
         instruments: this.instruments,
@@ -238,6 +265,7 @@ export class VirtualBandApp {
           { instrumentId: violin.id, presentationId: violinMode.id },
           { instrumentId: electric.id, presentationId: electricMode.id },
           { instrumentId: acoustic.id, presentationId: acousticMode.id },
+          { instrumentId: bass.id, presentationId: bassMode.id },
         ],
         initialInstrumentId: drums.id,
         onChanged: () => this.renderer.invalidateShadows(),
@@ -261,6 +289,7 @@ export class VirtualBandApp {
       this.violinSampler.preloadCommon(),
       this.electricSampler.preloadShowcase(),
       this.acousticSampler.preloadShowcase(),
+      this.bassSampler.preload(),
     ]);
   }
 
@@ -307,6 +336,11 @@ export class VirtualBandApp {
     return this.acoustic;
   }
 
+  requireBass(): BassInstrument {
+    if (!this.bass) throw new Error('Atelier bass is not ready');
+    return this.bass;
+  }
+
   requireAtelierShowcase(): AtelierDrumShowcaseMode {
     if (!this.atelierMode) throw new Error('Atelier drum showcase is not ready');
     return this.atelierMode;
@@ -332,6 +366,11 @@ export class VirtualBandApp {
     return this.acousticMode;
   }
 
+  requireBassShowcase(): AtelierBassShowcaseMode {
+    if (!this.bassMode) throw new Error('Atelier bass showcase is not ready');
+    return this.bassMode;
+  }
+
   dispose(): void {
     if (!this.started) return;
     this.started = false;
@@ -344,11 +383,13 @@ export class VirtualBandApp {
     this.violinMode = null;
     this.electricMode = null;
     this.acousticMode = null;
+    this.bassMode = null;
     if (this.drums) this.cameraRegistry.clearInstrumentViews(this.drums.id);
     if (this.keyboard) this.cameraRegistry.clearInstrumentViews(this.keyboard.id);
     if (this.violin) this.cameraRegistry.clearInstrumentViews(this.violin.id);
     if (this.electric) this.cameraRegistry.clearInstrumentViews(this.electric.id);
     if (this.acoustic) this.cameraRegistry.clearInstrumentViews(this.acoustic.id);
+    if (this.bass) this.cameraRegistry.clearInstrumentViews(this.bass.id);
     this.interactions.dispose();
     this.control.clear();
     this.instruments.dispose();
@@ -357,11 +398,13 @@ export class VirtualBandApp {
     this.violin = null;
     this.electric = null;
     this.acoustic = null;
+    this.bass = null;
     this.drumSampler.dispose();
     this.keyboardSampler.dispose();
     this.violinSampler.dispose();
     this.electricSampler.dispose();
     this.acousticSampler.dispose();
+    this.bassSampler.dispose();
     this.sf2Banks.dispose();
     this.samples.dispose();
     this.audio.dispose();

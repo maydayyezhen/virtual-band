@@ -10,6 +10,7 @@ export interface CalibrationSequenceProgress {
 type ProgressListener = (progress: CalibrationSequenceProgress) => void;
 
 const GUITAR_OPEN_NOTES = [40, 45, 50, 55, 59, 64] as const;
+const BASS_OPEN_NOTES = [28, 33, 38, 43] as const;
 
 export async function runCalibrationSequence(
   runtime: CalibrationAudioRuntime,
@@ -36,6 +37,10 @@ export async function runCalibrationSequence(
   }
   if (target.kind === 'acoustic') {
     await runAcousticSequence(runtime, signal, onProgress);
+    return;
+  }
+  if (target.kind === 'bass') {
+    await runBassSequence(runtime, signal, onProgress);
     return;
   }
   await runElectricSequence(runtime, signal, onProgress);
@@ -77,6 +82,15 @@ export async function runAuditionSequence(
     await wait(articulation === 'arco' ? 950 : 650, signal);
     runtime.violinSampler.noteOff(2);
     await wait(articulation === 'arco' ? 550 : 850, signal);
+    return;
+  }
+
+  if (target.kind === 'bass') {
+    for (let index = 0; index < BASS_OPEN_NOTES.length; index += 1) {
+      runtime.bassSampler.noteOn(4 - index, BASS_OPEN_NOTES[index], 90, 'pluck');
+      await wait(70, signal);
+    }
+    await wait(1800, signal);
     return;
   }
 
@@ -254,6 +268,26 @@ async function runElectricSequence(
     await wait(28, signal);
   }
   await wait(1250, signal);
+}
+
+async function runBassSequence(
+  runtime: CalibrationAudioRuntime,
+  signal?: AbortSignal,
+  onProgress?: ProgressListener,
+): Promise<void> {
+  const steps = [
+    { stringNumber: 4, note: 28, velocity: 48, label: 'E1 · velocity 48' },
+    { stringNumber: 3, note: 33, velocity: 80, label: 'A1 · velocity 80' },
+    { stringNumber: 2, note: 38, velocity: 96, label: 'D2 · velocity 96' },
+    { stringNumber: 1, note: 43, velocity: 112, label: 'G2 · velocity 112' },
+  ] as const;
+  for (let index = 0; index < steps.length; index += 1) {
+    const step = steps[index];
+    report(onProgress, index, steps.length, step.label);
+    runtime.bassSampler.noteOn(step.stringNumber, step.note, step.velocity, 'pluck');
+    await wait(850, signal);
+  }
+  await wait(1000, signal);
 }
 
 function report(

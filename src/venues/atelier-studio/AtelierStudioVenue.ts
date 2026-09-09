@@ -71,6 +71,12 @@ export class AtelierStudioVenue implements Venue {
       rotation: [0, 0, 0] as [number, number, number],
       scale: 1,
     },
+    // The Bass donor was authored against a y=-3.98 studio floor.
+    'bass.main': {
+      position: [0, 3.968, 0] as [number, number, number],
+      rotation: [0, 0, 0] as [number, number, number],
+      scale: 1,
+    },
   };
 
   readonly cameraViews = [

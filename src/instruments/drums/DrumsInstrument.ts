@@ -22,6 +22,7 @@ const PART_NOTE: Record<string, number> = {
 };
 
 const HI_HAT_CLOSED_MAX = 0.16;
+const HI_HAT_MOUSE_OPENNESS = 0.8;
 
 type HitListener = (event: LegacyDrumHitEvent) => void;
 type PanicListener = () => void;
@@ -156,6 +157,20 @@ export class DrumsInstrument implements Instrument {
       return true;
     }
 
+    if (partId === 'hatPedal') {
+      if (phase === 'end') {
+        this.noteOff(HI_HAT_NOTES.pedal);
+        return true;
+      }
+
+      if (this.hiHatOpenness <= HI_HAT_CLOSED_MAX) {
+        return this.setHiHat(HI_HAT_MOUSE_OPENNESS);
+      }
+
+      this.noteOn(HI_HAT_NOTES.pedal, velocity);
+      return true;
+    }
+
     const note = PART_NOTE[partId];
     if (note === undefined) return false;
 
@@ -165,7 +180,6 @@ export class DrumsInstrument implements Instrument {
     }
 
     this.noteOff(note);
-    if (partId === 'hatPedal') this.setHiHat(0.8);
     return true;
   }
 

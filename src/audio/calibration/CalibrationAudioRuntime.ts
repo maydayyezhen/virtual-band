@@ -2,6 +2,8 @@ import {
   DEFAULT_ACOUSTIC_GUITAR_PROGRAM,
 } from '../AcousticGuitarProgram';
 import { AcousticGuitarSampler } from '../AcousticGuitarSampler';
+import { DEFAULT_BASS_PROGRAM } from '../BassProgram';
+import { BassSampler } from '../BassSampler';
 import { AudioEngine } from '../AudioEngine';
 import { DrumSampler } from '../DrumSampler';
 import {
@@ -59,6 +61,13 @@ export class CalibrationAudioRuntime {
     this.electricSf2,
   );
 
+  readonly bassSf2 = new Sf2ProgramBackend(this.audio, this.sf2Banks, {
+    bank: 0,
+    program: DEFAULT_BASS_PROGRAM,
+    label: 'calibration-bass',
+  });
+  readonly bassSampler = new BassSampler(this.bassSf2);
+
   private disposed = false;
 
   async prepare(target: CalibrationTarget): Promise<CalibrationAudioSource> {
@@ -92,6 +101,12 @@ export class CalibrationAudioRuntime {
       return this.acousticSf2.ready ? 'SF2' : 'MP3 fallback';
     }
 
+    if (target.kind === 'bass') {
+      this.bassSampler.setProgram(target.program ?? DEFAULT_BASS_PROGRAM);
+      if (!await this.bassSampler.preload()) throw new Error('Bass SF2 program is unavailable');
+      return 'SF2';
+    }
+
     const program = target.program ?? DEFAULT_ELECTRIC_GUITAR_PROGRAM;
     this.electricSampler.setProgram(program);
     await Promise.allSettled([
@@ -108,6 +123,7 @@ export class CalibrationAudioRuntime {
     this.violinSampler.reset();
     this.acousticSampler.reset();
     this.electricSampler.reset();
+    this.bassSampler.reset();
     this.audio.stopAll();
   }
 
@@ -120,6 +136,7 @@ export class CalibrationAudioRuntime {
     this.violinSampler.dispose();
     this.acousticSampler.dispose();
     this.electricSampler.dispose();
+    this.bassSampler.dispose();
     this.sf2Banks.dispose();
     this.samples.dispose();
     this.audio.dispose();

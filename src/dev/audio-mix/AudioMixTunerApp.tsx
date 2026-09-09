@@ -31,6 +31,7 @@ const INSTRUMENT_CONTROLS: readonly {
   { key: 'violin.pizzicato', label: 'Violin · Pizzicato', auditionTargetId: 'violin.pizzicato' },
   { key: 'acoustic', label: 'Acoustic Guitar · Family', auditionTargetId: 'acoustic.24' },
   { key: 'electric', label: 'Electric Guitar · Family', auditionTargetId: 'electric.27' },
+  { key: 'bass', label: 'Electric Bass · Family', auditionTargetId: 'bass.33' },
 ];
 
 const ACOUSTIC_PROGRAMS = [
@@ -45,6 +46,12 @@ const ELECTRIC_PROGRAMS = [
   { program: '29', label: 'Overdrive', targetId: 'electric.29' },
   { program: '30', label: 'Distortion', targetId: 'electric.30' },
   { program: '31', label: 'Harmonics', targetId: 'electric.31' },
+] as const;
+
+const BASS_PROGRAMS = [
+  { program: '33', label: 'Fingered', targetId: 'bass.33' },
+  { program: '34', label: 'Picked', targetId: 'bass.34' },
+  { program: '36', label: 'Slap', targetId: 'bass.36' },
 ] as const;
 
 export function AudioMixTunerApp() {
@@ -132,7 +139,7 @@ export function AudioMixTunerApp() {
   }
 
   function updateProgram(
-    family: 'acoustic' | 'electric',
+    family: 'acoustic' | 'electric' | 'bass',
     program: string,
     value: number,
   ): void {
@@ -302,6 +309,21 @@ export function AudioMixTunerApp() {
               />
             ))}
           </div>
+
+          <h3>Electric Bass</h3>
+          <div className="control-list compact">
+            {BASS_PROGRAMS.map((row) => (
+              <DbControl
+                key={row.program}
+                label={`${row.program} · ${row.label}`}
+                value={draft.programTrimDb.bass[row.program]}
+                effective={draft.instrumentTrimDb.bass + draft.programTrimDb.bass[row.program]}
+                selected={selectedId === row.targetId}
+                onChange={(value) => updateProgram('bass', row.program, value)}
+                onAudition={() => void audition(row.targetId)}
+              />
+            ))}
+          </div>
         </section>
       </div>
 
@@ -368,6 +390,7 @@ function effectiveTrimDb(config: AudioMixConfigFile, target: CalibrationTarget):
   if (target.program === undefined) return instrument;
   if (target.kind === 'acoustic') return instrument + (config.programTrimDb.acoustic[String(target.program)] ?? 0);
   if (target.kind === 'electric') return instrument + (config.programTrimDb.electric[String(target.program)] ?? 0);
+  if (target.kind === 'bass') return instrument + (config.programTrimDb.bass[String(target.program)] ?? 0);
   return instrument;
 }
 
@@ -379,6 +402,7 @@ function cloneConfig(config: AudioMixConfigFile): AudioMixConfigFile {
     programTrimDb: {
       acoustic: { ...config.programTrimDb.acoustic },
       electric: { ...config.programTrimDb.electric },
+      bass: { ...config.programTrimDb.bass },
     },
   };
 }

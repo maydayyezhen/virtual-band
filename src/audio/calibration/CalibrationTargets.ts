@@ -9,11 +9,13 @@ export type CalibrationTargetKind =
   | 'keyboard'
   | 'violin'
   | 'acoustic'
-  | 'electric';
+  | 'electric'
+  | 'bass';
 
 export type CalibrationComparisonGroup =
   | 'acoustic.programs'
-  | 'electric.programs';
+  | 'electric.programs'
+  | 'bass.programs';
 
 export interface CalibrationTarget {
   readonly id: string;
@@ -167,6 +169,17 @@ export const CALIBRATION_TARGETS: readonly CalibrationTarget[] = Object.freeze([
     tailSeconds: 1.5,
     description: 'Guitar harmonics reference notes and ringing strum.',
   },
+  ...([33, 34, 36] as const).map((program) => ({
+    id: `bass.${program}`,
+    label: `Bass · GM ${program}`,
+    family: 'Electric Bass',
+    kind: 'bass' as const,
+    mixTarget: 'bass' as const,
+    comparisonGroup: 'bass.programs' as const,
+    program,
+    tailSeconds: 1.8,
+    description: 'Four-string bass notes across the playable register.',
+  })),
 ]);
 
 const BY_ID = new Map(CALIBRATION_TARGETS.map((target) => [target.id, target]));

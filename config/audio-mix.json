@@ -8,7 +8,8 @@
     "violin.arco": -2,
     "violin.pizzicato": -2,
     "acoustic": -6,
-    "electric": -3.25
+    "electric": -3.25,
+    "bass": -4
   },
   "programTrimDb": {
     "acoustic": {
@@ -22,6 +23,11 @@
       "29": -5,
       "30": -10,
       "31": -3.5
+    },
+    "bass": {
+      "33": 0,
+      "34": 0,
+      "36": 0
     }
   }
 }

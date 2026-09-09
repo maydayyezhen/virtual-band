@@ -32,7 +32,7 @@ V2 now provides:
 - one Camera registry and output camera
 - Show scheduler plus control ownership arbiter
 - React UI that only subscribes to app state
-- playable drums, keyboard, violin, electric guitar and acoustic guitar
+- playable drums, keyboard, violin, electric guitar, acoustic guitar and four-string electric bass
 - a shared native SF2 audio backend with MP3 fallback
 - audio calibration and mix-tuning development tools
 

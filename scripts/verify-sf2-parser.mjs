@@ -30,6 +30,9 @@ const steel = requirePreset(0, 25, 'GM steel guitar');
 const electricPrograms = [26, 27, 28, 29, 30, 31].map(
   (program) => requirePreset(0, program, `GM electric guitar ${program}`),
 );
+const bassPrograms = [33, 34, 36].map(
+  (program) => requirePreset(0, program, `GM bass ${program}`),
+);
 const percussion = requirePreset(128, 0, 'GM percussion');
 
 const violinRegions = requireRegions(0, 40, 69, 100, 'Violin A4');
@@ -45,6 +48,9 @@ const nylonRegions = requireRegions(0, 24, 64, 100, 'Nylon guitar E4');
 const steelRegions = requireRegions(0, 25, 64, 100, 'Steel guitar E4');
 const electricRegions = [26, 27, 28, 29, 30, 31].map(
   (program) => requireRegions(0, program, 64, 100, `Electric guitar program ${program} E4`),
+);
+const bassRegions = [33, 34, 36].map(
+  (program) => requireRegions(0, program, 33, 100, `Bass program ${program} A1`),
 );
 const kickRegions = requireRegions(128, 0, 36, 100, 'Kick drum');
 const closedHatRegions = requireRegions(128, 0, 42, 100, 'Closed hi-hat');
@@ -62,6 +68,7 @@ for (const region of [
   ...nylonRegions,
   ...steelRegions,
   ...electricRegions.flat(),
+  ...bassRegions.flat(),
 ]) {
   for (const [name, value] of [
     ['keynumToVolEnvHold', region.keynumToVolEnvHold],
@@ -102,12 +109,14 @@ console.log(`Warm Pad preset: ${warmPad.name}`);
 console.log(`Nylon guitar preset: ${nylon.name}`);
 console.log(`Steel guitar preset: ${steel.name}`);
 console.log(`Electric guitar presets: ${electricPrograms.map((preset) => preset.name).join(' | ')}`);
+console.log(`Bass presets: ${bassPrograms.map((preset) => preset.name).join(' | ')}`);
 console.log(`Percussion preset: ${percussion.name}`);
 console.log(`Violin A4 regions: ${violinRegions.length}`);
 console.log(`Piano C4 regions: ${pianoRegions.length}`);
 console.log(`Warm Pad C4 regions: ${padRegions.length} (${padLooped.length} looped)`);
 console.log(`Nylon/Steel E4 regions: ${nylonRegions.length}/${steelRegions.length}`);
 console.log(`Electric E4 region counts: ${electricRegions.map((regions) => regions.length).join('/')}`);
+console.log(`Bass A1 region counts: ${bassRegions.map((regions) => regions.length).join('/')}`);
 console.log(`Kick regions: ${kickRegions.length}`);
 console.log(`Hi-hat regions closed/open: ${closedHatRegions.length}/${openHatRegions.length}`);
 console.log(`Hi-hat exclusive classes: ${hatExclusiveClasses.length ? hatExclusiveClasses.join(',') : 'none'}`);

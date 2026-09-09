@@ -7,7 +7,8 @@ export type AudioMixTarget =
   | 'violin.arco'
   | 'violin.pizzicato'
   | 'acoustic'
-  | 'electric';
+  | 'electric'
+  | 'bass';
 
 export interface AudioMixConfigFile {
   readonly schemaVersion: 1;
@@ -16,6 +17,7 @@ export interface AudioMixConfigFile {
   readonly programTrimDb: Readonly<{
     acoustic: Readonly<Record<string, number>>;
     electric: Readonly<Record<string, number>>;
+    bass: Readonly<Record<string, number>>;
   }>;
 }
 
@@ -25,6 +27,7 @@ export interface AudioMixProfile {
   readonly programTrimDb: Readonly<{
     acoustic: Readonly<Record<number, number>>;
     electric: Readonly<Record<number, number>>;
+    bass: Readonly<Record<number, number>>;
   }>;
 }
 
@@ -42,10 +45,12 @@ const MIX_TARGETS: readonly AudioMixTarget[] = Object.freeze([
   'violin.pizzicato',
   'acoustic',
   'electric',
+  'bass',
 ]);
 
 const ACOUSTIC_PROGRAMS = Object.freeze([24, 25] as const);
 const ELECTRIC_PROGRAMS = Object.freeze([26, 27, 28, 29, 30, 31] as const);
+const BASS_PROGRAMS = Object.freeze([33, 34, 36] as const);
 
 /**
  * Git-tracked source of truth for production mix calibration.
@@ -64,6 +69,7 @@ export const FLUID_R3_MIX_PROFILE: AudioMixProfile = Object.freeze({
   programTrimDb: Object.freeze({
     acoustic: toProgramTable(AUDIO_MIX_CONFIG.programTrimDb.acoustic, ACOUSTIC_PROGRAMS),
     electric: toProgramTable(AUDIO_MIX_CONFIG.programTrimDb.electric, ELECTRIC_PROGRAMS),
+    bass: toProgramTable(AUDIO_MIX_CONFIG.programTrimDb.bass, BASS_PROGRAMS),
   }),
 });
 
@@ -82,6 +88,7 @@ export function mixTrimComponents(
   if (program !== undefined) {
     if (target === 'acoustic') programTrimDb = profile.programTrimDb.acoustic[program] ?? 0;
     else if (target === 'electric') programTrimDb = profile.programTrimDb.electric[program] ?? 0;
+    else if (target === 'bass') programTrimDb = profile.programTrimDb.bass[program] ?? 0;
   }
   return {
     instrumentTrimDb,
@@ -121,12 +128,13 @@ function freezeConfig(input: AudioMixConfigFile): AudioMixConfigFile {
 
   const acoustic = freezeProgramConfig(input.programTrimDb.acoustic, ACOUSTIC_PROGRAMS, 'acoustic');
   const electric = freezeProgramConfig(input.programTrimDb.electric, ELECTRIC_PROGRAMS, 'electric');
+  const bass = freezeProgramConfig(input.programTrimDb.bass, BASS_PROGRAMS, 'bass');
 
   return Object.freeze({
     schemaVersion: 1,
     source: input.source,
     instrumentTrimDb: Object.freeze(instrumentTrimDb),
-    programTrimDb: Object.freeze({ acoustic, electric }),
+    programTrimDb: Object.freeze({ acoustic, electric, bass }),
   });
 }
 
