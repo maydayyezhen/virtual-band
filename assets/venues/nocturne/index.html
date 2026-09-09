@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#080b13" />
+  <link rel="icon" type="image/svg+xml" href="/virtual-band-icon.svg" />
+  <title>NOCTURNE · Venue Asset</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #080b13; color: #edf0f7; }
+    #viewport { position: fixed; inset: 0; touch-action: none; cursor: grab; }
+    #viewport.dragging { cursor: grabbing; }
+    #viewport canvas { display: block; width: 100%; height: 100%; }
+    .asset-ui { position: fixed; inset: 0; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; padding: 18px; }
+    .asset-head, .asset-controls, .asset-hint { pointer-events: auto; }
+    .asset-head { align-self: flex-start; padding: 11px 13px; border: 1px solid #ffffff1d; border-radius: 10px; background: #090e17c7; backdrop-filter: blur(14px); }
+    .eyebrow { font-size: 10px; letter-spacing: .18em; color: #8092a6; text-transform: uppercase; }
+    .name { margin-top: 3px; font-size: 15px; letter-spacing: .18em; font-weight: 650; }
+    .meta { margin-top: 5px; color: #93a3b5; font-size: 11px; }
+    .asset-bottom { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; }
+    .asset-hint { color: #9dacbd; font-size: 11px; line-height: 1.7; text-shadow: 0 1px 4px #000; }
+    .asset-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 520px; padding: 7px; border: 1px solid #ffffff1d; border-radius: 11px; background: #090e17d9; backdrop-filter: blur(16px); }
+    button { min-height: 34px; border: 1px solid #ffffff18; border-radius: 7px; padding: 6px 10px; color: #dce5ed; background: #ffffff08; font: inherit; font-size: 12px; cursor: pointer; }
+    button:hover { background: #ffffff13; }
+    button.active { border-color: #80dce458; background: #80dce416; color: #bdf5f5; }
+    #loading { position: fixed; inset: 0; display: grid; place-items: center; background: #080b13; z-index: 20; transition: opacity .6s; }
+    .loading-inner { text-align: center; }
+    .loading-name { font-size: 21px; letter-spacing: .32em; font-weight: 300; }
+    .loading-line { width: 160px; height: 1px; margin: 18px auto; overflow: hidden; background: #263b46; }
+    .loading-line::after { content: ""; display: block; width: 52px; height: 100%; background: #9fe2e7; animation: load 1.2s ease-in-out infinite; }
+    #loadingNote { color: #8fa0b3; font-size: 12px; }
+    @keyframes load { to { transform: translateX(160px); } }
+    #toast { position: fixed; left: 50%; bottom: 82px; transform: translate(-50%, 10px); opacity: 0; pointer-events: none; padding: 8px 12px; border: 1px solid #ffffff1f; border-radius: 7px; background: #0d1522e8; color: #dbe5ee; font-size: 12px; transition: .2s; z-index: 30; }
+    #toast.show { opacity: 1; transform: translate(-50%, 0); }
+    @media (max-width: 720px) { .asset-bottom { align-items: stretch; flex-direction: column; } .asset-controls { justify-content: flex-start; max-width: none; } .asset-hint { display: none; } }
+    @media (prefers-reduced-motion: reduce) { *, *::after { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+  <div id="viewport" tabindex="0" aria-label="NOCTURNE 场景资产预览。拖动环顾，滚轮缩放，WASD 移动，Q E 升降。"></div>
+  <div class="asset-ui">
+    <div class="asset-head">
+      <div class="eyebrow">Venue Asset / Interactive</div>
+      <div class="name">NOCTURNE</div>
+      <div class="meta">30 × 16 m stage · surface Y 1.2 m</div>
+    </div>
+    <div class="asset-bottom">
+      <div class="asset-hint">拖动环顾 · 滚轮变焦<br />WASD 移动 · Q / E 升降 · Shift 加速</div>
+      <div class="asset-controls" aria-label="NOCTURNE 资产控制">
+        <button type="button" data-mode="nocturne" class="active">夜色</button>
+        <button type="button" data-mode="aurora">极光</button>
+        <button type="button" data-mode="amber">琥珀</button>
+        <button type="button" data-mode="blackout">黑场</button>
+        <button type="button" id="demoToggle">停止演示</button>
+        <button type="button" id="pauseToggle">冻结动画</button>
+      </div>
+    </div>
+  </div>
+  <div id="toast" role="status"></div>
+  <div id="loading">
+    <div class="loading-inner">
+      <div class="loading-name">NOCTURNE</div>
+      <div class="loading-line"></div>
+      <div id="loadingNote">正在载入原始场景资产</div>
+    </div>
+  </div>
+  <script type="module" src="/src/assets/venues/nocturne/main.ts"></script>
+</body>
+</html>
