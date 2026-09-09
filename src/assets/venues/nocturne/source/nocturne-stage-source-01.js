@@ -1,0 +1,3 @@
+'use strict';
+window.__NOCTURNE_STAGE_SOURCE_PARTS__ = window.__NOCTURNE_STAGE_SOURCE_PARTS__ || [];
+window.__NOCTURNE_STAGE_SOURCE_PARTS__.push('PLACEHOLDER');
