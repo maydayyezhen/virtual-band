@@ -1,3 +1,5 @@
+import rawAudioMixConfig from '../../config/audio-mix.json' with { type: 'json' };
+
 export type AudioMixTarget =
   | 'drums'
   | 'keyboard.lower'
@@ -6,6 +8,16 @@ export type AudioMixTarget =
   | 'violin.pizzicato'
   | 'acoustic'
   | 'electric';
+
+export interface AudioMixConfigFile {
+  readonly schemaVersion: 1;
+  readonly source: string;
+  readonly instrumentTrimDb: Readonly<Record<AudioMixTarget, number>>;
+  readonly programTrimDb: Readonly<{
+    acoustic: Readonly<Record<string, number>>;
+    electric: Readonly<Record<string, number>>;
+  }>;
+}
 
 export interface AudioMixProfile {
   readonly source: string;
@@ -22,54 +34,36 @@ export interface AudioMixTrimComponents {
   readonly effectiveTrimDb: number;
 }
 
+const MIX_TARGETS: readonly AudioMixTarget[] = Object.freeze([
+  'drums',
+  'keyboard.lower',
+  'keyboard.upper',
+  'violin.arco',
+  'violin.pizzicato',
+  'acoustic',
+  'electric',
+]);
+
+const ACOUSTIC_PROGRAMS = Object.freeze([24, 25] as const);
+const ELECTRIC_PROGRAMS = Object.freeze([26, 27, 28, 29, 30, 31] as const);
+
 /**
- * Listening + harness calibration for FluidR3_GM.sf2 and the matching MP3
- * fallback sets. These trims are mix policy, not SoundFont semantics.
+ * Git-tracked source of truth for production mix calibration.
  *
- * Instrument trims establish ensemble/family gain staging. Program trims may
- * move either direction to compensate systematic preset loudness jumps inside
- * one instrument family. User volume, MIDI expression and performance dynamics
- * stay outside this table.
- *
- * The current guitar values intentionally use a conservative partial adoption
- * of the calibration report: strongly over-loud presets are attenuated, while
- * unusually quiet presets are only raised modestly instead of chasing exact
- * family LUFS parity. Final instrument balance belongs to real ensemble MIDI
- * listening rather than further standalone normalization.
+ * The developer mix tuner edits config/audio-mix.json directly. Runtime code
+ * consumes the same file, so a saved/committed tuning session is exactly what
+ * MIDI playback and showcase audio will use after reload/build.
  */
+export const AUDIO_MIX_CONFIG: AudioMixConfigFile = freezeConfig(
+  rawAudioMixConfig as unknown as AudioMixConfigFile,
+);
+
 export const FLUID_R3_MIX_PROFILE: AudioMixProfile = Object.freeze({
-  source: 'FluidR3_GM.sf2 / FluidR3 MP3 fallback',
-  instrumentTrimDb: Object.freeze({
-    drums: -2.0,
-    'keyboard.lower': -2.0,
-    'keyboard.upper': -4.0,
-    'violin.arco': -2.0,
-    'violin.pizzicato': -2.0,
-    // Standalone listening still placed the acoustic family too far forward.
-    // Lower the family as a unit so Nylon/Steel retain their calibrated
-    // relative balance; song-level MIDI mixing can move the whole family later.
-    acoustic: -6.0,
-    electric: -3.25,
-  }),
+  source: AUDIO_MIX_CONFIG.source,
+  instrumentTrimDb: AUDIO_MIX_CONFIG.instrumentTrimDb,
   programTrimDb: Object.freeze({
-    acoustic: Object.freeze({
-      // Keep the measured Nylon/Steel relationship while the family trim sets
-      // the overall acoustic-guitar level. Effective trims are now -7 / -5 dB.
-      24: -1.0,
-      25: 1.0,
-    }),
-    electric: Object.freeze({
-      // Do not chase the very quiet Jazz / Muted programs with the large
-      // positive gains suggested by exact LUFS matching. Instead keep boosts
-      // modest and mainly pull the loud Overdrive / Distortion / Harmonics
-      // programs toward the usable middle of the family.
-      26: 3.0,
-      27: 0.0,
-      28: 3.0,
-      29: -5.0,
-      30: -10.0,
-      31: -2.5,
-    }),
+    acoustic: toProgramTable(AUDIO_MIX_CONFIG.programTrimDb.acoustic, ACOUSTIC_PROGRAMS),
+    electric: toProgramTable(AUDIO_MIX_CONFIG.programTrimDb.electric, ELECTRIC_PROGRAMS),
   }),
 });
 
@@ -110,4 +104,55 @@ export function mixGain(
   profile: AudioMixProfile = FLUID_R3_MIX_PROFILE,
 ): number {
   return dbToGain(mixTrimDb(target, program, profile));
+}
+
+function freezeConfig(input: AudioMixConfigFile): AudioMixConfigFile {
+  if (input.schemaVersion !== 1) {
+    throw new Error(`Unsupported audio mix config schema: ${String(input.schemaVersion)}`);
+  }
+  if (typeof input.source !== 'string' || input.source.trim().length === 0) {
+    throw new Error('Audio mix config source must be a non-empty string');
+  }
+
+  const instrumentTrimDb = {} as Record<AudioMixTarget, number>;
+  for (const target of MIX_TARGETS) {
+    instrumentTrimDb[target] = finiteDb(input.instrumentTrimDb[target], `instrumentTrimDb.${target}`);
+  }
+
+  const acoustic = freezeProgramConfig(input.programTrimDb.acoustic, ACOUSTIC_PROGRAMS, 'acoustic');
+  const electric = freezeProgramConfig(input.programTrimDb.electric, ELECTRIC_PROGRAMS, 'electric');
+
+  return Object.freeze({
+    schemaVersion: 1,
+    source: input.source,
+    instrumentTrimDb: Object.freeze(instrumentTrimDb),
+    programTrimDb: Object.freeze({ acoustic, electric }),
+  });
+}
+
+function freezeProgramConfig(
+  input: Readonly<Record<string, number>>,
+  programs: readonly number[],
+  label: string,
+): Readonly<Record<string, number>> {
+  const output: Record<string, number> = {};
+  for (const program of programs) {
+    const key = String(program);
+    output[key] = finiteDb(input[key], `programTrimDb.${label}.${key}`);
+  }
+  return Object.freeze(output);
+}
+
+function toProgramTable(
+  input: Readonly<Record<string, number>>,
+  programs: readonly number[],
+): Readonly<Record<number, number>> {
+  const output: Record<number, number> = {};
+  for (const program of programs) output[program] = input[String(program)] ?? 0;
+  return Object.freeze(output);
+}
+
+function finiteDb(value: number, label: string): number {
+  if (!Number.isFinite(value)) throw new Error(`Audio mix config ${label} must be finite`);
+  return value;
 }

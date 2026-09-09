@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "source": "FluidR3_GM.sf2 / FluidR3 MP3 fallback",
+  "instrumentTrimDb": {
+    "drums": -2,
+    "keyboard.lower": -2,
+    "keyboard.upper": -4,
+    "violin.arco": -2,
+    "violin.pizzicato": -2,
+    "acoustic": -6,
+    "electric": -3.25
+  },
+  "programTrimDb": {
+    "acoustic": {
+      "24": -1,
+      "25": 1
+    },
+    "electric": {
+      "26": 3,
+      "27": 0,
+      "28": 3,
+      "29": -5,
+      "30": -10,
+      "31": -2.5
+    }
+  }
+}

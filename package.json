@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "dev:calibration": "vite --open /calibration.html",
+    "dev:mix": "vite --open /mix.html",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
@@ -20,6 +21,7 @@
     "three": "^0.169.0"
   },
   "devDependencies": {
+    "@types/node": "^22.15.0",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "@types/three": "^0.169.0",
