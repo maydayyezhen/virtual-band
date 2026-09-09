@@ -48,13 +48,13 @@ export const FLUID_R3_MIX_PROFILE: AudioMixProfile = Object.freeze({
     // Standalone listening still placed the acoustic family too far forward.
     // Lower the family as a unit so Nylon/Steel retain their calibrated
     // relative balance; song-level MIDI mixing can move the whole family later.
-    acoustic: -4.0,
+    acoustic: -6.0,
     electric: -3.25,
   }),
   programTrimDb: Object.freeze({
     acoustic: Object.freeze({
       // Keep the measured Nylon/Steel relationship while the family trim sets
-      // the overall acoustic-guitar level. Effective trims are now -5 / -3 dB.
+      // the overall acoustic-guitar level. Effective trims are now -7 / -5 dB.
       24: -1.0,
       25: 1.0,
     }),
