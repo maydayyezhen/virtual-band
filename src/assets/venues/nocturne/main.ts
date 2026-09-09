@@ -76,6 +76,7 @@ function bindAssetControls(stage: LightingStage, director: DustLightingDirector)
   for (const button of modeButtons) {
     button.addEventListener('click', () => {
       director.stop(false);
+      stage.setDemo(false);
       const mode = button.dataset.mode ?? 'nocturne';
       stage.setStageMode(mode);
       for (const candidate of modeButtons) candidate.classList.toggle('active', candidate === button);
@@ -98,7 +99,12 @@ function bindAssetControls(stage: LightingStage, director: DustLightingDirector)
   const demoToggle = document.getElementById('demoToggle') as HTMLButtonElement | null;
   demoToggle?.addEventListener('click', () => {
     director.stop(false);
-    stage.setDemo(!stage.demo);
+    if (stage.demo) {
+      stage.setDemo(false);
+    } else {
+      stage.setStageMode('nocturne');
+      stage.setDemo(true);
+    }
     if (demoToggle) demoToggle.textContent = stage.demo ? '停止演示' : '开始演示';
   });
 
