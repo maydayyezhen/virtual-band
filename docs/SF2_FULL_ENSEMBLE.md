@@ -1,6 +1,6 @@
 # SF2 Full-Ensemble Routing
 
-The `experiment/sf2-backend` branch routes the full playable ensemble through one shared SoundFont bank while keeping the existing MP3 sample path as fallback.
+V2 routes the full playable ensemble through one shared SoundFont bank while keeping the existing MP3 sample path as fallback.
 
 ## Shared-bank architecture
 

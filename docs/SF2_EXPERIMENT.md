@@ -1,12 +1,12 @@
-# SF2 backend experiment
+# SF2 backend
 
-This branch tests a native TypeScript/Web Audio SoundFont 2 engine behind the V2 sampler boundaries. It began as a violin sustain experiment and now covers the full playable ensemble plus dynamic filter/envelope/LFO behavior.
+This native TypeScript/Web Audio SoundFont 2 engine was developed behind the V2 sampler boundaries on `experiment/sf2-backend`. It began as a violin sustain experiment and now covers the full playable ensemble plus dynamic filter/envelope/LFO behavior.
 
-## Current goal
+## Production status
 
-The experiment is no longer just proving that an `.sf2` file can be decoded. The current target is a musically usable backend with correct note lifecycle, SoundFont volume/filter/modulation envelopes, internal LFO behavior, default velocity response, sustain loops, percussion choking and instrument-level performance tuning.
+The backend provides musically usable note lifecycle, SoundFont volume/filter/modulation envelopes, internal LFO behavior, default velocity response, sustain loops, percussion choking and instrument-level performance tuning.
 
-The production decision remains gated on listening quality and runtime cost. `architecture-v2` is not modified until explicit promotion.
+The backend was promoted into `architecture-v2` after automated verification and browser listening acceptance. MP3 samples remain available as runtime fallback.
 
 ## Get the test SoundFont
 
@@ -93,17 +93,15 @@ Useful regression targets:
 
 - `docs/SF2_AUDIO_ENGINE.md`: engine architecture, DSP/modulation semantics and missing features.
 - `docs/SF2_FULL_ENSEMBLE.md`: instrument routing and ensemble behavior.
-- `docs/ARCHITECTURE_V2.md`: V2 ownership rules and experimental SF2 boundary.
+- `docs/ARCHITECTURE_V2.md`: V2 ownership rules and the production SF2 boundary.
 
-## Promotion gate
+## Promotion record
 
-Before merging any part of this experiment into `architecture-v2`:
+The backend was approved for promotion on 2026-09-09 after confirming:
 
-1. `npm run build` passes;
-2. `npm run sf2:verify` passes against the exact FluidR3 binary;
-3. guitar repeated-strum behavior remains audibly controlled;
-4. violin/Pad long-note behavior remains correct;
-5. filter/LFO changes improve realism without unstable gain or CPU use;
-6. default velocity response is musically acceptable across drums, piano, strings and guitars;
-7. branch diff contains no temporary validation workflow or unrelated architecture edits;
-8. documentation matches the actual support boundary.
+1. `npm run build` and `npm run sf2:verify` pass against the exact FluidR3 binary;
+2. audio mix and calibration verification pass;
+3. guitar repeated-strum and violin/Pad long-note behavior remain controlled;
+4. filter/LFO behavior, default velocity response and ensemble balance are musically acceptable;
+5. the final branch contains no temporary validation workflow;
+6. documentation matches the promoted support boundary.

@@ -1,6 +1,6 @@
 # SF2 Audio Engine
 
-This document describes the native TypeScript/Web Audio SoundFont 2 path on `experiment/sf2-backend`. The branch keeps the V2 ownership rules intact: 3D instrument adapters emit musical intent, samplers own instrument semantics, and the SF2 engine remains an audio backend rather than leaking into donor geometry or UI code.
+This document describes the native TypeScript/Web Audio SoundFont 2 path in V2. The implementation keeps the V2 ownership rules intact: 3D instrument adapters emit musical intent, samplers own instrument semantics, and the SF2 engine remains an audio backend rather than leaking into donor geometry or UI code.
 
 ## Runtime boundary
 

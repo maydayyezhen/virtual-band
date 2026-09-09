@@ -20,9 +20,9 @@ npm run typecheck
 npm run build
 ```
 
-## Current milestone
+## Current runtime
 
-Phase 1 establishes the runtime boundaries only:
+V2 now provides:
 
 - one Three.js renderer and scene
 - one requestAnimationFrame loop
@@ -32,7 +32,10 @@ Phase 1 establishes the runtime boundaries only:
 - one Camera registry and output camera
 - Show scheduler plus control ownership arbiter
 - React UI that only subscribes to app state
+- playable drums, keyboard, violin, electric guitar and acoustic guitar
+- a shared native SF2 audio backend with MP3 fallback
+- audio calibration and mix-tuning development tools
 
-No legacy instruments, NOCTURNE source, MIDI parser, lighting show, LED tests, camera patches, or old UI are loaded yet.
+The old runtime, camera patches, bootstrap chain and UI are not loaded. Reused donor geometry and authored animation behavior remain isolated behind V2 instrument adapters.
 
 See `docs/ARCHITECTURE_V2.md` for the rules that future work must preserve.

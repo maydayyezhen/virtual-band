@@ -15,8 +15,8 @@ VirtualBandApp
 ├── Transport
 ├── AudioEngine
 ├── SampleLibrary
-├── Sf2BankLibrary              experiment/sf2-backend
-├── instrument audio backends   experiment/sf2-backend
+├── Sf2BankLibrary
+├── instrument audio backends
 ├── InstrumentRegistry
 ├── InstrumentInteractionSystem
 ├── VenueManager
@@ -28,7 +28,7 @@ VirtualBandApp
 └── AppState
 ```
 
-`Sf2BankLibrary` and the SF2 backends shown above are currently experimental branch additions. They do not imply that `architecture-v2` has already adopted SF2.
+`Sf2BankLibrary` and the SF2 backends are part of the V2 runtime. Samplers prefer SF2 when the shared bank is ready and retain the existing MP3 path as fallback.
 
 ## Non-negotiable rules
 
@@ -86,15 +86,15 @@ Instrument adapter
 Sampler
         ↓ instrument policy
 Audio backend
-   ├── MP3 sample path
-   └── SF2 path (experiment)
+   ├── SF2 path (preferred)
+   └── MP3 sample path (fallback)
         ↓
 AudioEngine
 ```
 
 `SampleLibrary` owns MP3 path construction support, fetch/decode and decoded-buffer caching. Samplers own instrument-specific program, articulation, sustain, pitch, tone/effect, gesture and voice semantics.
 
-On `experiment/sf2-backend`, `Sf2BankLibrary` owns shared SoundFont fetch/parse work; `Sf2Synth` owns SoundFont voice DSP; `ProgramToneBackend`/specialized sustain backends form the sampler-facing boundary. Parser and synth code must not know about Three.js donors, camera state or UI.
+`Sf2BankLibrary` owns shared SoundFont fetch/parse work; `Sf2Synth` owns SoundFont voice DSP; `ProgramToneBackend`/specialized sustain backends form the sampler-facing boundary. Parser and synth code must not know about Three.js donors, camera state or UI.
 
 Performance profiles are intentionally above the parser/synth layer:
 
@@ -170,6 +170,6 @@ The following must not be copied into V2 runtime:
 7. SongAnalysis + ShowPlan + lighting/screen channels.
 8. Practice/free-play features and production UI when needed.
 
-Experimental audio-engine work may proceed on a separate branch in parallel, but promotion back to `architecture-v2` requires a clean, reviewed boundary and passing build/behavior validation.
+Future experimental audio-engine work may proceed on separate branches, but promotion into `architecture-v2` requires a clean, reviewed boundary and passing build/behavior validation.
 
 Each milestone must remain directly runnable before moving to the next one.

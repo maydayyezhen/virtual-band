@@ -1,6 +1,6 @@
 # Audio Mix Calibration
 
-This document defines the loudness-calibration boundary for the V2 audio runtime on `experiment/sf2-backend`.
+This document defines the loudness-calibration boundary for the V2 audio runtime.
 
 The goal is deliberately narrow: keep preset-to-preset and instrument-to-instrument baseline loudness coherent without changing SoundFont semantics, articulation, dynamics or user controls.
 
