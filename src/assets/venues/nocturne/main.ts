@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { DustLightingDirector, type DustLightingStatus, type LightingStage } from './lighting/DustLightingDirector';
-import dustMidiUrl from './lighting/dust.json.gz?url';
+import dustMidiInlineUrl from './lighting/dust.json.gz?inline';
 import sourcePart01 from './source/nocturne-stage-source-01.js?raw';
 import sourcePart02 from './source/nocturne-stage-source-02.js?raw';
 import sourcePart03 from './source/nocturne-stage-source-03.js?raw';
@@ -116,12 +116,29 @@ function bindAssetControls(stage: LightingStage, director: DustLightingDirector)
   });
 }
 
+function inlineDustBytes(): Uint8Array {
+  const encoded = dustMidiInlineUrl.match(/^data:[^,]*;base64,(.+)$/)?.[1];
+  if (!encoded) throw new Error('Dust MIDI 内联资产格式无效');
+  const raw = atob(encoded);
+  const bytes = new Uint8Array(raw.length);
+  for (let index = 0; index < raw.length; index += 1) bytes[index] = raw.charCodeAt(index);
+  return bytes;
+}
+
 async function createDustDirector(stage: LightingStage): Promise<DustLightingDirector> {
   const nativeFetch = window.fetch.bind(window);
+  const dustBytes = inlineDustBytes();
   const routedFetch: typeof window.fetch = (input, init) => {
     const requested = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    if (requested === '/nocturne-lighting/dust.json.gz' || requested.endsWith('/nocturne-lighting/dust.json.gz')) {
-      return nativeFetch(dustMidiUrl, init);
+    if (requested.includes('dust.json.gz')) {
+      return Promise.resolve(new Response(dustBytes.slice(), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/gzip',
+          'Content-Length': String(dustBytes.byteLength),
+          'Cache-Control': 'no-store',
+        },
+      }));
     }
     return nativeFetch(input, init);
   };
