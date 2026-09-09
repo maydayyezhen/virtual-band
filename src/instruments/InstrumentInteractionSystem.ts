@@ -6,12 +6,18 @@ export interface InstrumentHit {
   partId: string;
 }
 
+interface PendingFingeringClick {
+  hit: InstrumentHit;
+  velocity: number;
+}
+
 export class InstrumentInteractionSystem {
   private readonly element: HTMLCanvasElement;
   private readonly camera: THREE.Camera;
   private readonly instruments: InstrumentRegistry;
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
+  private readonly pendingFingeringClicks = new Map<number, PendingFingeringClick>();
   private previewHit: InstrumentHit | null = null;
 
   constructor(options: {
@@ -24,6 +30,8 @@ export class InstrumentInteractionSystem {
     this.instruments = options.instruments;
     this.element.addEventListener('pointermove', this.onPreviewPointerMove);
     this.element.addEventListener('pointerdown', this.onPreviewPointerDown);
+    this.element.addEventListener('pointerup', this.onPreviewPointerUp);
+    this.element.addEventListener('pointercancel', this.onPreviewPointerCancel);
     this.element.addEventListener('pointerleave', this.onPreviewPointerLeave);
   }
 
@@ -84,6 +92,34 @@ export class InstrumentInteractionSystem {
     });
   }
 
+  beginFingeringClick(event: PointerEvent, hit: InstrumentHit | null, velocity: number): boolean {
+    if (event.pointerType !== 'mouse' || !isFingeringHit(hit)) return false;
+    this.pendingFingeringClicks.set(event.pointerId, { hit, velocity });
+    return true;
+  }
+
+  hasPendingFingeringClick(pointerId: number): boolean {
+    return this.pendingFingeringClicks.has(pointerId);
+  }
+
+  finishFingeringClick(event: PointerEvent): boolean {
+    const pending = this.pendingFingeringClicks.get(event.pointerId);
+    if (!pending) return false;
+    this.pendingFingeringClicks.delete(event.pointerId);
+
+    if (event.type !== 'pointerup') return true;
+    const releaseHit = this.hitTest(event.clientX, event.clientY, pending.hit.instrumentId);
+    if (!isSameInstrumentHit(pending.hit, releaseHit)) return true;
+
+    this.dispatch(pending.hit, 'start', pending.velocity);
+    this.dispatch(pending.hit, 'end', pending.velocity);
+    return true;
+  }
+
+  cancelFingeringClicks(): void {
+    this.pendingFingeringClicks.clear();
+  }
+
   allowsDragRetarget(hit: InstrumentHit): boolean {
     const instrument = this.instruments.get(hit.instrumentId);
     return instrument?.interactionDragBehavior?.(hit.partId) !== 'lock';
@@ -92,7 +128,10 @@ export class InstrumentInteractionSystem {
   dispose(): void {
     this.element.removeEventListener('pointermove', this.onPreviewPointerMove);
     this.element.removeEventListener('pointerdown', this.onPreviewPointerDown);
+    this.element.removeEventListener('pointerup', this.onPreviewPointerUp);
+    this.element.removeEventListener('pointercancel', this.onPreviewPointerCancel);
     this.element.removeEventListener('pointerleave', this.onPreviewPointerLeave);
+    this.cancelFingeringClicks();
     this.setPreview(null);
   }
 
@@ -101,7 +140,19 @@ export class InstrumentInteractionSystem {
     this.setPreview(this.hitTest(event.clientX, event.clientY));
   };
 
-  private readonly onPreviewPointerDown = (): void => this.setPreview(null);
+  private readonly onPreviewPointerDown = (event: PointerEvent): void => {
+    const hit = event.pointerType === 'mouse'
+      ? this.hitTest(event.clientX, event.clientY)
+      : null;
+    this.setPreview(isFingeringHit(hit) ? hit : null);
+  };
+
+  private readonly onPreviewPointerUp = (event: PointerEvent): void => {
+    if (event.pointerType !== 'mouse') return;
+    this.setPreview(this.hitTest(event.clientX, event.clientY));
+  };
+
+  private readonly onPreviewPointerCancel = (): void => this.setPreview(null);
   private readonly onPreviewPointerLeave = (): void => this.setPreview(null);
 
   private setPreview(hit: InstrumentHit | null): void {
@@ -126,4 +177,12 @@ function isRenderedVisible(object: THREE.Object3D): boolean {
     node = node.parent;
   }
   return true;
+}
+
+function isFingeringHit(hit: InstrumentHit | null): hit is InstrumentHit {
+  return Boolean(hit && /^(?:fret|finger):/.test(hit.partId));
+}
+
+function isSameInstrumentHit(a: InstrumentHit, b: InstrumentHit | null): boolean {
+  return a.instrumentId === b?.instrumentId && a.partId === b.partId;
 }

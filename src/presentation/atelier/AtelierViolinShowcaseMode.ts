@@ -231,13 +231,14 @@ export class AtelierViolinShowcaseMode implements PresentationMode {
       mode: hit ? 'play' : (event.shiftKey || event.button !== 0 ? 'pan' : 'orbit'),
       hit: null,
     };
+    const pendingFingeringClick = this.interactions.beginFingeringClick(event, hit, 99);
     this.pointers.set(event.pointerId, pointer);
     this.element.setPointerCapture(event.pointerId);
     this.momentumX = 0;
     this.momentumY = 0;
     this.previousGesture = null;
-    if (hit) this.playHit(pointer, hit);
-    else this.element.classList.add('dragging');
+    if (!hit) this.element.classList.add('dragging');
+    else if (!pendingFingeringClick) this.playHit(pointer, hit);
   };
 
   private readonly onPointerMove = (event: PointerEvent): void => {
@@ -257,6 +258,7 @@ export class AtelierViolinShowcaseMode implements PresentationMode {
     pointer.y = event.clientY;
 
     if (pointer.mode === 'play') {
+      if (this.interactions.hasPendingFingeringClick(event.pointerId)) return;
       if (pointer.hit && !this.interactions.allowsDragRetarget(pointer.hit)) return;
       this.playHit(pointer, this.interactions.hitTest(event.clientX, event.clientY, this.violin.id));
       return;
@@ -288,7 +290,8 @@ export class AtelierViolinShowcaseMode implements PresentationMode {
 
   private readonly onPointerEnd = (event: PointerEvent): void => {
     const pointer = this.pointers.get(event.pointerId);
-    if (pointer) this.releaseHit(pointer);
+    const fingeringClickFinished = this.interactions.finishFingeringClick(event);
+    if (pointer && !fingeringClickFinished) this.releaseHit(pointer);
     this.pointers.delete(event.pointerId);
     this.previousGesture = null;
     if (![...this.pointers.values()].some((item) => item.mode !== 'play')) {
@@ -390,6 +393,7 @@ export class AtelierViolinShowcaseMode implements PresentationMode {
   }
 
   private releaseInputState(): void {
+    this.interactions.cancelFingeringClicks();
     for (const pointer of this.pointers.values()) this.releaseHit(pointer);
     for (const held of this.computerKeys.values()) this.violin.noteOff(held.note);
     this.computerKeys.clear();
