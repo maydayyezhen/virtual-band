@@ -8,7 +8,7 @@ import legacyPart05 from './nocturne-legacy/nocturne-stage-source-05.js?raw';
 import legacyPart06 from './nocturne-legacy/nocturne-stage-source-06.js?raw';
 import legacyPart07 from './nocturne-legacy/nocturne-stage-source-07.js?raw';
 
-const LEGACY_SOURCE_LENGTH = 42_892;
+const LEGACY_SOURCE_LENGTH = 127_767;
 const LEGACY_STAGE_SURFACE_Y = 1.2;
 const legacyParts = [
   legacyPart01,
