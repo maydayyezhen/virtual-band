@@ -341,8 +341,7 @@ export class PhysicalLightingExecutor {
   }
 
   private songTime(): number {
-    const value = this.director?.currentTime?.();
-    return Number.isFinite(value) ? Number(value) : 0;
+    return finite(this.director?.currentTime?.(), 0);
   }
 
   private captureFutureCue(cueIndex: number, cueTime: number): void {
