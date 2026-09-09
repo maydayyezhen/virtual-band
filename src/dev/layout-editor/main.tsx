@@ -1,9 +1,11 @@
 import { createRoot } from 'react-dom/client';
 import { LayoutEditorApp } from './LayoutEditorApp';
+import { installLayoutEditorCameraPan } from './LayoutEditorCameraPan';
 import { installNocturneStaticBackdrop } from './NocturneStaticBackdrop';
 import './layout-editor.css';
 
 installNocturneStaticBackdrop();
+installLayoutEditorCameraPan();
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Layout editor root is missing');
