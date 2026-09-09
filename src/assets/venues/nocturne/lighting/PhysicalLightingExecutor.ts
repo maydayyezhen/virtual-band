@@ -3,6 +3,13 @@ import type { LightingStage } from './DustLightingDirector';
 
 type FixturePatch = Record<string, unknown>;
 
+type ScanPatch = {
+  pan: number;
+  tilt: number;
+  speed: number;
+  phase: number;
+};
+
 type RawFixture = {
   id: string;
   type: string;
@@ -45,12 +52,24 @@ type EffectState = {
   active: boolean;
 };
 
+type ScanBlendState = {
+  fromPan: number;
+  fromTilt: number;
+  to: ScanPatch | null;
+  speed: number;
+  phase: number;
+  startedAt: number;
+  duration: number;
+  active: boolean;
+};
+
 type WrappedFixture = {
   raw: RawFixture;
   originalSet: (patch: FixturePatch, duration?: number) => unknown;
   motion: MotionState;
   plan: MotionPlan | null;
   effect: EffectState;
+  scanBlend: ScanBlendState;
 };
 
 type DirectorInternals = {
@@ -70,7 +89,9 @@ const ANGLE_SPEED = 90;
 const ANGLE_ACCEL = 320;
 const DISTANCE_SPEED = 100;
 const DISTANCE_ACCEL = 280;
+const SCAN_BLEND_SECONDS = 0.32;
 const EPSILON = 1e-4;
+const TAU = Math.PI * 2;
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 const finite = (value: unknown, fallback: number): number => Number.isFinite(Number(value)) ? Number(value) : fallback;
@@ -82,6 +103,18 @@ function readColor(value: unknown): THREE.Color {
   } catch {
     return new THREE.Color('#ffffff');
   }
+}
+
+function readScan(value: unknown): ScanPatch | null {
+  if (!value || typeof value !== 'object') return null;
+  const scan = value as Partial<ScanPatch>;
+  if (![scan.pan, scan.tilt, scan.speed, scan.phase].every((item) => Number.isFinite(Number(item)))) return null;
+  return {
+    pan: Number(scan.pan),
+    tilt: Number(scan.tilt),
+    speed: Number(scan.speed),
+    phase: Number(scan.phase),
+  };
 }
 
 function minTravelTime(distance: number, maxSpeed: number, maxAccel: number): number {
@@ -202,6 +235,7 @@ export class PhysicalLightingExecutor {
     const distance = finite(raw.state.distance, 48);
     const color = readColor(raw.state.color ?? '#ffffff');
     const intensity = finite(raw.state.intensity, 0);
+    const initialScan = readScan(raw.state.scan);
     const wrapped: WrappedFixture = {
       raw,
       originalSet,
@@ -218,6 +252,16 @@ export class PhysicalLightingExecutor {
         duration: 0,
         active: false,
       },
+      scanBlend: {
+        fromPan: initialScan?.pan ?? 0,
+        fromTilt: initialScan?.tilt ?? 0,
+        to: initialScan,
+        speed: initialScan?.speed ?? 0,
+        phase: initialScan?.phase ?? 0,
+        startedAt: 0,
+        duration: 0,
+        active: false,
+      },
     };
 
     raw.set = (patch: FixturePatch = {}, duration = 0) => {
@@ -230,31 +274,54 @@ export class PhysicalLightingExecutor {
   private handleSet(wrapped: WrappedFixture, patch: FixturePatch, duration: number): void {
     const now = this.songTime();
     this.advanceEffect(wrapped, now);
+    this.advanceScanBlend(wrapped, now);
     const { forwarded, controlled } = splitPatch(patch);
+    const hasMotion = ['pan', 'tilt', 'angle', 'distance', 'target'].some((key) => key in controlled);
+    const hasScan = 'scan' in controlled;
+
+    // Predictive cue capture is allowed to schedule only physical movement.
+    // It must not fire brightness/color/strobe/enabled changes before the musical cue actually happens.
+    if (this.captureArrival != null) {
+      if (hasMotion || hasScan) {
+        const target = hasMotion ? resolveMotionTarget(wrapped, controlled) : {
+          pan: wrapped.motion.pan,
+          tilt: wrapped.motion.tilt,
+          angle: wrapped.motion.angle,
+          distance: wrapped.motion.distance,
+        };
+        const scan = hasScan ? controlled.scan : readScan(wrapped.raw.state.scan);
+        this.scheduleMotion(wrapped, target, this.captureArrival, scan);
+      }
+      return;
+    }
 
     if (Object.keys(forwarded).length) wrapped.originalSet(forwarded, 0);
     if ('color' in controlled || 'intensity' in controlled) {
       this.startEffect(wrapped, controlled, Math.max(0, Number(duration) || 0), now);
     }
 
-    const hasMotion = ['pan', 'tilt', 'angle', 'distance', 'target'].some((key) => key in controlled);
-    if (!hasMotion && !('scan' in controlled)) return;
+    if (!hasMotion && hasScan) {
+      this.startScanBlend(wrapped, controlled.scan, now, Math.max(0.18, Math.min(Number(duration) || SCAN_BLEND_SECONDS, 0.5)));
+      return;
+    }
+    if (!hasMotion) return;
 
-    const target = hasMotion ? resolveMotionTarget(wrapped, controlled) : {
+    const target = resolveMotionTarget(wrapped, controlled);
+    const scan = hasScan ? controlled.scan : readScan(wrapped.raw.state.scan);
+
+    if (wrapped.plan && motionClose(wrapped.plan.target, target) && wrapped.plan.arriveAt <= now + 0.22) {
+      wrapped.plan.scan = scan;
+      return;
+    }
+
+    const currentTarget: MotionTarget = {
       pan: wrapped.motion.pan,
       tilt: wrapped.motion.tilt,
       angle: wrapped.motion.angle,
       distance: wrapped.motion.distance,
     };
-    const scan = 'scan' in controlled ? controlled.scan : wrapped.plan?.scan ?? null;
-
-    if (this.captureArrival != null) {
-      this.scheduleMotion(wrapped, target, this.captureArrival, scan);
-      return;
-    }
-
-    if (wrapped.plan && motionClose(wrapped.plan.target, target) && wrapped.plan.arriveAt <= now + 0.22) {
-      wrapped.plan.scan = scan;
+    if (!wrapped.plan && motionClose(currentTarget, target)) {
+      if (hasScan) this.startScanBlend(wrapped, scan, now, SCAN_BLEND_SECONDS);
       return;
     }
 
@@ -289,6 +356,67 @@ export class PhysicalLightingExecutor {
     if (k >= 1) effect.active = false;
   }
 
+  private startScanBlend(wrapped: WrappedFixture, value: unknown, now: number, duration = SCAN_BLEND_SECONDS): void {
+    const target = readScan(value);
+    const current = readScan(wrapped.raw.state.scan);
+    if (!current && !target) {
+      wrapped.scanBlend.active = false;
+      wrapped.originalSet({ scan: null }, 0);
+      return;
+    }
+
+    const stageTime = finite(this.stage.time, 0);
+    const speed = target?.speed ?? current?.speed ?? 0;
+    let phase = target?.phase ?? current?.phase ?? 0;
+    if (current && target) {
+      const absolutePhase = stageTime * TAU * current.speed + current.phase;
+      phase = absolutePhase - stageTime * TAU * speed;
+    }
+
+    wrapped.scanBlend = {
+      fromPan: current?.pan ?? 0,
+      fromTilt: current?.tilt ?? 0,
+      to: target,
+      speed,
+      phase,
+      startedAt: now,
+      duration: Math.max(0, duration),
+      active: duration > 0.001,
+    };
+
+    if (!wrapped.scanBlend.active) {
+      wrapped.originalSet({ scan: target ? { ...target, speed, phase } : null }, 0);
+      return;
+    }
+
+    // Switching the oscillator's speed/phase is position-continuous here; amplitude starts at the current value.
+    wrapped.originalSet({ scan: {
+      pan: current?.pan ?? 0,
+      tilt: current?.tilt ?? 0,
+      speed,
+      phase,
+    } }, 0);
+  }
+
+  private advanceScanBlend(wrapped: WrappedFixture, now: number): void {
+    const blend = wrapped.scanBlend;
+    if (!blend.active) return;
+    const k = clamp((now - blend.startedAt) / Math.max(blend.duration, 0.001), 0, 1);
+    const eased = k * k * (3 - 2 * k);
+    const toPan = blend.to?.pan ?? 0;
+    const toTilt = blend.to?.tilt ?? 0;
+    const scan: ScanPatch = {
+      pan: blend.fromPan + (toPan - blend.fromPan) * eased,
+      tilt: blend.fromTilt + (toTilt - blend.fromTilt) * eased,
+      speed: blend.speed,
+      phase: blend.phase,
+    };
+    wrapped.originalSet({ scan }, 0);
+    if (k < 1) return;
+    blend.active = false;
+    wrapped.originalSet({ scan: blend.to ? scan : null }, 0);
+  }
+
   private scheduleMotion(wrapped: WrappedFixture, target: MotionTarget, arriveAt: number, scan: unknown): void {
     const travel = estimateTravel(wrapped.motion, target);
     wrapped.plan = {
@@ -300,13 +428,18 @@ export class PhysicalLightingExecutor {
     };
   }
 
-  private startPlan(wrapped: WrappedFixture): void {
+  private startPlan(wrapped: WrappedFixture, now: number): void {
     const plan = wrapped.plan;
     if (!plan || plan.started) return;
+    this.advanceScanBlend(wrapped, now);
+
+    // Freeze the beam exactly where it is visually before taking control away from the scan oscillator.
+    // This avoids the classic scan -> base-position snap at the beginning of a move.
     const currentPan = finite(wrapped.raw.effective?.pan, wrapped.motion.pan);
     const currentTilt = finite(wrapped.raw.effective?.tilt, wrapped.motion.tilt);
     wrapped.motion.pan = currentPan;
     wrapped.motion.tilt = currentTilt;
+    wrapped.scanBlend.active = false;
     wrapped.originalSet({ pan: currentPan, tilt: currentTilt, angle: wrapped.motion.angle, distance: wrapped.motion.distance, scan: null }, 0);
     plan.started = true;
   }
@@ -314,7 +447,7 @@ export class PhysicalLightingExecutor {
   private updateMotion(wrapped: WrappedFixture, now: number, dt: number): void {
     const plan = wrapped.plan;
     if (!plan || now + 0.0001 < plan.startAt) return;
-    this.startPlan(wrapped);
+    this.startPlan(wrapped, now);
     const remaining = Math.max(plan.arriveAt - now, 0.045);
     const m = wrapped.motion;
 
@@ -336,8 +469,13 @@ export class PhysicalLightingExecutor {
     m.angle = plan.target.angle;
     m.distance = plan.target.distance;
     m.vPan = m.vTilt = m.vAngle = m.vDistance = 0;
-    wrapped.originalSet({ pan: m.pan, tilt: m.tilt, angle: m.angle, distance: m.distance, scan: plan.scan ?? null }, 0);
+    const nextScan = plan.scan;
+    wrapped.originalSet({ pan: m.pan, tilt: m.tilt, angle: m.angle, distance: m.distance, scan: null }, 0);
     wrapped.plan = null;
+
+    // A preset scan is never switched on at full amplitude. Start from zero amplitude and grow into it.
+    // Therefore reaching a cue cannot make the beam teleport by +/- scanPan or +/- scanTilt.
+    this.startScanBlend(wrapped, nextScan, now, SCAN_BLEND_SECONDS);
   }
 
   private songTime(): number {
@@ -382,6 +520,7 @@ export class PhysicalLightingExecutor {
     this.predict(now);
     for (const wrapped of this.wrapped.values()) {
       this.advanceEffect(wrapped, now);
+      this.advanceScanBlend(wrapped, now);
       this.updateMotion(wrapped, now, dt);
     }
     this.frame = requestAnimationFrame(this.tick);
