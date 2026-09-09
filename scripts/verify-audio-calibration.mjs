@@ -43,21 +43,34 @@ assert.equal(silence.value, Number.NEGATIVE_INFINITY);
 assert.equal(silence.windowCount, 0);
 
 // Family-relative planning is verified with a captured electric-guitar data set.
-// The family target starts at the median measured loudness, then moves downward
-// only when a quiet preset cannot safely reach that center without exceeding the
-// sample-peak ceiling.
+// Keep the captured trim state explicit so production mix tuning can change
+// without invalidating the planner's deterministic policy test.
+const capturedElectricMix = {
+  instrumentTrimDb: -3.25,
+  programTrimDb: {
+    26: 1.5,
+    27: 0,
+    28: 3,
+    29: -2,
+    30: -3,
+    31: 1,
+  },
+};
 const electricRows = [
-  ['electric.26', -26.79, -14.48],
-  ['electric.27', -21.70, -7.66],
-  ['electric.28', -32.74, -15.36],
-  ['electric.29', -16.10, -5.05],
-  ['electric.30', -11.02, -1.58],
-  ['electric.31', -15.91, -5.95],
+  ['electric.26', -26.79, -14.48, 26],
+  ['electric.27', -21.70, -7.66, 27],
+  ['electric.28', -32.74, -15.36, 28],
+  ['electric.29', -16.10, -5.05, 29],
+  ['electric.30', -11.02, -1.58, 30],
+  ['electric.31', -15.91, -5.95, 31],
 ];
 const electricResults = Object.fromEntries(
-  electricRows.map(([targetId, lufs, peakDbfs]) => [
+  electricRows.map(([targetId, lufs, peakDbfs, program]) => [
     targetId,
-    fakeResult(targetId, lufs, peakDbfs),
+    fakeResult(targetId, lufs, peakDbfs, {
+      instrumentTrimDb: capturedElectricMix.instrumentTrimDb,
+      programTrimDb: capturedElectricMix.programTrimDb[program],
+    }),
   ]),
 );
 const electricPlan = buildCalibrationPlan(electricResults, -22);
@@ -98,16 +111,17 @@ assert.ok(Math.abs(drums.diagnosticDeltaDb - 5.32) < 1e-9);
 
 console.log('Audio calibration math and family-plan verification passed');
 
-function fakeResult(targetId, integratedLufs, peakDbfs) {
+function fakeResult(targetId, integratedLufs, peakDbfs, mixOverride) {
   const target = calibrationTarget(targetId);
-  const mix = currentCalibrationMix(target);
+  const mix = mixOverride ?? currentCalibrationMix(target);
+  const currentTrimDb = mix.instrumentTrimDb + mix.programTrimDb;
   return {
     targetId,
     label: target.label,
     source: targetId === 'violin.pizzicato' ? 'MP3 fallback' : 'SF2',
     currentInstrumentTrimDb: mix.instrumentTrimDb,
     currentProgramTrimDb: mix.programTrimDb,
-    currentTrimDb: mix.effectiveTrimDb,
+    currentTrimDb,
     metrics: {
       integratedLufs,
       peakDbfs,

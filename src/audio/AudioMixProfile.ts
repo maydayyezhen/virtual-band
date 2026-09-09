@@ -23,7 +23,7 @@ export interface AudioMixTrimComponents {
 }
 
 /**
- * First-pass listening calibration for FluidR3_GM.sf2 and the matching MP3
+ * Listening + harness calibration for FluidR3_GM.sf2 and the matching MP3
  * fallback sets. These trims are mix policy, not SoundFont semantics.
  *
  * Instrument trims establish ensemble/family gain staging. Program trims may
@@ -31,9 +31,11 @@ export interface AudioMixTrimComponents {
  * one instrument family. User volume, MIDI expression and performance dynamics
  * stay outside this table.
  *
- * A positive program offset is not itself a clipping error. Safety is judged at
- * the effective output (including the shared instrument trim and measured peak
- * headroom), while the production profile remains deliberately conservative.
+ * The current guitar values intentionally use a conservative partial adoption
+ * of the calibration report: strongly over-loud presets are attenuated, while
+ * unusually quiet presets are only raised modestly instead of chasing exact
+ * family LUFS parity. Final instrument balance belongs to real ensemble MIDI
+ * listening rather than further standalone normalization.
  */
 export const FLUID_R3_MIX_PROFILE: AudioMixProfile = Object.freeze({
   source: 'FluidR3_GM.sf2 / FluidR3 MP3 fallback',
@@ -48,16 +50,22 @@ export const FLUID_R3_MIX_PROFILE: AudioMixProfile = Object.freeze({
   }),
   programTrimDb: Object.freeze({
     acoustic: Object.freeze({
-      24: 0.5,
-      25: 0.0,
+      // Harness family result was approximately -2.87 / -0.63 dB effective.
+      // Round to simple conservative values while keeping acoustic headroom.
+      24: -1.0,
+      25: 1.0,
     }),
     electric: Object.freeze({
-      26: 1.5,
+      // Do not chase the very quiet Jazz / Muted programs with the large
+      // positive gains suggested by exact LUFS matching. Instead keep boosts
+      // modest and mainly pull the loud Overdrive / Distortion / Harmonics
+      // programs toward the usable middle of the family.
+      26: 3.0,
       27: 0.0,
       28: 3.0,
-      29: -2.0,
-      30: -3.0,
-      31: 1.0,
+      29: -5.0,
+      30: -10.0,
+      31: -2.5,
     }),
   }),
 });
