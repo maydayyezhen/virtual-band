@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#080b13" />
   <link rel="icon" type="image/svg+xml" href="/virtual-band-icon.svg" />
-  <title>NOCTURNE · MIDI Lighting Experiment</title>
+  <title>NOCTURNE · MIDI Lighting + Audio Experiment</title>
   <style>
     :root { color-scheme: dark; font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif; }
     * { box-sizing: border-box; }
@@ -21,12 +21,16 @@
     .meta { margin-top: 5px; color: #93a3b5; font-size: 11px; }
     .asset-bottom { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; }
     .asset-hint { color: #9dacbd; font-size: 11px; line-height: 1.7; text-shadow: 0 1px 4px #000; }
-    .asset-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; max-width: 760px; padding: 7px; border: 1px solid #ffffff1d; border-radius: 11px; background: #090e17d9; backdrop-filter: blur(16px); }
+    .asset-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; max-width: 930px; padding: 7px; border: 1px solid #ffffff1d; border-radius: 11px; background: #090e17d9; backdrop-filter: blur(16px); }
     .divider { width: 1px; height: 24px; margin: 0 2px; background: #ffffff1a; }
     #dustStatus { min-width: 235px; padding: 0 6px; color: #c9a4a6; font-size: 11px; letter-spacing: .01em; }
+    #audioStatus { min-width: 126px; padding: 0 6px; color: #9fb5c7; font-size: 11px; }
+    #audioStatus[data-state="playing"] { color: #b9dfc2; }
+    #audioStatus[data-state="error"] { color: #f0a7aa; }
     button { min-height: 34px; border: 1px solid #ffffff18; border-radius: 7px; padding: 6px 10px; color: #dce5ed; background: #ffffff08; font: inherit; font-size: 12px; cursor: pointer; }
     button:hover { background: #ffffff13; }
     button.active { border-color: #c75d675c; background: #b8323c22; color: #ffd9da; }
+    button:disabled { opacity: .52; cursor: wait; }
     #loading { position: fixed; inset: 0; display: grid; place-items: center; background: #080b13; z-index: 20; transition: opacity .6s; }
     .loading-inner { text-align: center; }
     .loading-name { font-size: 21px; letter-spacing: .32em; font-weight: 300; }
@@ -36,7 +40,7 @@
     @keyframes load { to { transform: translateX(160px); } }
     #toast { position: fixed; left: 50%; bottom: 82px; transform: translate(-50%, 10px); opacity: 0; pointer-events: none; padding: 8px 12px; border: 1px solid #ffffff1f; border-radius: 7px; background: #0d1522e8; color: #dbe5ee; font-size: 12px; transition: .2s; z-index: 30; }
     #toast.show { opacity: 1; transform: translate(-50%, 0); }
-    @media (max-width: 820px) { .asset-bottom { align-items: stretch; flex-direction: column; } .asset-controls { justify-content: flex-start; max-width: none; } .asset-hint { display: none; } #dustStatus { width: 100%; min-width: 0; } .divider { display: none; } }
+    @media (max-width: 820px) { .asset-bottom { align-items: stretch; flex-direction: column; } .asset-controls { justify-content: flex-start; max-width: none; } .asset-hint { display: none; } #dustStatus, #audioStatus { width: 100%; min-width: 0; } .divider { display: none; } }
     @media (prefers-reduced-motion: reduce) { *, *::after { animation: none !important; transition: none !important; } }
   </style>
 </head>
@@ -53,14 +57,15 @@
   </div>
   <div class="asset-ui">
     <div class="asset-head">
-      <div class="eyebrow">Experiment / MIDI Lighting</div>
+      <div class="eyebrow">Experiment / MIDI Lighting + SF2 Audio</div>
       <div class="name">NOCTURNE · DUST</div>
       <div class="meta">Queen · Another One Bites the Dust · groove-noir arrangement</div>
     </div>
     <div class="asset-bottom">
-      <div class="asset-hint">Dust MIDI 数据驱动灯光 Cue<br />当前分支只有一个灯光控制器，不再和 Auto Show 抢灯</div>
-      <div class="asset-controls" aria-label="NOCTURNE MIDI 灯光实验控制">
+      <div class="asset-hint">Dust MIDI 同时驱动音频与灯光 Cue<br />点击播放后，以 Web Audio 时钟作为整场演出的时间基准</div>
+      <div class="asset-controls" aria-label="NOCTURNE MIDI 灯光与音频实验控制">
         <span id="dustStatus">正在载入 Dust MIDI 编排…</span>
+        <span id="audioStatus" data-state="loading">正在载入音源…</span>
         <button type="button" id="dustPlay">播放 Dust</button>
         <button type="button" id="dustRestart">从头重播</button>
         <span class="divider"></span>
@@ -78,7 +83,7 @@
     <div class="loading-inner">
       <div class="loading-name">NOCTURNE</div>
       <div class="loading-line"></div>
-      <div id="loadingNote">正在载入原始场景与 Dust MIDI 灯光编排</div>
+      <div id="loadingNote">正在载入场景、Dust MIDI 与灯光执行器</div>
     </div>
   </div>
   <script type="module" src="/src/assets/venues/nocturne/main.ts"></script>
