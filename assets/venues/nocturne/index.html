@@ -40,6 +40,15 @@
 </head>
 <body>
   <div id="viewport" tabindex="0" aria-label="NOCTURNE 场景资产预览。拖动环顾，滚轮缩放，WASD 移动，Q E 升降。"></div>
+  <div hidden aria-hidden="true">
+    <button id="demoButton" type="button"></button>
+    <button id="pauseButton" type="button"></button>
+    <input id="bpm" value="108" />
+    <input id="cameraAuto" type="checkbox" />
+    <span id="transportLabel"></span>
+    <span id="timecode"></span>
+    <span id="viewLabel"></span>
+  </div>
   <div class="asset-ui">
     <div class="asset-head">
       <div class="eyebrow">Venue Asset / Interactive</div>
