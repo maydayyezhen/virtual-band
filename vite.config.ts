@@ -10,6 +10,7 @@ export default defineConfig({
         'index.html',
         'assets/instruments/index.html',
         'assets/venues/index.html',
+        'assets/venues/nocturne/index.html',
         'studio/layout/index.html',
         'tools/audio/calibration/index.html',
         'tools/audio/mix/index.html',
