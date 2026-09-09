@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import {
   AudioCalibrationHarness,
   recommendCalibration,
@@ -13,7 +13,7 @@ import {
 type RunMode = 'idle' | 'single' | 'all' | 'audition';
 
 export function AudioCalibrationApp() {
-  const harness = useMemo(() => new AudioCalibrationHarness(), []);
+  const harnessRef = useRef<AudioCalibrationHarness | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const [selectedId, setSelectedId] = useState('electric.27');
   const [referenceLufs, setReferenceLufs] = useState(-22);
@@ -22,10 +22,20 @@ export function AudioCalibrationApp() {
   const [mode, setMode] = useState<RunMode>('idle');
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => () => {
-    abortRef.current?.abort();
-    harness.dispose();
-  }, [harness]);
+  useEffect(() => {
+    // The harness owns AudioContext/AudioWorklet resources, so it belongs to
+    // the committed effect lifetime rather than render-time memoization.
+    // React StrictMode intentionally tears effects down and mounts them again
+    // in development; each setup therefore receives a fresh live harness.
+    const harness = new AudioCalibrationHarness();
+    harnessRef.current = harness;
+
+    return () => {
+      abortRef.current?.abort();
+      if (harnessRef.current === harness) harnessRef.current = null;
+      harness.dispose();
+    };
+  }, []);
 
   const busy = mode !== 'idle';
   const selectedTarget = calibrationTarget(selectedId);
@@ -34,6 +44,12 @@ export function AudioCalibrationApp() {
     ? recommendCalibration(selectedResult, referenceLufs)
     : null;
 
+  const getHarness = (): AudioCalibrationHarness => {
+    const harness = harnessRef.current;
+    if (!harness) throw new Error('Audio calibration harness is not ready');
+    return harness;
+  };
+
   const runOne = async (targetId = selectedId): Promise<void> => {
     if (busy) return;
     setMode('single');
@@ -41,7 +57,7 @@ export function AudioCalibrationApp() {
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      const result = await harness.runTarget(targetId, {
+      const result = await getHarness().runTarget(targetId, {
         signal: controller.signal,
         onProgress: setProgress,
       });
@@ -63,6 +79,7 @@ export function AudioCalibrationApp() {
     const controller = new AbortController();
     abortRef.current = controller;
     try {
+      const harness = getHarness();
       for (const target of CALIBRATION_TARGETS) {
         if (controller.signal.aborted) break;
         setSelectedId(target.id);
@@ -88,7 +105,7 @@ export function AudioCalibrationApp() {
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      await harness.audition(
+      await getHarness().audition(
         selectedId,
         auditionMode,
         selectedResult,
