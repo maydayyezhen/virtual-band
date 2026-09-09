@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react(), audioMixDevPlugin()],
   build: {
     rollupOptions: {
-      input: ['index.html', 'calibration.html', 'mix.html'],
+      input: ['index.html', 'calibration.html', 'mix.html', 'layout.html'],
     },
   },
 });

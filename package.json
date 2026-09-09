@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "mix:verify": "node --experimental-strip-types scripts/verify-audio-mix.mjs",
     "calibration:verify": "node --experimental-strip-types scripts/verify-audio-calibration.mjs",
+    "layout:verify": "node --experimental-strip-types scripts/verify-layout-document.mjs",
     "sf2:fetch": "node scripts/fetch-fluidr3-sf2.mjs",
     "sf2:verify": "node --experimental-strip-types scripts/verify-sf2-parser.mjs"
   },
