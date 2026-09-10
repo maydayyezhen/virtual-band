@@ -145,6 +145,7 @@ export class DustAudioPlayer {
     const context = this.audio.getContext();
     this.contextStart = context.currentTime - this.position;
     this.playing = true;
+    this.resumeActiveNotes(this.position);
     this.lastStatusAt = 0;
     this.emit('playing', '播放中 · SF2');
     if (!this.frame) this.frame = requestAnimationFrame(this.tick);
@@ -158,6 +159,24 @@ export class DustAudioPlayer {
     this.backend.reset();
     this.seekPointers(this.position);
     this.emit('paused', '已暂停 · SF2');
+  }
+
+  seek(time: number): void {
+    const target = clamp(Number.isFinite(time) ? time : 0, 0, this.duration);
+    const wasPlaying = this.playing;
+    this.position = target;
+    this.backend.reset();
+    this.seekPointers(target);
+
+    if (wasPlaying) {
+      const context = this.audio.getContext();
+      this.contextStart = context.currentTime - target;
+      this.resumeActiveNotes(target);
+      this.emit('playing', '已定位 · SF2');
+      if (!this.frame) this.frame = requestAnimationFrame(this.tick);
+    } else {
+      this.emit(this.prepared ? 'paused' : 'loading', this.prepared ? '已定位 · SF2' : '正在载入 FluidR3_GM 音源…');
+    }
   }
 
   async restart(autoPlay = true): Promise<boolean> {
@@ -191,6 +210,14 @@ export class DustAudioPlayer {
   private seekPointers(time: number): void {
     this.startPtr = lowerBound(this.notes, time, (note) => note.start);
     this.endPtr = lowerBound(this.endings, time, (note) => note.end);
+  }
+
+  private resumeActiveNotes(time: number): void {
+    if (time <= 0) return;
+    for (const note of this.notes) {
+      if (note.start >= time) break;
+      if (note.role !== 'drums' && note.end > time + END_EPSILON) this.startNote(note);
+    }
   }
 
   private startNote(note: ScheduledNote): void {
