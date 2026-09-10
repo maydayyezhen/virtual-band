@@ -4,6 +4,7 @@ import {
   parseLayoutDocument,
   stringifyLayout,
 } from './LayoutDocument';
+import { BAND_SCALE } from './BandPresentation';
 import { LayoutEditorRuntime, type LayoutEditorSnapshot } from './LayoutEditorRuntime';
 
 export function LayoutEditorApp() {
@@ -185,7 +186,8 @@ export function LayoutEditorApp() {
           </div>
 
           <p className="scale-note">
-            1× 参考总高约 {selectedDefinition?.targetHeight.toFixed(2) ?? '—'} m，场景单位为米。
+            1× 总高约 {((selectedDefinition?.targetHeight ?? 0) * BAND_SCALE).toFixed(2)} m
+            （现实 {selectedDefinition?.targetHeight.toFixed(2) ?? '—'} m × 乐队放大 {BAND_SCALE}×）。
           </p>
 
           <div className="rotation-row">

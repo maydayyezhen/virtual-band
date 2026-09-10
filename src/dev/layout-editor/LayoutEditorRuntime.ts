@@ -17,6 +17,8 @@ import {
   type LayoutInstrumentType,
 } from './LayoutDocument';
 import { autoArrangeLayout, type InstrumentFootprints } from './AutoLayout';
+import { frameBounds } from '../../camera/CameraFraming';
+import { normalizeInstrument } from './BandPresentation';
 
 export interface LayoutEditorSnapshot {
   ready: boolean;
@@ -47,6 +49,8 @@ const GRID_STEP = 0.25;
 const ROTATION_STEP = THREE.MathUtils.degToRad(15);
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 5;
+/** Breathing room kept around the layout when the camera frames the band. */
+const FRAME_PADDING = 1.12;
 
 export class LayoutEditorRuntime {
   private readonly renderer: RendererHost;
@@ -352,34 +356,9 @@ export class LayoutEditorRuntime {
   }
 
   private registerPrototype(type: LayoutInstrumentType, modelRoot: THREE.Group): void {
-    const definition = getInstrumentDefinition(type);
-
-    const normalizedModel = new THREE.Group();
-    normalizedModel.name = `layout-editor:prototype:${type}`;
-    normalizedModel.add(modelRoot);
-    normalizedModel.updateMatrixWorld(true);
-    const rawBounds = new THREE.Box3().setFromObject(normalizedModel);
-    const rawHeight = rawBounds.max.y - rawBounds.min.y;
-    if (!Number.isFinite(rawHeight) || rawHeight <= 0) throw new Error(`无法测量乐器高度：${type}`);
-    const normalizationScale = definition.targetHeight / rawHeight;
-    normalizedModel.scale.setScalar(normalizationScale);
-    normalizedModel.position.y = -rawBounds.min.y * normalizationScale;
-
-    normalizedModel.updateMatrixWorld(true);
-    const normalizedBounds = new THREE.Box3().setFromObject(normalizedModel);
-    const normalizedSize = normalizedBounds.getSize(new THREE.Vector3());
-    this.footprints[type] = {
-      width: normalizedSize.x,
-      depth: normalizedSize.z,
-    };
-    normalizedModel.traverse((object) => {
-      object.userData = {};
-      const mesh = object as THREE.Mesh;
-      if (!mesh.isMesh) return;
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-    });
-    this.prototypes.set(type, normalizedModel);
+    const normalized = normalizeInstrument(type, modelRoot);
+    this.footprints[type] = normalized.footprint;
+    this.prototypes.set(type, normalized.holder);
   }
 
   private applyDocument(): void {
@@ -639,14 +618,17 @@ export class LayoutEditorRuntime {
   private fitCameraToInstruments(): boolean {
     if (this.roots.size === 0) return false;
     const bounds = new THREE.Box3().setFromObject(this.instrumentLayer);
-    if (bounds.isEmpty()) return false;
+    const framing = frameBounds(bounds, {
+      fovDeg: this.camera.fov,
+      aspect: this.camera.aspect,
+      yaw: this.yaw,
+      pitch: this.pitch,
+      padding: FRAME_PADDING,
+    });
+    if (!framing) return false;
 
-    const sphere = bounds.getBoundingSphere(new THREE.Sphere());
-    const verticalFov = THREE.MathUtils.degToRad(this.camera.fov);
-    const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * Math.max(this.camera.aspect, 0.1));
-    const limitingFov = Math.min(verticalFov, horizontalFov);
-    this.cameraTarget.copy(sphere.center);
-    this.distance = THREE.MathUtils.clamp((sphere.radius / Math.sin(limitingFov / 2)) * 1.12, 8, 42);
+    this.cameraTarget.copy(framing.target);
+    this.distance = framing.distance;
     return true;
   }
 

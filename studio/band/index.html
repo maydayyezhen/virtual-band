@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#080e19" />
+  <link rel="icon" type="image/svg+xml" href="/virtual-band-icon.svg" />
+  <title>Virtual Band · Band View</title>
+  <style>
+    :root { color-scheme: dark; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #080e19; }
+    [data-band-view] { position: fixed; inset: 0; }
+    [data-band-view] canvas { display: block; width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+  <div data-band-view></div>
+  <script type="module" src="/src/dev/band-viewer/main.ts"></script>
+</body>
+</html>
