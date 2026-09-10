@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { distanceForOrbitView } from '../../camera/CameraFraming';
 import type { CameraRegistry, InstrumentOrbitCameraView } from '../../camera/CameraRegistry';
 import type { CameraSystem } from '../../camera/CameraSystem';
 import {
@@ -426,12 +427,18 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
   private pan(dx: number, dy: number): void {
     if (this.height <= 0) return;
     const preset = this.getPreset(this.preset);
-    const fov = preset?.fov ?? 34;
-    const scale = this.current.distance * 2 * Math.tan(THREE.MathUtils.degToRad(fov / 2)) / this.height;
+    if (!preset) return;
+
+    this.drums.root.updateWorldMatrix(true, true);
+    const worldTarget = this.drums.root.localToWorld(this.current.target.clone());
+    const worldDistance = this.camera.output.position.distanceTo(worldTarget);
+    const scale = worldDistance * 2 * Math.tan(THREE.MathUtils.degToRad(preset.fov / 2)) / this.height;
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.output.quaternion);
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.output.quaternion);
-    this.want.target.addScaledVector(right, -dx * scale);
-    this.want.target.addScaledVector(up, dy * scale);
+    const movedWorldTarget = worldTarget
+      .addScaledVector(right, -dx * scale)
+      .addScaledVector(up, dy * scale);
+    this.want.target.copy(this.drums.root.worldToLocal(movedWorldTarget));
   }
 
   private syncViewport(force: boolean): void {
@@ -449,20 +456,22 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
   }
 
   private distanceFor(preset: InstrumentOrbitCameraView): number {
-    const aspect = Math.max(0.01, this.width / Math.max(1, this.height));
-    const framedSpan = Math.max(preset.height, preset.width / aspect);
-    return framedSpan / (2 * Math.tan(THREE.MathUtils.degToRad(preset.fov / 2)));
+    return distanceForOrbitView(preset, this.width, this.height);
   }
 
   private applyCamera(): void {
     const preset = this.getPreset(this.preset);
-    const fov = preset?.fov ?? 34;
+    if (!preset) return;
+
+    this.drums.root.updateWorldMatrix(true, true);
     const cp = Math.cos(this.current.pitch);
-    const position = new THREE.Vector3(
+    const localPosition = new THREE.Vector3(
       this.current.target.x + Math.sin(this.current.yaw) * cp * this.current.distance,
       Math.max(0.13, this.current.target.y + Math.sin(this.current.pitch) * this.current.distance),
       this.current.target.z + Math.cos(this.current.yaw) * cp * this.current.distance,
     );
-    this.camera.setPose({ position, target: this.current.target, fov }, true);
+    const position = this.drums.root.localToWorld(localPosition);
+    const target = this.drums.root.localToWorld(this.current.target.clone());
+    this.camera.setPose({ position, target, fov: preset.fov }, true);
   }
 }
