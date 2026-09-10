@@ -172,19 +172,26 @@ export function parseBohemianScore(bytes = bohemianMidiBytes()): BohemianScore {
   const tempos = buildTempoMap(rawTempos, ppq);
   const tickToSeconds = makeTickToSeconds(tempos, ppq);
   const notes = rawNotes
-    .map((note, index): BohemianNote => ({
-      ...note,
-      id: `bohemian:${index}`,
-      time: tickToSeconds(note.tick),
-      end: tickToSeconds(note.endTick),
-      role: classifyRole(note.channel, note.program),
-    }))
+    .map((note, index): BohemianNote => {
+      const time = tickToSeconds(note.tick);
+      const role = classifyRole(note.channel, note.program);
+      const rawEnd = tickToSeconds(note.endTick);
+      // This public MIDI contains percussion note-offs hundreds of seconds after
+      // the actual song. Drums are one-shots, so those tails must not define the
+      // performance duration or leave the transport sitting at ~17 minutes.
+      const end = role === 'drums' ? Math.min(rawEnd, time + 2.5) : rawEnd;
+      return {
+        ...note,
+        id: `bohemian:${index}`,
+        time,
+        end,
+        role,
+      };
+    })
     .sort((a, b) => a.time - b.time || a.track - b.track || a.note - b.note || a.end - b.end);
 
-  const duration = Math.max(
-    tickToSeconds(maxTick),
-    ...notes.map((note) => note.end),
-  );
+  const musicalEnd = notes.reduce((value, note) => Math.max(value, note.end), 0);
+  const duration = musicalEnd + 3;
 
   return { ppq, duration, notes, tempos, tickToSeconds };
 }
