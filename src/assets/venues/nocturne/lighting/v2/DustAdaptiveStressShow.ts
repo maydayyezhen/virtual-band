@@ -5,6 +5,7 @@ import type {
   RigSnapshot,
   ShowPlan,
   ShowSection,
+  SongEvent,
   SongScore,
 } from './contracts';
 
@@ -64,9 +65,6 @@ type GroupLook = {
   tilt: number;
   mirror: number;
   activeCount: number;
-  texturePan: number;
-  textureTilt: number;
-  textureBeats: number;
 };
 
 type StyleLook = {
@@ -100,17 +98,30 @@ const ROLE_WEIGHT: Record<string, number> = {
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
+/**
+ * Stress plan v2.1: keep the old Director's adaptive phrase vocabulary, but
+ * stop treating continuous movement as the default visual language.
+ *
+ * The song's bass riff is the visual clock. Moving heads mostly HOLD. Large
+ * repositions dip dark, move while hidden, then reveal the new composition.
+ * Bass / kick / snare / crash events create short deterministic transients.
+ */
 export function createDustAdaptiveStressShowPlan(score: SongScore, rig: RigSnapshot): ShowPlan {
   const analysis = analyze(score);
   const sections = buildMacroSections(score.duration, analysis.beat);
   const phrases = buildPhrases(analysis, score.duration);
   const cues: LightingCue[] = [];
-  const current = new Map<string, FixtureState>(rig.fixtures.map((fixture) => [fixture.id, { ...fixture.home, intensity: 0 }]));
+  const current = new Map<string, FixtureState>(
+    rig.fixtures.map((fixture) => [fixture.id, { ...fixture.home, intensity: 0 }]),
+  );
 
   const rear = fixtures(rig, 'beam', 'rear');
   const floor = fixtures(rig, 'beam', 'floor');
   const side = fixtures(rig, 'beam', 'side');
-  const front = rig.fixtures.filter((fixture) => fixture.type === 'par' && fixture.groups.includes('front') && !fixture.groups.includes('front-floor'));
+  const front = rig.fixtures
+    .filter((fixture) => fixture.type === 'par' && fixture.groups.includes('front') && !fixture.groups.includes('front-floor'))
+    .slice()
+    .sort((a, b) => a.id.localeCompare(b.id));
   const frontFloor = fixtures(rig, 'par', 'front-floor');
   const allBeams = rig.fixtures.filter((fixture) => fixture.type === 'beam');
 
@@ -120,14 +131,14 @@ export function createDustAdaptiveStressShowPlan(score: SongScore, rig: RigSnaps
     const phraseDuration = Math.max(0.05, phrase.endSeconds - phrase.startSeconds);
     const transitionSeconds = clamp(
       analysis.beat * phrase.transitionBeats,
-      0.18,
-      Math.max(0.18, phraseDuration * 0.46),
+      0.12,
+      Math.max(0.12, phraseDuration * 0.32),
     );
     const transitionEnd = Math.min(phrase.endSeconds - 0.01, phrase.startSeconds + transitionSeconds);
 
     applyBeamGroup(cues, current, rear, phrase, section, style.rear, transitionEnd, 'rear', 'edge');
     applyBeamGroup(cues, current, floor, phrase, section, style.floor, transitionEnd, 'floor', 'center');
-    applyBeamGroup(cues, current, side, phrase, section, style.side, transitionEnd, 'side', 'all');
+    applyBeamGroup(cues, current, side, phrase, section, style.side, transitionEnd, 'side', 'edge');
 
     applyParGroup(cues, current, front, phrase, section, style.frontIntensity, style.frontColor, 24, transitionEnd, 'front');
     applyParGroup(
@@ -144,15 +155,18 @@ export function createDustAdaptiveStressShowPlan(score: SongScore, rig: RigSnaps
     );
   }
 
-  addDrumAccents(cues, sections, rear, floor, side, frontFloor, allBeams, analysis.beat);
+  // Lots of cue traffic, but visually terse: the stress comes from layering and
+  // event density rather than making every moving head wander continuously.
+  addBassRiffAccents(cues, sections, score.events, rear, side, frontFloor, analysis.beat);
+  addDrumAccents(cues, sections, score.events, rear, floor, side, front, frontFloor, allBeams, analysis.beat);
   addFinalBlackout(cues, current, sections, rig, score.duration, analysis.beat);
 
   return {
     schemaVersion: '2.0-prototype',
     id: 'dust-adaptive-stress-v2',
-    revision: 1,
+    revision: 2,
     title: `${score.artist} · ${score.title}`,
-    brief: `压力测试编排：复用旧 Director 的逐小节能量/密度/声部焦点分析和 style vocabulary，共生成 ${phrases.length} 个 phrase；执行仍完全由绝对音乐时间确定。`,
+    brief: `Dry Groove 压力测试：${phrases.length} 个 adaptive phrase；moving heads 以 Hold / 暗场换位为主，Bass riff 与鼓组生成密集短促 accent，不使用持续 oscillator。`,
     seed: 86,
     baseLook: { intensity: 0 },
     sections,
@@ -241,7 +255,7 @@ function buildPhrases(analysis: Analysis, duration: number): Phrase[] {
       density: stats.density,
       focus: stats.focus,
       crashes: stats.crashes,
-      transitionBeats: style === 'void' || style === 'outro-shadow' ? 1.8 : style === 'climax-grid' ? 0.65 : 1.1,
+      transitionBeats: transitionBeatsFor(style),
     };
   });
 }
@@ -283,51 +297,54 @@ function styleFor(
   return 'climax-grid';
 }
 
+function transitionBeatsFor(style: PhraseStyle): number {
+  switch (style) {
+    case 'void':
+    case 'outro-shadow': return 0.85;
+    case 'build-fan': return 1.6;
+    case 'knife-hit':
+    case 'knife-drive':
+    case 'climax-grid': return 0.38;
+    default: return 0.58;
+  }
+}
+
 function styleLook(phrase: Phrase): StyleLook {
   const e = phrase.energy;
   const commonRear = (patch: Partial<GroupLook>): GroupLook => ({
-    intensity: lerp(0.32, 0.68, e),
-    idleIntensity: 0.025,
+    intensity: lerp(0.30, 0.62, e),
+    idleIntensity: 0.014,
     colorA: LOOK.red,
-    colorB: LOOK.steel,
-    beamAngleDeg: lerp(2.8, 1.9, e),
-    panWidth: 24,
-    tilt: lerp(-29, -21, e),
+    colorB: LOOK.deepRed,
+    beamAngleDeg: lerp(2.7, 1.9, e),
+    panWidth: 22,
+    tilt: lerp(-29, -22, e),
     mirror: 1,
     activeCount: 2,
-    texturePan: 0,
-    textureTilt: 0,
-    textureBeats: 8,
     ...patch,
   });
   const commonFloor = (patch: Partial<GroupLook>): GroupLook => ({
-    intensity: lerp(0.18, 0.48, e),
-    idleIntensity: 0.018,
+    intensity: lerp(0.15, 0.40, e),
+    idleIntensity: 0.009,
     colorA: LOOK.deepRed,
     colorB: LOOK.red,
-    beamAngleDeg: lerp(3.2, 2.0, e),
-    panWidth: 20,
-    tilt: lerp(48, 35, e),
+    beamAngleDeg: lerp(3.0, 2.0, e),
+    panWidth: 18,
+    tilt: lerp(47, 36, e),
     mirror: -1,
     activeCount: 1,
-    texturePan: 0,
-    textureTilt: 0,
-    textureBeats: 8,
     ...patch,
   });
   const commonSide = (patch: Partial<GroupLook>): GroupLook => ({
-    intensity: lerp(0.18, 0.46, e),
-    idleIntensity: 0.04,
+    intensity: lerp(0.16, 0.38, e),
+    idleIntensity: 0.012,
     colorA: LOOK.red,
-    colorB: LOOK.white,
-    beamAngleDeg: 3.2,
+    colorB: LOOK.deepRed,
+    beamAngleDeg: 3.0,
     panWidth: 12,
     tilt: -16,
     mirror: 1,
-    activeCount: 99,
-    texturePan: 0,
-    textureTilt: 0,
-    textureBeats: 8,
+    activeCount: 1,
     ...patch,
   });
 
@@ -335,79 +352,79 @@ function styleLook(phrase: Phrase): StyleLook {
     case 'opening-lock':
     case 'bass-lock':
       return {
-        rear: commonRear({ intensity: lerp(0.24, 0.46, e), panWidth: 15, colorA: LOOK.deepRed, colorB: LOOK.red, texturePan: 2.5, textureTilt: 1.2, textureBeats: 16 }),
-        floor: commonFloor({ intensity: lerp(0.13, 0.28, e), panWidth: 12, colorB: LOOK.steel, textureTilt: 1.4, textureBeats: 16 }),
-        side: commonSide({ intensity: 0.28, panWidth: 7, beamAngleDeg: 3.4 }),
-        frontIntensity: lerp(0.14, 0.24, e),
-        frontFloorIntensity: lerp(0.04, 0.10, e),
+        rear: commonRear({ intensity: lerp(0.23, 0.42, e), activeCount: 1, panWidth: 13, colorA: LOOK.deepRed, colorB: LOOK.red }),
+        floor: commonFloor({ intensity: lerp(0.10, 0.24, e), activeCount: 1, panWidth: 9, colorB: LOOK.steel }),
+        side: commonSide({ intensity: 0.20, activeCount: 1, panWidth: 8, beamAngleDeg: 3.3 }),
+        frontIntensity: lerp(0.12, 0.20, e),
+        frontFloorIntensity: lerp(0.025, 0.07, e),
         frontColor: LOOK.warm,
       };
     case 'void':
     case 'outro-shadow':
       return {
-        rear: commonRear({ intensity: 0.13, idleIntensity: 0.012, activeCount: 1, panWidth: 8, colorA: LOOK.deepRed, colorB: LOOK.steel, beamAngleDeg: 3.1 }),
-        floor: commonFloor({ intensity: 0.05, idleIntensity: 0.008, activeCount: 0, panWidth: 7, colorB: LOOK.deepRed, beamAngleDeg: 3.4 }),
-        side: commonSide({ intensity: 0.12, idleIntensity: 0.018, colorA: LOOK.red, colorB: LOOK.shadow, panWidth: 5 }),
-        frontIntensity: 0.11,
-        frontFloorIntensity: 0.025,
+        rear: commonRear({ intensity: 0.10, idleIntensity: 0.006, activeCount: 1, panWidth: 7, colorA: LOOK.deepRed, colorB: LOOK.shadow, beamAngleDeg: 3.2 }),
+        floor: commonFloor({ intensity: 0.035, idleIntensity: 0.004, activeCount: 0, panWidth: 5, colorB: LOOK.deepRed, beamAngleDeg: 3.5 }),
+        side: commonSide({ intensity: 0.08, idleIntensity: 0.006, activeCount: 1, colorA: LOOK.red, colorB: LOOK.shadow, panWidth: 5 }),
+        frontIntensity: 0.08,
+        frontFloorIntensity: 0.015,
         frontColor: LOOK.warm,
       };
     case 'groove-left':
     case 'groove-right': {
       const mirror = phrase.style === 'groove-left' ? -1 : 1;
       return {
-        rear: commonRear({ intensity: lerp(0.34, 0.56, e), panWidth: 30, mirror, texturePan: 5, textureTilt: 1.8, textureBeats: 8 }),
-        floor: commonFloor({ intensity: lerp(0.20, 0.38, e), panWidth: 22, mirror: -mirror, texturePan: 3.5, textureTilt: 2.2, textureBeats: 8 }),
-        side: commonSide({ intensity: lerp(0.22, 0.36, e), panWidth: 16 * mirror, beamAngleDeg: 3.2 }),
-        frontIntensity: lerp(0.18, 0.28, e),
-        frontFloorIntensity: lerp(0.07, 0.14, e),
+        rear: commonRear({ intensity: lerp(0.32, 0.52, e), activeCount: 2, panWidth: 27, mirror }),
+        floor: commonFloor({ intensity: lerp(0.17, 0.33, e), activeCount: 1, panWidth: 19, mirror: -mirror }),
+        side: commonSide({ intensity: lerp(0.20, 0.31, e), activeCount: 1, panWidth: 14 * mirror, beamAngleDeg: 3.1 }),
+        frontIntensity: lerp(0.15, 0.23, e),
+        frontFloorIntensity: lerp(0.045, 0.10, e),
         frontColor: LOOK.warm,
       };
     }
     case 'stagger-groove':
       return {
-        rear: commonRear({ intensity: lerp(0.42, 0.68, e), activeCount: 3, panWidth: 34, colorB: LOOK.white, texturePan: 7, textureTilt: 2.4, textureBeats: 8 }),
-        floor: commonFloor({ intensity: lerp(0.24, 0.46, e), activeCount: 2, panWidth: 26, colorB: LOOK.steel, texturePan: 4.5, textureTilt: 3, textureBeats: 8 }),
-        side: commonSide({ intensity: 0.40, panWidth: 18, beamAngleDeg: 2.9 }),
-        frontIntensity: 0.27,
-        frontFloorIntensity: 0.14,
+        rear: commonRear({ intensity: lerp(0.38, 0.60, e), activeCount: 2, panWidth: 31, colorB: LOOK.steel }),
+        floor: commonFloor({ intensity: lerp(0.21, 0.39, e), activeCount: 2, panWidth: 23, colorB: LOOK.steel }),
+        side: commonSide({ intensity: 0.34, activeCount: 1, panWidth: 18, beamAngleDeg: 2.9 }),
+        frontIntensity: 0.23,
+        frontFloorIntensity: 0.11,
         frontColor: LOOK.warm,
       };
     case 'cross-groove':
       return {
-        rear: commonRear({ intensity: lerp(0.44, 0.70, e), activeCount: 3, panWidth: 38, texturePan: 8, textureTilt: 2.8, textureBeats: 8 }),
-        floor: commonFloor({ intensity: lerp(0.28, 0.48, e), activeCount: 2, panWidth: 32, texturePan: 6, textureTilt: 3.2, textureBeats: 8 }),
-        side: commonSide({ intensity: 0.46, panWidth: 26, beamAngleDeg: 2.8 }),
-        frontIntensity: 0.29,
-        frontFloorIntensity: 0.16,
+        rear: commonRear({ intensity: lerp(0.40, 0.64, e), activeCount: 2, panWidth: 35, mirror: -1 }),
+        floor: commonFloor({ intensity: lerp(0.23, 0.42, e), activeCount: 2, panWidth: 29, mirror: 1 }),
+        side: commonSide({ intensity: 0.39, activeCount: 2, panWidth: 23, beamAngleDeg: 2.8 }),
+        frontIntensity: 0.25,
+        frontFloorIntensity: 0.13,
         frontColor: LOOK.warm,
       };
     case 'build-fan':
       return {
-        rear: commonRear({ intensity: lerp(0.52, 0.76, e), activeCount: 3, panWidth: 44, colorB: LOOK.white, texturePan: 10, textureTilt: 3.5, textureBeats: 12 }),
-        floor: commonFloor({ intensity: lerp(0.30, 0.54, e), activeCount: 2, panWidth: 38, colorA: LOOK.blue, texturePan: 7, textureTilt: 4, textureBeats: 12 }),
-        side: commonSide({ intensity: 0.40, panWidth: 30, beamAngleDeg: 3 }),
-        frontIntensity: 0.30,
-        frontFloorIntensity: 0.18,
+        rear: commonRear({ intensity: lerp(0.47, 0.70, e), activeCount: 3, panWidth: 42, colorB: LOOK.white }),
+        floor: commonFloor({ intensity: lerp(0.27, 0.49, e), activeCount: 2, panWidth: 35, colorA: LOOK.blue }),
+        side: commonSide({ intensity: 0.39, activeCount: 2, panWidth: 28, beamAngleDeg: 2.8 }),
+        frontIntensity: 0.27,
+        frontFloorIntensity: 0.16,
         frontColor: LOOK.warm,
       };
     case 'knife-hit':
     case 'knife-drive':
       return {
-        rear: commonRear({ intensity: lerp(0.64, 0.86, e), activeCount: 3, panWidth: 48, colorB: LOOK.white, beamAngleDeg: 1.7, texturePan: 11, textureTilt: 3.8, textureBeats: 4 }),
-        floor: commonFloor({ intensity: lerp(0.42, 0.68, e), activeCount: 3, panWidth: 42, beamAngleDeg: 1.9, texturePan: 9, textureTilt: 4.8, textureBeats: 4 }),
-        side: commonSide({ intensity: 0.54, panWidth: 34, beamAngleDeg: 2.4, texturePan: 4, textureBeats: 8 }),
-        frontIntensity: 0.38,
-        frontFloorIntensity: 0.24,
+        rear: commonRear({ intensity: lerp(0.58, 0.80, e), activeCount: 3, panWidth: 47, colorB: LOOK.white, beamAngleDeg: 1.7 }),
+        floor: commonFloor({ intensity: lerp(0.38, 0.61, e), activeCount: 3, panWidth: 40, beamAngleDeg: 1.9 }),
+        side: commonSide({ intensity: 0.49, activeCount: 2, panWidth: 31, beamAngleDeg: 2.35 }),
+        frontIntensity: 0.34,
+        frontFloorIntensity: 0.21,
         frontColor: LOOK.white,
       };
     case 'climax-grid':
       return {
-        rear: commonRear({ intensity: 0.92, activeCount: 99, panWidth: 52, colorB: LOOK.white, beamAngleDeg: 1.65, texturePan: 13, textureTilt: 4.6, textureBeats: 4 }),
-        floor: commonFloor({ intensity: 0.74, activeCount: 99, panWidth: 48, colorB: LOOK.white, beamAngleDeg: 1.85, texturePan: 11, textureTilt: 5.5, textureBeats: 4 }),
-        side: commonSide({ intensity: 0.72, panWidth: 38, beamAngleDeg: 2.3, texturePan: 5, textureTilt: 2, textureBeats: 8 }),
-        frontIntensity: 0.56,
-        frontFloorIntensity: 0.34,
+        rear: commonRear({ intensity: 0.88, activeCount: 99, panWidth: 51, colorB: LOOK.white, beamAngleDeg: 1.6 }),
+        floor: commonFloor({ intensity: 0.68, activeCount: 99, panWidth: 46, colorB: LOOK.white, beamAngleDeg: 1.8 }),
+        side: commonSide({ intensity: 0.64, activeCount: 99, panWidth: 36, colorB: LOOK.white, beamAngleDeg: 2.2 }),
+        frontIntensity: 0.50,
+        frontFloorIntensity: 0.30,
         frontColor: LOOK.white,
       };
   }
@@ -434,6 +451,68 @@ function applyBeamGroup(
       ? focusPan(phrase.focus) + fan(index, selected.length, Math.abs(look.panWidth) * 0.42) * Math.sign(look.panWidth || 1)
       : fan(index, selected.length, look.panWidth) * look.mirror;
     const targetTilt = look.tilt;
+    const transitionSpan = Math.max(0.01, transitionEnd - phrase.startSeconds);
+    const travel = Math.abs(targetPan - state.pan) + Math.abs(targetTilt - state.tilt) * 1.7;
+    const darkReposition = phrase.index > 0 && active && targetIntensity > 0.07 && travel > 8;
+    const darkLevel = Math.min(0.012, targetIntensity * 0.06);
+    const darkAt = phrase.startSeconds + transitionSpan * 0.20;
+    const revealAt = phrase.startSeconds + transitionSpan * 0.78;
+
+    const intensityKeyframes = darkReposition
+      ? [
+          { time: phrase.startSeconds, value: state.intensity },
+          { time: darkAt, value: darkLevel },
+          { time: revealAt, value: darkLevel },
+          { time: transitionEnd, value: targetIntensity },
+        ]
+      : [
+          { time: phrase.startSeconds, value: state.intensity },
+          { time: transitionEnd, value: targetIntensity },
+        ];
+    const colorKeyframes = darkReposition
+      ? [
+          { time: phrase.startSeconds, value: state.color },
+          { time: darkAt, value: state.color },
+          { time: revealAt, value: targetColor },
+          { time: transitionEnd, value: targetColor },
+        ]
+      : [
+          { time: phrase.startSeconds, value: state.color },
+          { time: transitionEnd, value: targetColor },
+        ];
+    const angleKeyframes = darkReposition
+      ? [
+          { time: phrase.startSeconds, value: state.beamAngleDeg },
+          { time: darkAt, value: state.beamAngleDeg },
+          { time: revealAt, value: look.beamAngleDeg },
+          { time: transitionEnd, value: look.beamAngleDeg },
+        ]
+      : [
+          { time: phrase.startSeconds, value: state.beamAngleDeg },
+          { time: transitionEnd, value: look.beamAngleDeg },
+        ];
+    const panKeyframes = darkReposition
+      ? [
+          { time: phrase.startSeconds, value: state.pan },
+          { time: darkAt, value: state.pan },
+          { time: revealAt, value: targetPan },
+          { time: transitionEnd, value: targetPan },
+        ]
+      : [
+          { time: phrase.startSeconds, value: state.pan },
+          { time: transitionEnd, value: targetPan },
+        ];
+    const tiltKeyframes = darkReposition
+      ? [
+          { time: phrase.startSeconds, value: state.tilt },
+          { time: darkAt, value: state.tilt },
+          { time: revealAt, value: targetTilt },
+          { time: transitionEnd, value: targetTilt },
+        ]
+      : [
+          { time: phrase.startSeconds, value: state.tilt },
+          { time: transitionEnd, value: targetTilt },
+        ];
 
     cues.push({
       id: `p${phrase.index}-${groupName}-look-${fixture.id}`,
@@ -444,9 +523,9 @@ function applyBeamGroup(
       priority: phrase.index,
       select: { ids: [fixture.id], order: 'given' },
       channels: {
-        intensity: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: phrase.startSeconds, value: state.intensity }, { time: transitionEnd, value: targetIntensity }] } },
-        color: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: phrase.startSeconds, value: state.color }, { time: transitionEnd, value: targetColor }] } },
-        beamAngleDeg: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: phrase.startSeconds, value: state.beamAngleDeg }, { time: transitionEnd, value: look.beamAngleDeg }] } },
+        intensity: { blend: 'replace', effect: { op: 'curve', keyframes: intensityKeyframes } },
+        color: { blend: 'replace', effect: { op: 'curve', keyframes: colorKeyframes } },
+        beamAngleDeg: { blend: 'replace', effect: { op: 'curve', keyframes: angleKeyframes } },
       },
     });
 
@@ -459,53 +538,10 @@ function applyBeamGroup(
       priority: phrase.index,
       select: { ids: [fixture.id], order: 'given' },
       channels: {
-        pan: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: phrase.startSeconds, value: state.pan }, { time: transitionEnd, value: targetPan }] } },
-        tilt: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: phrase.startSeconds, value: state.tilt }, { time: transitionEnd, value: targetTilt }] } },
+        pan: { blend: 'replace', effect: { op: 'curve', keyframes: panKeyframes } },
+        tilt: { blend: 'replace', effect: { op: 'curve', keyframes: tiltKeyframes } },
       },
     });
-
-    const textureStart = transitionEnd;
-    const textureDuration = phrase.endSeconds - textureStart;
-    if (active && textureDuration > 0.35 && (look.texturePan > 0.01 || look.textureTilt > 0.01)) {
-      const fade = Math.min(textureDuration * 0.22, Math.max(0.12, textureDuration * 0.08));
-      cues.push({
-        id: `p${phrase.index}-${groupName}-texture-${fixture.id}`,
-        sectionId: section.id,
-        startSeconds: textureStart,
-        endSeconds: phrase.endSeconds,
-        layer: 'motion',
-        priority: 10_000 + phrase.index,
-        select: { ids: [fixture.id], order: 'given' },
-        fadeInSeconds: fade,
-        fadeOutSeconds: fade,
-        channels: {
-          ...(look.texturePan > 0.01 ? {
-            pan: {
-              blend: 'replace' as const,
-              effect: {
-                op: 'oscillator' as const,
-                min: targetPan - look.texturePan,
-                max: targetPan + look.texturePan,
-                periodSeconds: Math.max(0.4, look.textureBeats * (60 / 110)),
-                phase: phrase.index * 0.173 + index * 0.137,
-              },
-            },
-          } : {}),
-          ...(look.textureTilt > 0.01 ? {
-            tilt: {
-              blend: 'replace' as const,
-              effect: {
-                op: 'oscillator' as const,
-                min: targetTilt - look.textureTilt,
-                max: targetTilt + look.textureTilt,
-                periodSeconds: Math.max(0.4, look.textureBeats * (60 / 110) * 1.17),
-                phase: 0.25 + phrase.index * 0.119 + index * 0.091,
-              },
-            },
-          } : {}),
-        },
-      });
-    }
 
     state.intensity = targetIntensity;
     state.color = targetColor;
@@ -530,7 +566,9 @@ function applyParGroup(
   selected.forEach((fixture, index) => {
     const state = current.get(fixture.id);
     if (!state) return;
-    const targetColor = groupName === 'front-floor' && index % 3 === 0 && phrase.style === 'climax-grid' ? LOOK.white : color;
+    const targetColor = groupName === 'front-floor' && index % 3 === 0 && phrase.style === 'climax-grid'
+      ? LOOK.white
+      : color;
     cues.push({
       id: `p${phrase.index}-${groupName}-look-${fixture.id}`,
       sectionId: section.id,
@@ -540,9 +578,36 @@ function applyParGroup(
       priority: phrase.index,
       select: { ids: [fixture.id], order: 'given' },
       channels: {
-        intensity: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: phrase.startSeconds, value: state.intensity }, { time: transitionEnd, value: intensity }] } },
-        color: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: phrase.startSeconds, value: state.color }, { time: transitionEnd, value: targetColor }] } },
-        beamAngleDeg: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: phrase.startSeconds, value: state.beamAngleDeg }, { time: transitionEnd, value: angle }] } },
+        intensity: {
+          blend: 'replace',
+          effect: {
+            op: 'curve',
+            keyframes: [
+              { time: phrase.startSeconds, value: state.intensity },
+              { time: transitionEnd, value: intensity },
+            ],
+          },
+        },
+        color: {
+          blend: 'replace',
+          effect: {
+            op: 'curve',
+            keyframes: [
+              { time: phrase.startSeconds, value: state.color },
+              { time: transitionEnd, value: targetColor },
+            ],
+          },
+        },
+        beamAngleDeg: {
+          blend: 'replace',
+          effect: {
+            op: 'curve',
+            keyframes: [
+              { time: phrase.startSeconds, value: state.beamAngleDeg },
+              { time: transitionEnd, value: angle },
+            ],
+          },
+        },
       },
     });
     state.intensity = intensity;
@@ -551,57 +616,170 @@ function applyParGroup(
   });
 }
 
+function addBassRiffAccents(
+  cues: LightingCue[],
+  sections: ShowSection[],
+  events: SongEvent[],
+  rear: RigFixtureSnapshot[],
+  side: RigFixtureSnapshot[],
+  frontFloor: RigFixtureSnapshot[],
+  beat: number,
+): void {
+  const bassEvents = events
+    .filter((event) => event.i === 'bass')
+    .slice()
+    .sort((a, b) => a.s - b.s || (a.n ?? 0) - (b.n ?? 0));
+  const [rearLeft, rearRight] = splitHalves(rear);
+  const [sideLeft, sideRight] = splitHalves(side);
+  let lastTime = -Infinity;
+  let hitIndex = 0;
+
+  for (const event of bassEvents) {
+    if (event.s - lastTime < 0.055) continue;
+    lastTime = event.s;
+    const velocity = clamp((Number(event.v) || 92) / 127, 0, 1);
+    if (velocity < 0.24) continue;
+    const section = sectionAt(sections, event.s);
+    const anchor = hitIndex % 4 === 0 || velocity > 0.88;
+    const left = hitIndex % 2 === 0;
+    const selected = anchor
+      ? [...rearLeft, ...rearRight]
+      : left
+        ? [...rearLeft, ...sideLeft]
+        : [...rearRight, ...sideRight];
+    const gain = anchor ? lerp(0.13, 0.22, velocity) : lerp(0.075, 0.15, velocity);
+    addTransient(cues, section, selected, `bass-bite-${hitIndex}`, event.s, Math.max(0.085, beat * 0.22), gain);
+
+    if (anchor) {
+      addTransient(
+        cues,
+        section,
+        frontFloor,
+        `bass-anchor-floor-${hitIndex}`,
+        event.s,
+        Math.max(0.075, beat * 0.18),
+        lerp(0.045, 0.095, velocity),
+      );
+    }
+    hitIndex += 1;
+  }
+}
+
 function addDrumAccents(
   cues: LightingCue[],
   sections: ShowSection[],
+  events: SongEvent[],
   rear: RigFixtureSnapshot[],
   floor: RigFixtureSnapshot[],
   side: RigFixtureSnapshot[],
+  front: RigFixtureSnapshot[],
   frontFloor: RigFixtureSnapshot[],
   allBeams: RigFixtureSnapshot[],
   beat: number,
 ): void {
-  for (const section of sections) {
-    addEnvelope(cues, section, [...floor, ...frontFloor], `kick-${section.id}`, [35, 36], 0.018, Math.max(0.11, beat * 0.28), 0.18);
-    addEnvelope(cues, section, [...rear, ...side], `snare-${section.id}`, [37, 38, 39, 40], 0.012, Math.max(0.14, beat * 0.36), 0.24);
-    addEnvelope(cues, section, allBeams, `crash-${section.id}`, [49, 52, 55, 57], 0.008, Math.max(0.26, beat * 0.78), 0.38);
+  let kickIndex = 0;
+  let snareIndex = 0;
+  let crashIndex = 0;
+  let lastKick = -Infinity;
+  let lastSnare = -Infinity;
+  let lastCrash = -Infinity;
+
+  for (const event of events) {
+    if (event.i !== 'drums') continue;
+    const kind = drumKind(Number(event.n) || 0);
+    const velocity = clamp((Number(event.v) || 90) / 127, 0, 1);
+    const section = sectionAt(sections, event.s);
+
+    if (kind === 'kick' && event.s - lastKick >= 0.045) {
+      lastKick = event.s;
+      addTransient(
+        cues,
+        section,
+        [...floor, ...frontFloor],
+        `kick-punch-${kickIndex++}`,
+        event.s,
+        Math.max(0.075, beat * 0.19),
+        lerp(0.07, 0.16, velocity),
+      );
+      continue;
+    }
+
+    if (kind === 'snare' && event.s - lastSnare >= 0.055 && velocity > 0.42) {
+      lastSnare = event.s;
+      addTransient(
+        cues,
+        section,
+        [...rear, ...side],
+        `snare-cut-${snareIndex++}`,
+        event.s,
+        Math.max(0.10, beat * 0.28),
+        lerp(0.14, 0.28, velocity),
+        LOOK.white,
+      );
+      continue;
+    }
+
+    if (kind === 'crash' && event.s - lastCrash >= 0.12) {
+      lastCrash = event.s;
+      addTransient(
+        cues,
+        section,
+        [...allBeams, ...front, ...frontFloor],
+        `crash-open-${crashIndex++}`,
+        event.s,
+        Math.max(0.24, beat * 0.66),
+        lerp(0.28, 0.50, velocity),
+        LOOK.white,
+      );
+    }
   }
 }
 
-function addEnvelope(
+function addTransient(
   cues: LightingCue[],
   section: ShowSection,
   selected: RigFixtureSnapshot[],
   id: string,
-  noteNumbers: number[],
-  attackSeconds: number,
-  decaySeconds: number,
+  time: number,
+  duration: number,
   gain: number,
+  color?: string,
 ): void {
   const ids = [...new Set(selected.map((fixture) => fixture.id))];
   if (!ids.length) return;
+  const start = clamp(time, section.startSeconds, Math.max(section.startSeconds, section.endSeconds - 0.002));
+  const end = Math.min(section.endSeconds, start + Math.max(0.025, duration));
+  if (end - start < 0.012) return;
+  const attack = Math.min(0.022, (end - start) * 0.18);
+  const peak = Math.min(end - 0.004, start + Math.max(0.006, attack));
+  const channels: LightingCue['channels'] = {
+    intensity: {
+      blend: 'add',
+      effect: {
+        op: 'curve',
+        keyframes: [
+          { time: start, value: 0 },
+          { time: peak, value: gain },
+          { time: Math.max(peak + 0.002, end - 0.002), value: 0 },
+        ],
+      },
+    },
+  };
+  if (color) {
+    channels.color = { blend: 'replace', effect: { op: 'constant', value: color } };
+  }
+
   cues.push({
     id,
     sectionId: section.id,
-    startSeconds: section.startSeconds,
-    endSeconds: section.endSeconds,
+    startSeconds: start,
+    endSeconds: end,
     layer: 'accent',
-    priority: 100,
+    priority: color ? 320 : 240,
     select: { ids, order: 'given' },
-    channels: {
-      intensity: {
-        blend: 'add',
-        effect: {
-          op: 'eventEnvelope',
-          roleIds: ['drums'],
-          noteNumbers,
-          attackSeconds,
-          decaySeconds,
-          gain,
-          reducer: 'max',
-        },
-      },
-    },
+    fadeInSeconds: color ? Math.min(0.012, (end - start) * 0.12) : undefined,
+    fadeOutSeconds: color ? Math.min(0.055, (end - start) * 0.42) : undefined,
+    channels,
   });
 }
 
@@ -645,13 +823,13 @@ function addFinalBlackout(
 
 function buildMacroSections(duration: number, beat: number): ShowSection[] {
   const labels: Array<[string, string, string]> = [
-    ['intro', '序幕 · Bass Lock', '保留低密度空间，建立 Another One Bites the Dust 的低频重心'],
-    ['groove-a', 'Groove A · 左右摆位', '按小节能量与焦点在 groove-left / groove-right / bass-lock 之间切换'],
-    ['groove-b', 'Groove B · Cross / Stagger', '中段增加 cross 与 stagger 构图，但运动仍由时间函数可复算'],
-    ['break', 'Break · 收束与空隙', '低能量 phrase 自动进入 void / bass-lock，减少无意义运动'],
-    ['build', 'Build · Fan 展开', '能量趋势向上时扩大 fan，允许慢速绝对时间 oscillator 作纹理'],
-    ['climax', 'Climax · Knife / Grid', '高能量 phrase 使用更窄 Beam、更宽覆盖和密集鼓点 accent'],
-    ['outro', 'Outro · Shadow', '回落到 shadow look，并在最后四拍显式淡黑'],
+    ['intro', '序幕 · Bass Lock', '灯头锁住；低位暗红构图让 Bass riff 成为视觉重心'],
+    ['groove-a', 'Groove A · Bite / Hold', '左右构图只在 phrase 边界换位，riff 本身用短促亮度 bite 回答'],
+    ['groove-b', 'Groove B · Cross / Stagger', '增加静态 cross / stagger 构图；移动结束后立即 Hold'],
+    ['break', 'Break · 收束', '降低亮度和覆盖；保留鼓组短促标点，不用持续漂移填空'],
+    ['build', 'Build · Dark Reposition', '较大的 fan 换位在压暗期间完成，到位后重新亮出'],
+    ['climax', 'Climax · Knife / Grid', '窄 Beam、宽构图、白色 backbeat / crash；效果瞬发，灯头仍以 Hold 为主'],
+    ['outro', 'Outro · Shadow', '收回低位暗色构图，最后四拍显式淡黑'],
   ];
   const fractions = [0, 0.12, 0.30, 0.48, 0.62, 0.80, 0.92, 1];
   const bar = beat * 4;
@@ -682,6 +860,12 @@ function fixtures(rig: RigSnapshot, type: string, group: string): RigFixtureSnap
     .filter((fixture) => fixture.type === type && fixture.groups.includes(group))
     .slice()
     .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function splitHalves(fixturesToSplit: RigFixtureSnapshot[]): [RigFixtureSnapshot[], RigFixtureSnapshot[]] {
+  if (fixturesToSplit.length <= 1) return [fixturesToSplit.slice(), fixturesToSplit.slice()];
+  const middle = Math.ceil(fixturesToSplit.length / 2);
+  return [fixturesToSplit.slice(0, middle), fixturesToSplit.slice(middle)];
 }
 
 function isActive(index: number, count: number, activeCount: number, mode: 'edge' | 'center' | 'all'): boolean {
