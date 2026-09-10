@@ -1,9 +1,7 @@
-import midi01 from './midi/part-01.txt?raw';
-import midi02 from './midi/part-02.txt?raw';
-import midi03 from './midi/part-03.txt?raw';
-import midi04 from './midi/part-04.txt?raw';
-import midi05 from './midi/part-05.txt?raw';
-import midi06 from './midi/part-06.txt?raw';
+import gzip01 from './midi/gzip-01.txt?raw';
+import gzip02 from './midi/gzip-02.txt?raw';
+import gzip03 from './midi/gzip-03.txt?raw';
+import gzip04 from './midi/gzip-04.txt?raw';
 
 export type BohemianRole = 'drums' | 'bass' | 'guitar' | 'piano' | 'choir' | 'strings' | 'lead';
 
@@ -39,13 +37,49 @@ type RawNote = Omit<BohemianNote, 'id' | 'time' | 'end' | 'role'>;
 type RawTempo = { tick: number; microsPerQuarter: number };
 type ActiveNote = { tick: number; velocity: number; channel: number; program: number; track: number; note: number };
 
-const MIDI_PARTS = [midi01, midi02, midi03, midi04, midi05, midi06];
+const MIDI_GZIP_PARTS = [gzip01, gzip02, gzip03, gzip04];
+const EXPECTED_MIDI_BYTES = 51_221;
+
+// Decode once while this ES module is loading. This keeps parseBohemianScore()
+// synchronous for the showcase while avoiding a fragile 68 KB raw-base64 split.
+const EMBEDDED_MIDI = await decodeEmbeddedMidi();
 
 export function bohemianMidiBytes(): Uint8Array {
-  const base64 = MIDI_PARTS.join('').replace(/\s+/g, '');
-  const raw = atob(base64);
-  const bytes = new Uint8Array(raw.length);
-  for (let index = 0; index < raw.length; index += 1) bytes[index] = raw.charCodeAt(index);
+  return EMBEDDED_MIDI.slice();
+}
+
+async function decodeEmbeddedMidi(): Promise<Uint8Array> {
+  if (typeof DecompressionStream !== 'function') {
+    throw new Error('Bohemian MIDI: 当前浏览器不支持 gzip 解压');
+  }
+
+  const base64 = MIDI_GZIP_PARTS.join('').replace(/\s+/g, '');
+  let raw: string;
+  try {
+    raw = atob(base64);
+  } catch (error) {
+    throw new Error(`Bohemian MIDI: 内嵌 gzip 数据损坏 (${error instanceof Error ? error.message : String(error)})`);
+  }
+
+  const compressed = new Uint8Array(raw.length);
+  for (let index = 0; index < raw.length; index += 1) compressed[index] = raw.charCodeAt(index);
+  const copy = new Uint8Array(compressed.byteLength);
+  copy.set(compressed);
+
+  let bytes: Uint8Array;
+  try {
+    const stream = new Blob([copy.buffer]).stream().pipeThrough(new DecompressionStream('gzip'));
+    bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+  } catch (error) {
+    throw new Error(`Bohemian MIDI: gzip 解压失败 (${error instanceof Error ? error.message : String(error)})`);
+  }
+
+  if (bytes.byteLength !== EXPECTED_MIDI_BYTES) {
+    throw new Error(`Bohemian MIDI: 解压尺寸错误 ${bytes.byteLength} / ${EXPECTED_MIDI_BYTES}`);
+  }
+  if (bytes[0] !== 0x4d || bytes[1] !== 0x54 || bytes[2] !== 0x68 || bytes[3] !== 0x64) {
+    throw new Error('Bohemian MIDI: 解压后缺少 MThd 文件头');
+  }
   return bytes;
 }
 
@@ -176,7 +210,7 @@ export function parseBohemianScore(bytes = bohemianMidiBytes()): BohemianScore {
       const time = tickToSeconds(note.tick);
       const role = classifyRole(note.channel, note.program);
       const rawEnd = tickToSeconds(note.endTick);
-      // This public MIDI contains percussion note-offs hundreds of seconds after
+      // The source MIDI contains percussion note-offs hundreds of seconds after
       // the actual song. Drums are one-shots, so those tails must not define the
       // performance duration or leave the transport sitting at ~17 minutes.
       const end = role === 'drums' ? Math.min(rawEnd, time + 2.5) : rawEnd;
