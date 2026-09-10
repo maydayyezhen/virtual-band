@@ -5,88 +5,76 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#080b13" />
   <link rel="icon" type="image/svg+xml" href="/virtual-band-icon.svg" />
-  <title>NOCTURNE · MIDI Lighting + Audio Experiment</title>
+  <title>NOCTURNE · Deterministic MIDI Lighting Runtime V2</title>
   <style>
     :root { color-scheme: dark; font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif; }
     * { box-sizing: border-box; }
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #080b13; color: #edf0f7; }
+    button, input { font: inherit; }
+    button { min-height: 34px; padding: 6px 11px; border: 1px solid #ffffff1b; border-radius: 7px; color: #dce5ed; background: #ffffff08; cursor: pointer; }
+    button:hover { background: #ffffff13; }
+    button.active { border-color: #c75d675c; background: #b8323c22; color: #ffd9da; }
+    button.ok { border-color: #6fc78e55; background: #5ab87916; color: #b9dfc2; }
+    button:disabled { opacity: .45; cursor: wait; }
     #viewport { position: fixed; inset: 0; touch-action: none; cursor: grab; }
     #viewport.dragging { cursor: grabbing; }
     #viewport canvas { display: block; width: 100%; height: 100%; }
-    .asset-ui { position: fixed; inset: 0; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; padding: 18px; }
-    .asset-head, .asset-controls, .asset-hint { pointer-events: auto; }
-    .asset-head { align-self: flex-start; padding: 11px 13px; border: 1px solid #ffffff1d; border-radius: 10px; background: #090e17c7; backdrop-filter: blur(14px); }
-    .eyebrow { font-size: 10px; letter-spacing: .18em; color: #8092a6; text-transform: uppercase; }
-    .name { margin-top: 3px; font-size: 15px; letter-spacing: .18em; font-weight: 650; }
-    .meta { margin-top: 5px; color: #93a3b5; font-size: 11px; }
-    .asset-bottom { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; }
-    .asset-hint { color: #9dacbd; font-size: 11px; line-height: 1.7; text-shadow: 0 1px 4px #000; }
-    .asset-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; max-width: 930px; padding: 7px; border: 1px solid #ffffff1d; border-radius: 11px; background: #090e17d9; backdrop-filter: blur(16px); }
-    .divider { width: 1px; height: 24px; margin: 0 2px; background: #ffffff1a; }
-    #dustStatus { min-width: 235px; padding: 0 6px; color: #c9a4a6; font-size: 11px; letter-spacing: .01em; }
-    #audioStatus { min-width: 126px; padding: 0 6px; color: #9fb5c7; font-size: 11px; }
+
+    .head { position: fixed; left: 22px; top: 20px; z-index: 12; pointer-events: none; padding: 12px 14px; border: 1px solid #ffffff1c; border-radius: 10px; background: #090e17c8; backdrop-filter: blur(14px); }
+    .eyebrow { color: #8296aa; font-size: 10px; letter-spacing: .18em; text-transform: uppercase; }
+    .name { margin-top: 4px; font-size: 15px; font-weight: 700; letter-spacing: .18em; }
+    .meta { margin-top: 6px; color: #9babbc; font-size: 11px; }
+
+    .runtime-card { position: fixed; top: 20px; right: 20px; z-index: 12; width: min(355px, calc(100vw - 40px)); padding: 14px; border: 1px solid #ffffff20; border-radius: 11px; background: #090e17df; box-shadow: 0 18px 50px #0007; backdrop-filter: blur(18px); }
+    .runtime-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .runtime-title { font-size: 11px; font-weight: 750; letter-spacing: .14em; }
+    #runtimeDiagnostics { padding: 4px 7px; border: 1px solid #6fc78e35; border-radius: 999px; color: #a8d7b6; background: #5ab8790e; font-size: 9px; letter-spacing: .08em; }
+    #runtimeSection { margin-top: 13px; color: #e6eaef; font-size: 17px; font-weight: 520; }
+    #showStatus { margin-top: 5px; color: #90a3b7; font-size: 11px; }
+    #planInfo { margin-top: 11px; padding-top: 10px; border-top: 1px solid #ffffff12; color: #74899d; font-size: 10px; line-height: 1.55; }
+    .runtime-rule { margin-top: 10px; color: #9fb1c2; font-size: 10px; line-height: 1.6; }
+    .runtime-rule b { color: #d7e0e9; font-weight: 600; }
+    #showDeterminism { width: 100%; margin-top: 11px; min-height: 31px; color: #aebdca; font-size: 10px; }
+
+    .player { position: fixed; z-index: 13; left: 50%; bottom: 20px; transform: translateX(-50%); width: min(980px, calc(100vw - 36px)); padding: 13px 15px; border: 1px solid #ffffff20; border-radius: 11px; background: #090e17e8; box-shadow: 0 18px 55px #0008; backdrop-filter: blur(18px); }
+    .transport { display: flex; align-items: center; gap: 7px; }
+    #showPlay { min-width: 70px; }
+    #showClock { min-width: 100px; margin-left: 4px; color: #bac7d3; font: 11px ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    #audioStatus { margin-left: auto; color: #8fa4b8; font-size: 10px; }
     #audioStatus[data-state="playing"] { color: #b9dfc2; }
     #audioStatus[data-state="error"] { color: #f0a7aa; }
-    button, select { min-height: 34px; border: 1px solid #ffffff18; border-radius: 7px; color: #dce5ed; background: #ffffff08; font: inherit; font-size: 12px; }
-    button { padding: 6px 10px; cursor: pointer; }
-    select { padding: 6px 28px 6px 9px; cursor: pointer; }
-    button:hover, select:hover { background: #ffffff13; }
-    button.active { border-color: #c75d675c; background: #b8323c22; color: #ffd9da; }
-    button:disabled { opacity: .52; cursor: wait; }
+    .seek { margin-top: 10px; }
+    #showSeek { width: 100%; height: 14px; accent-color: #b8323c; cursor: pointer; }
+    .section-row { display: flex; gap: 5px; margin-top: 8px; overflow-x: auto; scrollbar-width: none; }
+    .section-row::-webkit-scrollbar { display: none; }
+    .section-row button { flex: 1 0 auto; min-height: 29px; padding: 4px 8px; border-color: transparent; background: transparent; color: #7f93a6; font-size: 10px; }
+    .section-row button:hover { color: #cbd6df; background: #ffffff09; }
+    .hint { margin-top: 7px; color: #65798d; font-size: 9px; text-align: center; }
 
-    .motion-lab { position: fixed; top: 18px; right: 18px; z-index: 14; width: min(470px, calc(100vw - 36px)); padding: 12px; border: 1px solid #ffffff22; border-radius: 12px; background: #090e17e8; box-shadow: 0 18px 44px #0008; backdrop-filter: blur(18px); }
-    .motion-lab-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
-    .motion-lab-title { font-size: 12px; font-weight: 750; letter-spacing: .14em; }
-    .motion-phase { min-width: 66px; border: 1px solid #ffffff1b; border-radius: 999px; padding: 4px 8px; color: #93a7ba; background: #ffffff08; font-size: 9px; font-weight: 700; letter-spacing: .12em; text-align: center; }
-    .motion-phase[data-phase="PREPARE"], .motion-phase[data-phase="RETURN"] { color: #d7c59e; border-color: #cfb87542; background: #c5a75212; }
-    .motion-phase[data-phase="READY"] { color: #9ed6b0; border-color: #6fc78e42; background: #5ab87912; }
-    .motion-phase[data-phase="PLAY"] { color: #f0b4b7; border-color: #d56a7145; background: #b8323c18; }
-    .motion-phase[data-phase="HOLD"] { color: #b8c9e4; border-color: #829dcc45; background: #7189b418; }
-    .motion-status-row { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
-    #motionStatus { flex: 1; min-width: 0; color: #a8b8c7; font-size: 10px; line-height: 1.4; }
-    .motion-progress { height: 2px; overflow: hidden; border-radius: 999px; background: #ffffff12; }
-    #motionProgressFill { width: 0; height: 100%; background: currentColor; color: #c86d75; transition: width .08s linear; }
-    .motion-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 10px; }
-    .motion-field { min-width: 0; }
-    .motion-field label { display: block; margin-bottom: 4px; color: #71869b; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
-    .motion-field select { width: 100%; }
-    .motion-action-note { min-height: 31px; margin-top: 8px; padding: 7px 8px; border-radius: 7px; background: #ffffff05; color: #8194a8; font-size: 10px; line-height: 1.55; }
-    .motion-beat-row { display: flex; align-items: center; gap: 7px; margin-top: 9px; }
-    .motion-beat-label { min-width: 58px; color: #71869b; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
-    #motionBeatButtons { display: flex; flex: 1; gap: 4px; }
-    .motion-beat { flex: 1; min-width: 0; min-height: 29px; padding: 4px 5px; font-size: 10px; }
-    .motion-beat.active { border-color: #c75d675c; background: #b8323c22; color: #ffd9da; }
-    #motionBeatValue { min-width: 38px; color: #c4d0dc; font-size: 10px; text-align: right; }
-    .motion-command-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-top: 10px; }
-    .motion-command-row button { min-height: 32px; padding: 5px 6px; font-size: 10px; }
-    #motionAuto { border-color: #a6586055; color: #efc2c4; }
-    .motion-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 9px; padding-top: 8px; border-top: 1px solid #ffffff12; }
-    .motion-note { color: #657b90; font-size: 9px; line-height: 1.45; }
-    #motionRestore { flex: 0 0 auto; min-height: 30px; font-size: 10px; }
-
-    #loading { position: fixed; inset: 0; display: grid; place-items: center; background: #080b13; z-index: 20; transition: opacity .6s; }
+    #loading { position: fixed; inset: 0; display: grid; place-items: center; background: #080b13; z-index: 30; transition: opacity .6s; }
     .loading-inner { text-align: center; }
     .loading-name { font-size: 21px; letter-spacing: .32em; font-weight: 300; }
     .loading-line { width: 160px; height: 1px; margin: 18px auto; overflow: hidden; background: #263b46; }
     .loading-line::after { content: ""; display: block; width: 52px; height: 100%; background: #9fe2e7; animation: load 1.2s ease-in-out infinite; }
     #loadingNote { color: #8fa0b3; font-size: 12px; }
     @keyframes load { to { transform: translateX(160px); } }
-    #toast { position: fixed; left: 50%; bottom: 82px; transform: translate(-50%, 10px); opacity: 0; pointer-events: none; padding: 8px 12px; border: 1px solid #ffffff1f; border-radius: 7px; background: #0d1522e8; color: #dbe5ee; font-size: 12px; transition: .2s; z-index: 30; }
-    #toast.show { opacity: 1; transform: translate(-50%, 0); }
-    @media (max-width: 820px) {
-      .asset-bottom { align-items: stretch; flex-direction: column; }
-      .asset-controls { justify-content: flex-start; max-width: none; }
-      .asset-hint { display: none; }
-      #dustStatus, #audioStatus { width: 100%; min-width: 0; }
-      .divider { display: none; }
-      .motion-lab { top: 92px; right: 12px; width: min(430px, calc(100vw - 24px)); max-height: 53vh; overflow: auto; }
-      .motion-command-row { grid-template-columns: repeat(2, 1fr); }
+    #toast { position: fixed; left: 50%; bottom: 118px; z-index: 25; opacity: 0; pointer-events: none; }
+
+    @media (max-width: 720px) {
+      .head { left: 12px; top: 12px; padding: 9px 10px; }
+      .meta { display: none; }
+      .runtime-card { top: 82px; right: 12px; width: min(330px, calc(100vw - 24px)); }
+      .runtime-rule, #showDeterminism { display: none; }
+      .player { bottom: 12px; width: calc(100vw - 24px); padding: 10px 11px; }
+      #audioStatus { display: none; }
+      .section-row button { flex: 0 0 auto; }
     }
     @media (prefers-reduced-motion: reduce) { *, *::after { animation: none !important; transition: none !important; } }
   </style>
 </head>
 <body>
-  <div id="viewport" tabindex="0" aria-label="NOCTURNE 场景资产预览。拖动环顾，滚轮缩放，WASD 移动，Q E 升降。"></div>
+  <div id="viewport" tabindex="0" aria-label="NOCTURNE MIDI 灯光秀。拖动环顾，滚轮缩放，WASD 移动，Q E 升降。"></div>
+
   <div hidden aria-hidden="true">
     <button id="demoButton" type="button"></button>
     <button id="pauseButton" type="button"></button>
@@ -97,85 +85,45 @@
     <span id="viewLabel"></span>
   </div>
 
-  <div class="asset-ui">
-    <div class="asset-head">
-      <div class="eyebrow">Experiment / MIDI Lighting + SF2 Audio</div>
-      <div class="name">NOCTURNE · DUST</div>
-      <div class="meta">Queen · Another One Bites the Dust · groove-noir arrangement</div>
-    </div>
-    <div class="asset-bottom">
-      <div class="asset-hint">Dust MIDI 同时驱动音频与灯光 Cue<br />点击播放后，以 Web Audio 时钟作为整场演出的时间基准</div>
-      <div class="asset-controls" aria-label="NOCTURNE MIDI 灯光与音频实验控制">
-        <span id="dustStatus">正在载入 Dust MIDI 编排…</span>
-        <span id="audioStatus" data-state="loading">正在载入音源…</span>
-        <button type="button" id="dustPlay">播放 Dust</button>
-        <button type="button" id="dustRestart">从头重播</button>
-        <span class="divider"></span>
-        <button type="button" data-mode="nocturne">夜色</button>
-        <button type="button" data-mode="aurora">极光</button>
-        <button type="button" data-mode="amber">琥珀</button>
-        <button type="button" data-mode="blackout">黑场</button>
-        <button type="button" id="demoToggle">开始演示</button>
-        <button type="button" id="pauseToggle">冻结动画</button>
-      </div>
-    </div>
-  </div>
+  <header class="head">
+    <div class="eyebrow">Experiment / Deterministic Lighting Runtime V2</div>
+    <div class="name">NOCTURNE · DUST</div>
+    <div class="meta">Queen · Another One Bites the Dust · ShowPlan → musicTime → FrameState</div>
+  </header>
 
-  <aside class="motion-lab" aria-label="灯具动作预设调试">
-    <div class="motion-lab-head">
-      <div class="motion-lab-title">MOVEMENT LAB · STAGED DEMO</div>
-      <div id="motionPhase" class="motion-phase" data-phase="IDLE">IDLE</div>
+  <aside class="runtime-card" aria-label="灯光运行时状态">
+    <div class="runtime-top">
+      <div class="runtime-title">SHOWPLAN RUNTIME V2</div>
+      <div id="runtimeDiagnostics">COMPILING</div>
     </div>
-    <div class="motion-status-row">
-      <div id="motionStatus">选择动作后先看标准初始姿态</div>
-    </div>
-    <div class="motion-progress" aria-hidden="true"><div id="motionProgressFill"></div></div>
-
-    <div class="motion-grid">
-      <div class="motion-field">
-        <label for="motionGroup">灯组</label>
-        <select id="motionGroup">
-          <option value="rear">Rear Beam</option>
-          <option value="floor">Floor Beam</option>
-          <option value="side">Side Beam</option>
-          <option value="all-beams">All Beam</option>
-        </select>
-      </div>
-      <div class="motion-field">
-        <label for="motionAction">动作</label>
-        <select id="motionAction"></select>
-      </div>
-    </div>
-
-    <div id="motionActionNote" class="motion-action-note">先收成窄扇形，再向两侧展开。</div>
-
-    <div class="motion-beat-row">
-      <div class="motion-beat-label">完成拍数</div>
-      <div id="motionBeatButtons"></div>
-      <div id="motionBeatValue">2 拍</div>
-    </div>
-
-    <div class="motion-command-row">
-      <button type="button" id="motionPrepare">① 准备</button>
-      <button type="button" id="motionPlay">② 播放动作</button>
-      <button type="button" id="motionReplay">重播</button>
-      <button type="button" id="motionAuto">自动演示</button>
-    </div>
-
-    <div class="motion-footer">
-      <div class="motion-note">准备阶段会先把选中灯组摆到专属初始姿态，并压暗其它 Beam；主动作默认关闭 Scan。自动演示会执行 PREPARE → READY → PLAY → HOLD → RETURN。</div>
-      <button type="button" id="motionRestore">恢复 Dust</button>
-    </div>
+    <div id="runtimeSection">正在建立演出计划</div>
+    <div id="showStatus">00:00 · waiting</div>
+    <div id="planInfo">读取 MIDI 与灯具能力…</div>
+    <div class="runtime-rule"><b>核心规则</b><br>灯光不再从上一帧积分前进。每一帧都由绝对音乐时间重新求值；场景只接收即时结果，不再运行第二层 tween。</div>
+    <button id="showDeterminism" type="button">复算当前时刻</button>
   </aside>
+
+  <section class="player" aria-label="MIDI 灯光秀播放器">
+    <div class="transport">
+      <button id="showPlay" type="button">播放</button>
+      <button id="showRestart" type="button">从头重播</button>
+      <span id="showClock">00:00 / 00:00</span>
+      <span id="audioStatus" data-state="loading">正在载入 SF2…</span>
+    </div>
+    <div class="seek"><input id="showSeek" type="range" min="0" max="1" value="0" step="0.01" disabled aria-label="演出进度" /></div>
+    <div id="sectionJumps" class="section-row" aria-label="跳转段落"></div>
+    <div class="hint">空格：播放 / 暂停 · 拖动进度条直接验证 seek 后的确定性灯光状态</div>
+  </section>
 
   <div id="toast" role="status"></div>
   <div id="loading">
     <div class="loading-inner">
       <div class="loading-name">NOCTURNE</div>
       <div class="loading-line"></div>
-      <div id="loadingNote">正在载入场景、Dust MIDI 与灯光执行器</div>
+      <div id="loadingNote">正在载入场景与确定性灯光运行时</div>
     </div>
   </div>
+
   <script type="module" src="/src/assets/venues/nocturne/main.ts"></script>
 </body>
 </html>
