@@ -1,6 +1,6 @@
 # NOCTURNE Lighting Runtime V2
 
-这套目录是对旧 `DustLightingDirector + PhysicalLightingExecutor + MovementActionLab` 实验路线的替代核心。旧文件暂时保留用于对照，但 `main.ts` 已不再导入它们。
+这套目录是当前 NOCTURNE 灯光主线，用来替代旧 `DustLightingDirector + PhysicalLightingExecutor + MovementActionLab` 实验路线。旧实现已经集中归档到 `../legacy-v1/`，当前 `main.ts` 不再导入它们。
 
 核心约束只有一条：**同一个 ShowPlan、同一个音乐时刻，必须得到同一个 FrameState。**
 
@@ -34,6 +34,12 @@ NocturneLightingAdapter
 - `NocturneLightingAdapter.ts`：唯一场景写入口；每帧把 Runtime 的最终状态即时写入旧 NOCTURNE 灯具，不再让场景跑第二层 tween；强制关闭旧 scan。
 - `DustReferenceShow.ts`：只作为 Runtime V2 的手写参考计划。它强调稳定构图、有限换位、Hold 和鼓点 accent；`oscillator` 只在少量段落作背景纹理。
 - 播放器支持 seek；灯光 seek 不从零快进，而是直接重新求值目标音乐时刻。
+
+## 与 legacy-v1 的边界
+
+`../legacy-v1/` 只保存旧实验代码和经验，不是 V2 的依赖，也不应该重新接回当前入口。V2 可以吸收旧实验已经证明有效的约束，例如灯头速度限制、连续 handoff 和瞬态 accent，但实现必须服从“绝对音乐时间可复算”这一主线。
+
+`../dust.json.gz` 暂时仍是共享数据：当前 Dust 音频与 V2 reference show 都在读取它，因此没有跟随旧代码移入归档目录。
 
 ## 有意没有伪装完成的部分
 
