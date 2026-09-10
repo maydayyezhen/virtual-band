@@ -3,6 +3,7 @@ import { DustAudioPlayer, type DustAudioStatus } from './DustAudioPlayer';
 import { createDustAdaptiveStressShowPlan } from './lighting/v2/DustAdaptiveStressShow';
 import { decodeLegacyDustScore } from './lighting/v2/DustReferenceShow';
 import { NocturneLightingAdapter, type LightingStage } from './lighting/v2/NocturneLightingAdapter';
+import { namespaceCueIdsBySection } from './lighting/v2/ShowPlanIds';
 import {
   DeterministicLightingRuntime,
   compileShowPlan,
@@ -250,7 +251,7 @@ async function start(): Promise<void> {
 
   const adapter = new NocturneLightingAdapter(stage);
   const rig = adapter.describeRig();
-  const plan = createDustAdaptiveStressShowPlan(score, rig);
+  const plan = namespaceCueIdsBySection(createDustAdaptiveStressShowPlan(score, rig));
   const compiled = compileShowPlan(plan, rig, score);
   renderDiagnostics(compiled);
 
