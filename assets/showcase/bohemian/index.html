@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#05070c" />
+  <link rel="icon" type="image/svg+xml" href="/virtual-band-icon.svg" />
+  <title>NOCTURNE · Bohemian Rhapsody Live Band</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #05070c; color: #eff3f7; }
+    button, input { font: inherit; }
+    button { border: 1px solid #ffffff20; border-radius: 8px; color: #dfe8ef; background: #ffffff09; cursor: pointer; }
+    button:hover { background: #ffffff13; }
+    button:disabled { opacity: .44; cursor: wait; }
+    button.active { border-color: #e09a7866; color: #ffe3d1; background: #bf5f3c27; }
+
+    #viewport { position: fixed; inset: 0; touch-action: none; cursor: grab; }
+    #viewport.dragging { cursor: grabbing; }
+    #viewport canvas { display: block; width: 100%; height: 100%; }
+
+    .brand { position: fixed; z-index: 12; top: 22px; left: 24px; pointer-events: none; text-shadow: 0 2px 18px #000; }
+    .brand .eyebrow { color: #91a2b1; font-size: 10px; letter-spacing: .22em; }
+    .brand h1 { margin: 5px 0 0; font-size: clamp(20px, 2vw, 31px); font-weight: 650; letter-spacing: .12em; }
+    .brand p { margin: 7px 0 0; color: #a6b0ba; font-size: 11px; letter-spacing: .05em; }
+
+    .chapter { position: fixed; z-index: 12; top: 24px; right: 24px; width: min(360px, calc(100vw - 48px)); padding: 15px 17px; border: 1px solid #ffffff1e; border-radius: 12px; background: #070b12d9; box-shadow: 0 18px 55px #0008; backdrop-filter: blur(18px); }
+    .chapter .label { color: #8193a5; font: 10px ui-monospace, Consolas, monospace; letter-spacing: .16em; }
+    #showChapter { margin-top: 7px; font-size: 18px; font-weight: 620; }
+    #showLook { margin-top: 4px; color: #dcb58d; font: 11px ui-monospace, Consolas, monospace; letter-spacing: .12em; }
+    #chapterMeta { margin-top: 9px; color: #6f8295; font: 10px ui-monospace, Consolas, monospace; }
+
+    .meters { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 13px; }
+    .meter { min-width: 0; }
+    .meter b { display: block; margin-bottom: 4px; color: #718398; font-size: 8px; font-weight: 500; letter-spacing: .08em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .meter i { display: block; height: 3px; overflow: hidden; border-radius: 4px; background: #ffffff10; }
+    .meter em { display: block; width: 100%; height: 100%; transform: scaleX(.015); transform-origin: left center; background: currentColor; transition: transform 55ms linear; }
+    .meter:nth-child(1) { color: #e6c48e; }
+    .meter:nth-child(2) { color: #d58863; }
+    .meter:nth-child(3) { color: #8bd9dd; }
+    .meter:nth-child(4) { color: #7ca9d5; }
+    .meter:nth-child(5) { color: #b7a3e9; }
+
+    .player { position: fixed; z-index: 14; left: 50%; bottom: 18px; transform: translateX(-50%); width: min(1080px, calc(100vw - 36px)); padding: 13px 15px 11px; border: 1px solid #ffffff20; border-radius: 12px; background: #070b12e8; box-shadow: 0 20px 65px #0009; backdrop-filter: blur(20px); }
+    .transport { display: flex; align-items: center; gap: 8px; }
+    .transport button { min-height: 35px; padding: 6px 13px; }
+    #showPlay { min-width: 78px; }
+    #showClock { min-width: 106px; margin-left: 4px; color: #d0dae3; font: 11px ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    #audioStatus { margin-left: auto; color: #91a4b6; font-size: 10px; }
+    .volume { display: flex; align-items: center; gap: 6px; color: #708297; font-size: 9px; }
+    #showVolume { width: 78px; accent-color: #d57b55; }
+    .timeline { margin-top: 9px; }
+    #showSeek { width: 100%; height: 14px; accent-color: #d57b55; cursor: pointer; }
+    .chapters { display: flex; gap: 4px; margin-top: 7px; overflow-x: auto; scrollbar-width: none; }
+    .chapters::-webkit-scrollbar { display: none; }
+    .chapters button { flex: 0 0 auto; min-height: 27px; padding: 4px 7px; border-color: transparent; background: transparent; color: #788b9d; font-size: 9px; letter-spacing: .04em; }
+    .chapters button:hover, .chapters button.active { color: #eff3f7; background: #ffffff0d; }
+    .chapters button.active { color: #e5bb91; }
+    .footer { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; color: #5f7182; font-size: 9px; }
+
+    #loading { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; background: #05070c; transition: opacity .6s ease; }
+    .loading-inner { text-align: center; }
+    .loading-name { font-size: 22px; font-weight: 300; letter-spacing: .34em; }
+    .loading-line { width: 180px; height: 1px; margin: 19px auto; overflow: hidden; background: #26333e; }
+    .loading-line::after { content: ""; display: block; width: 58px; height: 100%; background: #d8b17f; animation: loading 1.15s ease-in-out infinite; }
+    #loadingNote { color: #8999a8; font-size: 11px; }
+    @keyframes loading { from { transform: translateX(-65px); } to { transform: translateX(188px); } }
+
+    #toast { position: fixed; z-index: 30; left: 50%; bottom: 120px; opacity: 0; pointer-events: none; }
+
+    @media (max-width: 780px) {
+      .brand { top: 14px; left: 14px; }
+      .brand p { display: none; }
+      .chapter { top: 80px; right: 12px; width: calc(100vw - 24px); padding: 11px 13px; }
+      .chapter .label, #chapterMeta { display: none; }
+      #showChapter { font-size: 15px; }
+      .meters { margin-top: 9px; }
+      .player { bottom: 10px; width: calc(100vw - 20px); padding: 10px; }
+      #audioStatus, .volume, .footer span:last-child { display: none; }
+      .transport button { min-height: 31px; padding: 5px 9px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="viewport" tabindex="0" aria-label="Bohemian Rhapsody 虚拟乐队演出。拖动环顾，滚轮缩放，WASD 移动。"></div>
+
+  <div hidden aria-hidden="true">
+    <button id="demoButton" type="button"></button>
+    <button id="pauseButton" type="button"></button>
+    <input id="bpm" value="78" />
+    <input id="cameraAuto" type="checkbox" checked />
+    <span id="transportLabel"></span>
+    <span id="timecode"></span>
+    <span id="viewLabel"></span>
+  </div>
+
+  <header class="brand">
+    <div class="eyebrow">NOCTURNE / VIRTUAL BAND</div>
+    <h1>BOHEMIAN RHAPSODY</h1>
+    <p>Queen · MIDI-driven instruments · lighting · camera · LED</p>
+  </header>
+
+  <aside class="chapter" aria-label="当前演出段落">
+    <div class="label">LIVE SCORE / 4 PROCEDURAL INSTRUMENTS</div>
+    <div id="showChapter">序幕 · 合声微光</div>
+    <div id="showLook">OVERTURE</div>
+    <div id="chapterMeta">0:00 → ...</div>
+    <div class="meters" aria-label="MIDI 声部响应">
+      <div class="meter"><b>PIANO</b><i><em id="meter-piano"></em></i></div>
+      <div class="meter"><b>GUITAR</b><i><em id="meter-guitar"></em></i></div>
+      <div class="meter"><b>BASS</b><i><em id="meter-bass"></em></i></div>
+      <div class="meter"><b>DRUMS</b><i><em id="meter-drums"></em></i></div>
+      <div class="meter"><b>VOICES</b><i><em id="meter-voices"></em></i></div>
+    </div>
+  </aside>
+
+  <section class="player" aria-label="Bohemian Rhapsody 演出播放器">
+    <div class="transport">
+      <button id="showPlay" type="button">▶ 播放</button>
+      <button id="showRestart" type="button">↶ 从头</button>
+      <span id="showClock">0:00 / 0:00</span>
+      <span id="audioStatus">准备场景…</span>
+      <label class="volume">VOL <input id="showVolume" type="range" min="0" max="100" value="84" /></label>
+    </div>
+    <div class="timeline"><input id="showSeek" type="range" min="0" max="331" value="0" step="0.02" aria-label="演出进度" /></div>
+    <div id="chapterJumps" class="chapters" aria-label="演出段落跳转"></div>
+    <div class="footer"><span id="showStats">正在解析 MIDI…</span><span>空格：播放 / 暂停 · 乐器由 MIDI 自动演奏</span></div>
+  </section>
+
+  <div id="toast" role="status"></div>
+  <div id="loading">
+    <div class="loading-inner">
+      <div class="loading-name">NOCTURNE</div>
+      <div class="loading-line"></div>
+      <div id="loadingNote">正在打开 Bohemian Rhapsody 舞台</div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/showcase/bohemian/main.ts"></script>
+</body>
+</html>
