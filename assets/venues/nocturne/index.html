@@ -33,16 +33,37 @@
     button:hover, select:hover { background: #ffffff13; }
     button.active { border-color: #c75d675c; background: #b8323c22; color: #ffd9da; }
     button:disabled { opacity: .52; cursor: wait; }
-    .motion-lab { position: fixed; top: 18px; right: 18px; z-index: 14; width: min(430px, calc(100vw - 36px)); padding: 10px; border: 1px solid #ffffff1d; border-radius: 11px; background: #090e17dd; backdrop-filter: blur(16px); }
-    .motion-lab-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
-    .motion-lab-title { font-size: 12px; font-weight: 700; letter-spacing: .12em; }
-    #motionStatus { color: #92a7ba; font-size: 10px; text-align: right; }
-    .motion-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; }
-    .motion-toolbar label { display: flex; align-items: center; gap: 6px; color: #91a2b5; font-size: 11px; }
-    .motion-toolbar select { flex: 1; }
-    .motion-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
-    .motion-action { width: 100%; min-height: 32px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .motion-note { margin-top: 8px; color: #72869a; font-size: 10px; line-height: 1.5; }
+
+    .motion-lab { position: fixed; top: 18px; right: 18px; z-index: 14; width: min(470px, calc(100vw - 36px)); padding: 12px; border: 1px solid #ffffff22; border-radius: 12px; background: #090e17e8; box-shadow: 0 18px 44px #0008; backdrop-filter: blur(18px); }
+    .motion-lab-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+    .motion-lab-title { font-size: 12px; font-weight: 750; letter-spacing: .14em; }
+    .motion-phase { min-width: 66px; border: 1px solid #ffffff1b; border-radius: 999px; padding: 4px 8px; color: #93a7ba; background: #ffffff08; font-size: 9px; font-weight: 700; letter-spacing: .12em; text-align: center; }
+    .motion-phase[data-phase="PREPARE"], .motion-phase[data-phase="RETURN"] { color: #d7c59e; border-color: #cfb87542; background: #c5a75212; }
+    .motion-phase[data-phase="READY"] { color: #9ed6b0; border-color: #6fc78e42; background: #5ab87912; }
+    .motion-phase[data-phase="PLAY"] { color: #f0b4b7; border-color: #d56a7145; background: #b8323c18; }
+    .motion-phase[data-phase="HOLD"] { color: #b8c9e4; border-color: #829dcc45; background: #7189b418; }
+    .motion-status-row { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
+    #motionStatus { flex: 1; min-width: 0; color: #a8b8c7; font-size: 10px; line-height: 1.4; }
+    .motion-progress { height: 2px; overflow: hidden; border-radius: 999px; background: #ffffff12; }
+    #motionProgressFill { width: 0; height: 100%; background: currentColor; color: #c86d75; transition: width .08s linear; }
+    .motion-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 10px; }
+    .motion-field { min-width: 0; }
+    .motion-field label { display: block; margin-bottom: 4px; color: #71869b; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+    .motion-field select { width: 100%; }
+    .motion-action-note { min-height: 31px; margin-top: 8px; padding: 7px 8px; border-radius: 7px; background: #ffffff05; color: #8194a8; font-size: 10px; line-height: 1.55; }
+    .motion-beat-row { display: flex; align-items: center; gap: 7px; margin-top: 9px; }
+    .motion-beat-label { min-width: 58px; color: #71869b; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+    #motionBeatButtons { display: flex; flex: 1; gap: 4px; }
+    .motion-beat { flex: 1; min-width: 0; min-height: 29px; padding: 4px 5px; font-size: 10px; }
+    .motion-beat.active { border-color: #c75d675c; background: #b8323c22; color: #ffd9da; }
+    #motionBeatValue { min-width: 38px; color: #c4d0dc; font-size: 10px; text-align: right; }
+    .motion-command-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-top: 10px; }
+    .motion-command-row button { min-height: 32px; padding: 5px 6px; font-size: 10px; }
+    #motionAuto { border-color: #a6586055; color: #efc2c4; }
+    .motion-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 9px; padding-top: 8px; border-top: 1px solid #ffffff12; }
+    .motion-note { color: #657b90; font-size: 9px; line-height: 1.45; }
+    #motionRestore { flex: 0 0 auto; min-height: 30px; font-size: 10px; }
+
     #loading { position: fixed; inset: 0; display: grid; place-items: center; background: #080b13; z-index: 20; transition: opacity .6s; }
     .loading-inner { text-align: center; }
     .loading-name { font-size: 21px; letter-spacing: .32em; font-weight: 300; }
@@ -58,7 +79,8 @@
       .asset-hint { display: none; }
       #dustStatus, #audioStatus { width: 100%; min-width: 0; }
       .divider { display: none; }
-      .motion-lab { top: 92px; right: 12px; width: min(390px, calc(100vw - 24px)); max-height: 48vh; overflow: auto; }
+      .motion-lab { top: 92px; right: 12px; width: min(430px, calc(100vw - 24px)); max-height: 53vh; overflow: auto; }
+      .motion-command-row { grid-template-columns: repeat(2, 1fr); }
     }
     @media (prefers-reduced-motion: reduce) { *, *::after { animation: none !important; transition: none !important; } }
   </style>
@@ -101,21 +123,49 @@
 
   <aside class="motion-lab" aria-label="灯具动作预设调试">
     <div class="motion-lab-head">
-      <div class="motion-lab-title">MOVEMENT LAB</div>
-      <div id="motionStatus">动作调试待命</div>
+      <div class="motion-lab-title">MOVEMENT LAB · STAGED DEMO</div>
+      <div id="motionPhase" class="motion-phase" data-phase="IDLE">IDLE</div>
     </div>
-    <div class="motion-toolbar">
-      <label for="motionGroup">灯组</label>
-      <select id="motionGroup">
-        <option value="rear">Rear Beam</option>
-        <option value="floor">Floor Beam</option>
-        <option value="side">Side Beam</option>
-        <option value="all-beams">All Beam</option>
-      </select>
+    <div class="motion-status-row">
+      <div id="motionStatus">选择动作后先看标准初始姿态</div>
+    </div>
+    <div class="motion-progress" aria-hidden="true"><div id="motionProgressFill"></div></div>
+
+    <div class="motion-grid">
+      <div class="motion-field">
+        <label for="motionGroup">灯组</label>
+        <select id="motionGroup">
+          <option value="rear">Rear Beam</option>
+          <option value="floor">Floor Beam</option>
+          <option value="side">Side Beam</option>
+          <option value="all-beams">All Beam</option>
+        </select>
+      </div>
+      <div class="motion-field">
+        <label for="motionAction">动作</label>
+        <select id="motionAction"></select>
+      </div>
+    </div>
+
+    <div id="motionActionNote" class="motion-action-note">先收成窄扇形，再向两侧展开。</div>
+
+    <div class="motion-beat-row">
+      <div class="motion-beat-label">完成拍数</div>
+      <div id="motionBeatButtons"></div>
+      <div id="motionBeatValue">2 拍</div>
+    </div>
+
+    <div class="motion-command-row">
+      <button type="button" id="motionPrepare">① 准备</button>
+      <button type="button" id="motionPlay">② 播放动作</button>
+      <button type="button" id="motionReplay">重播</button>
+      <button type="button" id="motionAuto">自动演示</button>
+    </div>
+
+    <div class="motion-footer">
+      <div class="motion-note">准备阶段会先把选中灯组摆到专属初始姿态，并压暗其它 Beam；主动作默认关闭 Scan。自动演示会执行 PREPARE → READY → PLAY → HOLD → RETURN。</div>
       <button type="button" id="motionRestore">恢复 Dust</button>
     </div>
-    <div id="motionActionButtons" class="motion-actions"></div>
-    <div class="motion-note">点击动作会暂停 Dust 音频与自动编排，只运行这一套灯具动作。主运动按拍数完成；物理速度/加速度仍然生效。Idle Scan 仅用于对比待机漂移。</div>
   </aside>
 
   <div id="toast" role="status"></div>
