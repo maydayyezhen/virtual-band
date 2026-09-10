@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { DustAudioPlayer, type DustAudioStatus } from './DustAudioPlayer';
-import { createDustReferenceShowPlan, decodeLegacyDustScore } from './lighting/v2/DustReferenceShow';
+import { createDustAdaptiveStressShowPlan } from './lighting/v2/DustAdaptiveStressShow';
+import { decodeLegacyDustScore } from './lighting/v2/DustReferenceShow';
 import { NocturneLightingAdapter, type LightingStage } from './lighting/v2/NocturneLightingAdapter';
 import {
   DeterministicLightingRuntime,
@@ -249,7 +250,7 @@ async function start(): Promise<void> {
 
   const adapter = new NocturneLightingAdapter(stage);
   const rig = adapter.describeRig();
-  const plan = createDustReferenceShowPlan(score, rig);
+  const plan = createDustAdaptiveStressShowPlan(score, rig);
   const compiled = compileShowPlan(plan, rig, score);
   renderDiagnostics(compiled);
 
@@ -268,7 +269,7 @@ async function start(): Promise<void> {
   const seek = document.getElementById('showSeek') as HTMLInputElement | null;
   if (seek) seek.max = String(score.duration);
   const planInfo = document.getElementById('planInfo');
-  if (planInfo) planInfo.textContent = `${rig.fixtures.length} fixtures · ${plan.cues.length} cues · ${score.events.length} MIDI events`;
+  if (planInfo) planInfo.textContent = `${plan.id} · ${rig.fixtures.length} fixtures · ${plan.cues.length} cues · ${score.events.length} MIDI events`;
 
   const loading = document.getElementById('loading');
   if (loading) {
