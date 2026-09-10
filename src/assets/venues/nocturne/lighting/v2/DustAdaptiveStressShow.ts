@@ -10,127 +10,272 @@ import type {
 } from './contracts';
 
 const LOOK = {
-  red: '#b8323c',
-  deepRed: '#631821',
-  white: '#f4f0e7',
-  steel: '#788391',
-  blue: '#465a78',
-  warm: '#e3c9a4',
+  blackRed: '#3d1118',
+  red: '#9f2632',
+  hotRed: '#c43b45',
+  white: '#f5f1e8',
+  steel: '#77818d',
+  blueSteel: '#4f6076',
+  warm: '#d9c2a3',
 };
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
+type BeamGroupLook = {
+  level: number;
+  idle: number;
+  colorA: string;
+  colorB: string;
+  width: number;
+  tilt: number;
+  angle: number;
+  active: 'inner' | 'outer' | 'alternating' | 'all';
+};
+
+type ParGroupLook = {
+  level: number;
+  color: string;
+  angle: number;
+};
+
+type SceneLook = {
+  rear: BeamGroupLook;
+  floor: BeamGroupLook;
+  side: BeamGroupLook;
+  front: ParGroupLook;
+  frontFloor: ParGroupLook;
+  transitionBeats: number;
+};
+
+type RigGroups = {
+  rear: RigFixtureSnapshot[];
+  floor: RigFixtureSnapshot[];
+  side: RigFixtureSnapshot[];
+  front: RigFixtureSnapshot[];
+  frontFloor: RigFixtureSnapshot[];
+  allBeams: RigFixtureSnapshot[];
+};
+
+const SECTION_DEFS: Array<[string, string, string]> = [
+  ['intro', 'Intro · The Riff Appears', '少量灯建立低频空间；不急着运动，让三音 Bass riff 成为舞台的重力。'],
+  ['verse-a', 'Verse A · Stalk', '窄而偏侧的构图；动作像步伐，不像摇摆。'],
+  ['hook-a', 'Hook A · Bites', '把“bite”做成空间咬合：扇面收拢、错位、再打开，而不是逐拍闪。'],
+  ['verse-b', 'Verse B · Mirror', '保留第一段语法，但镜像位置和重心，制造重复中的变奏。'],
+  ['hook-b', 'Hook B · Wider Teeth', '第二次 hook 扩大空间和白光比例，但仍保留暗部。'],
+  ['breakdown', 'Breakdown · Swirl', '只有这里允许明显连续感：对应录音里的旋转/处理感，而不是全曲都在扫。'],
+  ['rebuild', 'Rebuild · Layer By Layer', '从 Bass/鼓的底盘重新叠加灯组，一层层把舞台搭回来。'],
+  ['final', 'Final · Arena Release', '前面克制换来的释放：宽 fan、交叉运动、少量白色重音。'],
+  ['outro', 'Outro · Release', '动作逐渐停止，空间收回，最后明确淡黑。'],
+];
+
+const TARGET_FRACTIONS = [0, 0.11, 0.24, 0.34, 0.48, 0.59, 0.72, 0.82, 0.94, 1];
+
 export function createDustAdaptiveStressShowPlan(score: SongScore, rig: RigSnapshot): ShowPlan {
   const beat = 60 / score.bpm;
   const bar = beat * 4;
-  const sections = buildSections(score.duration, bar);
+  const sections = buildSongSpecificSections(score, bar);
+  const groups = groupRig(rig);
   const cues: LightingCue[] = [];
-  const current = new Map<string, FixtureState>(rig.fixtures.map((fixture) => [fixture.id, { ...fixture.home, intensity: 0 }]));
+  const current = new Map<string, FixtureState>(
+    rig.fixtures.map((fixture) => [fixture.id, { ...fixture.home, intensity: 0 }]),
+  );
+  const homes = new Map<string, { pan: number; tilt: number }>();
 
-  const rear = fixtures(rig, 'beam', 'rear');
-  const floor = fixtures(rig, 'beam', 'floor');
-  const side = fixtures(rig, 'beam', 'side');
-  const front = rig.fixtures
-    .filter((fixture) => fixture.type === 'par' && fixture.groups.includes('front') && !fixture.groups.includes('front-floor'))
-    .sort((a, b) => a.id.localeCompare(b.id));
-  const frontFloor = fixtures(rig, 'par', 'front-floor');
-  const allBeams = rig.fixtures.filter((fixture) => fixture.type === 'beam').sort((a, b) => a.id.localeCompare(b.id));
+  sections.forEach((section, sectionIndex) => {
+    const look = sceneLook(sectionIndex);
+    const transitionEnd = Math.min(
+      section.endSeconds - 0.01,
+      section.startSeconds + beat * look.transitionBeats,
+    );
 
-  const basePan = new Map<string, number>();
-  const baseTilt = new Map<string, number>();
+    addBaseBeamGroup(cues, current, homes, groups.rear, section, look.rear, transitionEnd, 'rear');
+    addBaseBeamGroup(cues, current, homes, groups.floor, section, look.floor, transitionEnd, 'floor');
+    addBaseBeamGroup(cues, current, homes, groups.side, section, look.side, transitionEnd, 'side');
+    addBaseParGroup(cues, current, groups.front, section, look.front, transitionEnd, 'front');
+    addBaseParGroup(cues, current, groups.frontFloor, section, look.frontFloor, transitionEnd, 'front-floor');
 
-  sections.forEach((section, index) => {
-    const energy = sectionEnergy(score.events, section);
-    const look = sectionLook(index, energy);
-    const transitionEnd = Math.min(section.endSeconds - 0.01, section.startSeconds + beat * look.transitionBeats);
-
-    addBeamLook(cues, current, rear, section, look.rearIntensity, look.rearColorA, look.rearColorB, look.rearWidth, look.rearTilt, look.rearAngle, transitionEnd, basePan, baseTilt, 'rear');
-    addBeamLook(cues, current, floor, section, look.floorIntensity, look.floorColorA, look.floorColorB, look.floorWidth, look.floorTilt, look.floorAngle, transitionEnd, basePan, baseTilt, 'floor');
-    addBeamLook(cues, current, side, section, look.sideIntensity, look.sideColorA, look.sideColorB, look.sideWidth, look.sideTilt, look.sideAngle, transitionEnd, basePan, baseTilt, 'side');
-    addParLook(cues, current, front, section, look.frontIntensity, look.frontColor, 24, transitionEnd, 'front');
-    addParLook(cues, current, frontFloor, section, look.frontFloorIntensity, look.frontFloorColor, 22, transitionEnd, 'front-floor');
-
-    const gestureStart = Math.min(section.endSeconds, transitionEnd + beat * 0.25);
-    addFourBarGestures(cues, score, section, gestureStart, beat, bar, rear, floor, side, basePan, baseTilt, energy);
+    switch (section.id) {
+      case 'intro':
+        addIntroRiffReveal(cues, score, section, groups, homes, beat, bar);
+        break;
+      case 'verse-a':
+        addVerseStalk(cues, score, section, groups, homes, beat, bar, 1);
+        break;
+      case 'hook-a':
+        addHookBite(cues, section, groups, homes, beat, bar, 1);
+        break;
+      case 'verse-b':
+        addVerseStalk(cues, score, section, groups, homes, beat, bar, -1);
+        break;
+      case 'hook-b':
+        addHookBite(cues, section, groups, homes, beat, bar, -1);
+        break;
+      case 'breakdown':
+        addBreakdownSwirl(cues, score, section, groups, homes, beat, bar);
+        break;
+      case 'rebuild':
+        addRebuild(cues, section, groups, homes, beat, bar);
+        break;
+      case 'final':
+        addFinalRelease(cues, section, groups, homes, beat, bar);
+        break;
+      case 'outro':
+        addOutroContraction(cues, section, groups, homes, beat, bar);
+        break;
+    }
   });
 
-  addBassMotionBites(cues, score, sections, rear, side, basePan, baseTilt, beat);
-  addSelectiveDrumAccents(cues, sections, rear, floor, side, frontFloor, allBeams, beat);
-  addOutroBlack(cues, current, sections, rig, score.duration, beat);
+  addCrashPunctuation(cues, sections, groups.allBeams, beat);
+  addFinalBlackout(cues, current, sections, rig, score.duration, beat);
 
   return {
     schemaVersion: '2.0-prototype',
-    id: 'dust-kinetic-groove-v3',
-    revision: 3,
+    id: 'dust-directed-concert-v4',
+    revision: 4,
     title: `${score.artist} · ${score.title}`,
-    brief: 'Kinetic Groove：补上“静态 pose”和“持续摇摆”之间缺失的中尺度动作。以 1–4 小节的有限 gesture 为主体，Bass riff 驱动小幅运动，鼓点只做选择性标点。',
-    seed: 117,
+    brief: '人工导演版：scene → phrase gesture → selective accent。以静止/运动对比、层次递进和 song-specific motif 为核心，不逐拍追灯。',
+    seed: 1980,
     baseLook: { intensity: 0 },
     sections,
     cues,
   };
 }
 
-type SectionLook = {
-  rearIntensity: number;
-  rearColorA: string;
-  rearColorB: string;
-  rearWidth: number;
-  rearTilt: number;
-  rearAngle: number;
-  floorIntensity: number;
-  floorColorA: string;
-  floorColorB: string;
-  floorWidth: number;
-  floorTilt: number;
-  floorAngle: number;
-  sideIntensity: number;
-  sideColorA: string;
-  sideColorB: string;
-  sideWidth: number;
-  sideTilt: number;
-  sideAngle: number;
-  frontIntensity: number;
-  frontColor: string;
-  frontFloorIntensity: number;
-  frontFloorColor: string;
-  transitionBeats: number;
-};
-
-function sectionLook(index: number, energy: number): SectionLook {
-  const e = clamp(energy, 0, 1);
-  const looks: SectionLook[] = [
-    { rearIntensity: 0.30, rearColorA: LOOK.deepRed, rearColorB: LOOK.red, rearWidth: 18, rearTilt: -26, rearAngle: 2.5, floorIntensity: 0.12, floorColorA: LOOK.deepRed, floorColorB: LOOK.steel, floorWidth: 13, floorTilt: 44, floorAngle: 2.9, sideIntensity: 0.18, sideColorA: LOOK.red, sideColorB: LOOK.white, sideWidth: 10, sideTilt: -18, sideAngle: 3.2, frontIntensity: 0.17, frontColor: LOOK.warm, frontFloorIntensity: 0.06, frontFloorColor: LOOK.deepRed, transitionBeats: 1.2 },
-    { rearIntensity: 0.42, rearColorA: LOOK.red, rearColorB: LOOK.steel, rearWidth: 26, rearTilt: -25, rearAngle: 2.25, floorIntensity: 0.20, floorColorA: LOOK.deepRed, floorColorB: LOOK.red, floorWidth: 20, floorTilt: 41, floorAngle: 2.6, sideIntensity: 0.26, sideColorA: LOOK.red, sideColorB: LOOK.white, sideWidth: 16, sideTilt: -16, sideAngle: 3.0, frontIntensity: 0.20, frontColor: LOOK.warm, frontFloorIntensity: 0.09, frontFloorColor: LOOK.red, transitionBeats: 0.9 },
-    { rearIntensity: 0.50, rearColorA: LOOK.red, rearColorB: LOOK.white, rearWidth: 32, rearTilt: -23, rearAngle: 2.05, floorIntensity: 0.27, floorColorA: LOOK.deepRed, floorColorB: LOOK.red, floorWidth: 26, floorTilt: 38, floorAngle: 2.35, sideIntensity: 0.32, sideColorA: LOOK.white, sideColorB: LOOK.red, sideWidth: 22, sideTilt: -14, sideAngle: 2.8, frontIntensity: 0.24, frontColor: LOOK.warm, frontFloorIntensity: 0.13, frontFloorColor: LOOK.red, transitionBeats: 1.1 },
-    { rearIntensity: 0.26, rearColorA: LOOK.deepRed, rearColorB: LOOK.steel, rearWidth: 14, rearTilt: -24, rearAngle: 2.8, floorIntensity: 0.10, floorColorA: LOOK.deepRed, floorColorB: LOOK.blue, floorWidth: 12, floorTilt: 46, floorAngle: 3.0, sideIntensity: 0.14, sideColorA: LOOK.red, sideColorB: LOOK.steel, sideWidth: 9, sideTilt: -18, sideAngle: 3.4, frontIntensity: 0.13, frontColor: LOOK.warm, frontFloorIntensity: 0.045, frontFloorColor: LOOK.deepRed, transitionBeats: 1.4 },
-    { rearIntensity: 0.58, rearColorA: LOOK.red, rearColorB: LOOK.white, rearWidth: 38, rearTilt: -22, rearAngle: 1.95, floorIntensity: 0.34, floorColorA: LOOK.red, floorColorB: LOOK.deepRed, floorWidth: 31, floorTilt: 36, floorAngle: 2.15, sideIntensity: 0.38, sideColorA: LOOK.white, sideColorB: LOOK.red, sideWidth: 27, sideTilt: -12, sideAngle: 2.6, frontIntensity: 0.28, frontColor: LOOK.warm, frontFloorIntensity: 0.16, frontFloorColor: LOOK.red, transitionBeats: 1.3 },
-    { rearIntensity: 0.74, rearColorA: LOOK.red, rearColorB: LOOK.white, rearWidth: 46, rearTilt: -19, rearAngle: 1.7, floorIntensity: 0.50, floorColorA: LOOK.red, floorColorB: LOOK.white, floorWidth: 39, floorTilt: 33, floorAngle: 1.9, sideIntensity: 0.50, sideColorA: LOOK.white, sideColorB: LOOK.red, sideWidth: 32, sideTilt: -10, sideAngle: 2.35, frontIntensity: 0.36, frontColor: LOOK.white, frontFloorIntensity: 0.25, frontFloorColor: LOOK.red, transitionBeats: 0.75 },
-    { rearIntensity: 0.24, rearColorA: LOOK.deepRed, rearColorB: LOOK.steel, rearWidth: 16, rearTilt: -25, rearAngle: 2.7, floorIntensity: 0.09, floorColorA: LOOK.deepRed, floorColorB: LOOK.blue, floorWidth: 11, floorTilt: 45, floorAngle: 3.0, sideIntensity: 0.12, sideColorA: LOOK.steel, sideColorB: LOOK.red, sideWidth: 8, sideTilt: -18, sideAngle: 3.5, frontIntensity: 0.11, frontColor: LOOK.warm, frontFloorIntensity: 0.035, frontFloorColor: LOOK.deepRed, transitionBeats: 1.7 },
-  ];
-  const base = looks[index] ?? looks[looks.length - 1]!;
-  const scale = lerp(0.88, 1.08, e);
+function groupRig(rig: RigSnapshot): RigGroups {
+  const fixtures = rig.fixtures.slice().sort((a, b) => a.id.localeCompare(b.id));
   return {
-    ...base,
-    rearIntensity: clamp(base.rearIntensity * scale, 0, 1),
-    floorIntensity: clamp(base.floorIntensity * scale, 0, 1),
-    sideIntensity: clamp(base.sideIntensity * scale, 0, 1),
+    rear: fixtures.filter((fixture) => fixture.type === 'beam' && fixture.groups.includes('rear')),
+    floor: fixtures.filter((fixture) => fixture.type === 'beam' && fixture.groups.includes('floor')),
+    side: fixtures.filter((fixture) => fixture.type === 'beam' && fixture.groups.includes('side')),
+    front: fixtures.filter(
+      (fixture) =>
+        fixture.type === 'par' &&
+        fixture.groups.includes('front') &&
+        !fixture.groups.includes('front-floor'),
+    ),
+    frontFloor: fixtures.filter(
+      (fixture) => fixture.type === 'par' && fixture.groups.includes('front-floor'),
+    ),
+    allBeams: fixtures.filter((fixture) => fixture.type === 'beam'),
   };
 }
 
-function addBeamLook(
-  cues: LightingCue[], current: Map<string, FixtureState>, selected: RigFixtureSnapshot[], section: ShowSection,
-  intensity: number, colorA: string, colorB: string, width: number, tilt: number, angle: number, transitionEnd: number,
-  basePan: Map<string, number>, baseTilt: Map<string, number>, group: string,
+function sceneLook(index: number): SceneLook {
+  const looks: SceneLook[] = [
+    {
+      rear: beam(0.24, 0.008, LOOK.blackRed, LOOK.red, 12, -27, 2.7, 'inner'),
+      floor: beam(0.06, 0.004, LOOK.blackRed, LOOK.blueSteel, 10, 46, 3.2, 'inner'),
+      side: beam(0.08, 0.003, LOOK.steel, LOOK.red, 7, -19, 3.5, 'outer'),
+      front: par(0.12, LOOK.warm, 26),
+      frontFloor: par(0.025, LOOK.blackRed, 24),
+      transitionBeats: 1.8,
+    },
+    {
+      rear: beam(0.38, 0.012, LOOK.red, LOOK.blackRed, 24, -25, 2.35, 'inner'),
+      floor: beam(0.12, 0.006, LOOK.blackRed, LOOK.red, 18, 42, 2.8, 'alternating'),
+      side: beam(0.24, 0.008, LOOK.white, LOOK.red, 15, -16, 3.0, 'outer'),
+      front: par(0.17, LOOK.warm, 25),
+      frontFloor: par(0.055, LOOK.red, 23),
+      transitionBeats: 1.0,
+    },
+    {
+      rear: beam(0.56, 0.02, LOOK.red, LOOK.white, 38, -22, 2.0, 'all'),
+      floor: beam(0.26, 0.01, LOOK.blackRed, LOOK.hotRed, 30, 37, 2.3, 'alternating'),
+      side: beam(0.34, 0.012, LOOK.white, LOOK.red, 24, -13, 2.7, 'all'),
+      front: par(0.22, LOOK.warm, 24),
+      frontFloor: par(0.12, LOOK.red, 22),
+      transitionBeats: 0.65,
+    },
+    {
+      rear: beam(0.36, 0.01, LOOK.blackRed, LOOK.steel, 26, -24, 2.4, 'inner'),
+      floor: beam(0.14, 0.006, LOOK.blueSteel, LOOK.red, 20, 41, 2.8, 'alternating'),
+      side: beam(0.25, 0.008, LOOK.red, LOOK.white, 17, -15, 3.0, 'outer'),
+      front: par(0.17, LOOK.warm, 25),
+      frontFloor: par(0.06, LOOK.red, 23),
+      transitionBeats: 1.0,
+    },
+    {
+      rear: beam(0.62, 0.018, LOOK.red, LOOK.white, 43, -20, 1.9, 'all'),
+      floor: beam(0.32, 0.012, LOOK.hotRed, LOOK.white, 34, 35, 2.15, 'all'),
+      side: beam(0.38, 0.012, LOOK.white, LOOK.red, 28, -12, 2.55, 'all'),
+      front: par(0.25, LOOK.white, 23),
+      frontFloor: par(0.15, LOOK.hotRed, 21),
+      transitionBeats: 0.6,
+    },
+    {
+      rear: beam(0.28, 0.008, LOOK.blueSteel, LOOK.red, 18, -24, 2.6, 'inner'),
+      floor: beam(0.08, 0.004, LOOK.blackRed, LOOK.blueSteel, 14, 45, 3.0, 'inner'),
+      side: beam(0.34, 0.008, LOOK.steel, LOOK.white, 19, -12, 2.5, 'all'),
+      front: par(0.13, LOOK.warm, 26),
+      frontFloor: par(0.04, LOOK.blackRed, 24),
+      transitionBeats: 1.6,
+    },
+    {
+      rear: beam(0.40, 0.01, LOOK.red, LOOK.steel, 28, -24, 2.25, 'inner'),
+      floor: beam(0.18, 0.007, LOOK.blackRed, LOOK.red, 22, 40, 2.6, 'alternating'),
+      side: beam(0.22, 0.007, LOOK.white, LOOK.red, 17, -15, 2.9, 'outer'),
+      front: par(0.17, LOOK.warm, 25),
+      frontFloor: par(0.07, LOOK.red, 23),
+      transitionBeats: 1.2,
+    },
+    {
+      rear: beam(0.78, 0.024, LOOK.hotRed, LOOK.white, 52, -18, 1.7, 'all'),
+      floor: beam(0.52, 0.016, LOOK.red, LOOK.white, 44, 31, 1.9, 'all'),
+      side: beam(0.55, 0.016, LOOK.white, LOOK.hotRed, 36, -9, 2.25, 'all'),
+      front: par(0.34, LOOK.white, 22),
+      frontFloor: par(0.24, LOOK.hotRed, 20),
+      transitionBeats: 0.55,
+    },
+    {
+      rear: beam(0.24, 0.008, LOOK.blackRed, LOOK.steel, 16, -25, 2.7, 'inner'),
+      floor: beam(0.07, 0.004, LOOK.blackRed, LOOK.blueSteel, 11, 46, 3.1, 'inner'),
+      side: beam(0.12, 0.004, LOOK.steel, LOOK.red, 9, -18, 3.3, 'outer'),
+      front: par(0.11, LOOK.warm, 26),
+      frontFloor: par(0.03, LOOK.blackRed, 24),
+      transitionBeats: 1.4,
+    },
+  ];
+  return looks[index] ?? looks[looks.length - 1]!;
+}
+
+function beam(
+  level: number,
+  idle: number,
+  colorA: string,
+  colorB: string,
+  width: number,
+  tilt: number,
+  angle: number,
+  active: BeamGroupLook['active'],
+): BeamGroupLook {
+  return { level, idle, colorA, colorB, width, tilt, angle, active };
+}
+
+function par(level: number, color: string, angle: number): ParGroupLook {
+  return { level, color, angle };
+}
+
+function addBaseBeamGroup(
+  cues: LightingCue[],
+  current: Map<string, FixtureState>,
+  homes: Map<string, { pan: number; tilt: number }>,
+  selected: RigFixtureSnapshot[],
+  section: ShowSection,
+  look: BeamGroupLook,
+  transitionEnd: number,
+  groupName: string,
 ): void {
   selected.forEach((fixture, index) => {
     const state = current.get(fixture.id);
     if (!state) return;
-    const targetPan = fan(index, selected.length, width) * (group === 'floor' ? -1 : 1);
-    const targetColor = index % 2 ? colorB : colorA;
+    const active = fixtureActive(index, selected.length, look.active);
+    const targetIntensity = active ? look.level : look.idle;
+    const targetPan = fan(index, selected.length, look.width) * (groupName === 'floor' ? -1 : 1);
+    const targetColor = index % 2 ? look.colorB : look.colorA;
+
     cues.push({
-      id: `${section.id}-${group}-base-${fixture.id}`,
+      id: `${section.id}-${groupName}-base-look-${fixture.id}`,
       sectionId: section.id,
       startSeconds: section.startSeconds,
       endSeconds: section.endSeconds,
@@ -138,13 +283,41 @@ function addBeamLook(
       priority: 0,
       select: { ids: [fixture.id], order: 'given' },
       channels: {
-        intensity: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: section.startSeconds, value: state.intensity }, { time: transitionEnd, value: intensity }] } },
-        color: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: section.startSeconds, value: state.color }, { time: transitionEnd, value: targetColor }] } },
-        beamAngleDeg: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: section.startSeconds, value: state.beamAngleDeg }, { time: transitionEnd, value: angle }] } },
+        intensity: {
+          blend: 'replace',
+          effect: {
+            op: 'curve',
+            keyframes: [
+              { time: section.startSeconds, value: state.intensity },
+              { time: transitionEnd, value: targetIntensity },
+            ],
+          },
+        },
+        color: {
+          blend: 'replace',
+          effect: {
+            op: 'curve',
+            keyframes: [
+              { time: section.startSeconds, value: state.color },
+              { time: transitionEnd, value: targetColor },
+            ],
+          },
+        },
+        beamAngleDeg: {
+          blend: 'replace',
+          effect: {
+            op: 'curve',
+            keyframes: [
+              { time: section.startSeconds, value: state.beamAngleDeg },
+              { time: transitionEnd, value: look.angle },
+            ],
+          },
+        },
       },
     });
+
     cues.push({
-      id: `${section.id}-${group}-home-${fixture.id}`,
+      id: `${section.id}-${groupName}-base-position-${fixture.id}`,
       sectionId: section.id,
       startSeconds: section.startSeconds,
       endSeconds: section.endSeconds,
@@ -152,29 +325,53 @@ function addBeamLook(
       priority: 0,
       select: { ids: [fixture.id], order: 'given' },
       channels: {
-        pan: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: section.startSeconds, value: state.pan }, { time: transitionEnd, value: targetPan }] } },
-        tilt: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: section.startSeconds, value: state.tilt }, { time: transitionEnd, value: tilt }] } },
+        pan: {
+          blend: 'replace',
+          effect: {
+            op: 'curve',
+            keyframes: [
+              { time: section.startSeconds, value: state.pan },
+              { time: transitionEnd, value: targetPan },
+            ],
+          },
+        },
+        tilt: {
+          blend: 'replace',
+          effect: {
+            op: 'curve',
+            keyframes: [
+              { time: section.startSeconds, value: state.tilt },
+              { time: transitionEnd, value: look.tilt },
+            ],
+          },
+        },
       },
     });
-    state.intensity = intensity;
+
+    state.intensity = targetIntensity;
     state.color = targetColor;
-    state.beamAngleDeg = angle;
+    state.beamAngleDeg = look.angle;
     state.pan = targetPan;
-    state.tilt = tilt;
-    basePan.set(`${section.id}:${fixture.id}`, targetPan);
-    baseTilt.set(`${section.id}:${fixture.id}`, tilt);
+    state.tilt = look.tilt;
+    homes.set(`${section.id}:${fixture.id}`, { pan: targetPan, tilt: look.tilt });
   });
 }
 
-function addParLook(
-  cues: LightingCue[], current: Map<string, FixtureState>, selected: RigFixtureSnapshot[], section: ShowSection,
-  intensity: number, color: string, angle: number, transitionEnd: number, group: string,
+function addBaseParGroup(
+  cues: LightingCue[],
+  current: Map<string, FixtureState>,
+  selected: RigFixtureSnapshot[],
+  section: ShowSection,
+  look: ParGroupLook,
+  transitionEnd: number,
+  groupName: string,
 ): void {
   selected.forEach((fixture) => {
     const state = current.get(fixture.id);
     if (!state) return;
+
     cues.push({
-      id: `${section.id}-${group}-base-${fixture.id}`,
+      id: `${section.id}-${groupName}-base-${fixture.id}`,
       sectionId: section.id,
       startSeconds: section.startSeconds,
       endSeconds: section.endSeconds,
@@ -182,55 +379,441 @@ function addParLook(
       priority: 0,
       select: { ids: [fixture.id], order: 'given' },
       channels: {
-        intensity: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: section.startSeconds, value: state.intensity }, { time: transitionEnd, value: intensity }] } },
-        color: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: section.startSeconds, value: state.color }, { time: transitionEnd, value: color }] } },
-        beamAngleDeg: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: section.startSeconds, value: state.beamAngleDeg }, { time: transitionEnd, value: angle }] } },
+        intensity: {
+          blend: 'replace',
+          effect: {
+            op: 'curve',
+            keyframes: [
+              { time: section.startSeconds, value: state.intensity },
+              { time: transitionEnd, value: look.level },
+            ],
+          },
+        },
+        color: {
+          blend: 'replace',
+          effect: {
+            op: 'curve',
+            keyframes: [
+              { time: section.startSeconds, value: state.color },
+              { time: transitionEnd, value: look.color },
+            ],
+          },
+        },
+        beamAngleDeg: {
+          blend: 'replace',
+          effect: {
+            op: 'curve',
+            keyframes: [
+              { time: section.startSeconds, value: state.beamAngleDeg },
+              { time: transitionEnd, value: look.angle },
+            ],
+          },
+        },
       },
     });
-    state.intensity = intensity;
-    state.color = color;
-    state.beamAngleDeg = angle;
+
+    state.intensity = look.level;
+    state.color = look.color;
+    state.beamAngleDeg = look.angle;
   });
 }
 
-function addFourBarGestures(
-  cues: LightingCue[], score: SongScore, section: ShowSection, firstStart: number, beat: number, bar: number,
-  rear: RigFixtureSnapshot[], floor: RigFixtureSnapshot[], side: RigFixtureSnapshot[],
-  basePan: Map<string, number>, baseTilt: Map<string, number>, energy: number,
+function addIntroRiffReveal(
+  cues: LightingCue[],
+  score: SongScore,
+  section: ShowSection,
+  groups: RigGroups,
+  homes: Map<string, { pan: number; tilt: number }>,
+  beat: number,
+  bar: number,
 ): void {
-  let block = 0;
-  for (let start = firstStart; start + beat * 1.2 < section.endSeconds; start += bar * 2) {
-    const localEnd = Math.min(section.endSeconds - 0.01, start + beat * (block % 3 === 2 ? 3.0 : 2.0));
-    if (localEnd <= start + 0.05) break;
-    const dominant = dominantRole(score.events, start, Math.min(section.endSeconds, start + bar * 2));
-    const strength = clamp(0.55 + energy * 0.45, 0.55, 1);
+  const bassStarts = score.events
+    .filter((event) => event.i === 'bass' && event.s >= section.startSeconds && event.s < section.endSeconds)
+    .slice(0, 4)
+    .map((event) => event.s);
 
-    if (block % 4 === 0) {
-      addSweepGesture(cues, section, rear, start, localEnd, basePan, baseTilt, 10 * strength, -2.5 * strength, block, 'rear-sweep');
-    } else if (block % 4 === 1) {
-      addFanBreath(cues, section, floor, start, localEnd, basePan, baseTilt, 8 * strength, 4.5 * strength, block, 'floor-open');
-    } else if (block % 4 === 2) {
-      const direction = dominant === 'electric' ? 1 : dominant === 'bass' ? -1 : block % 2 ? 1 : -1;
-      addSweepGesture(cues, section, side, start, localEnd, basePan, baseTilt, 7 * strength * direction, 2.0 * strength, block, 'side-follow');
-    } else {
-      addCrossGesture(cues, section, rear, floor, start, localEnd, basePan, baseTilt, 9 * strength, block);
-    }
-    block += 1;
+  const revealTimes = bassStarts.length >= 3
+    ? bassStarts
+    : [section.startSeconds + beat, section.startSeconds + beat * 2.5, section.startSeconds + bar * 1.5];
+
+  const pairs = [
+    selectInnerPair(groups.rear),
+    selectInnerPair(groups.floor),
+    selectOuterPair(groups.side),
+  ];
+
+  pairs.forEach((fixtures, index) => {
+    const start = clamp(
+      revealTimes[Math.min(index, revealTimes.length - 1)] ?? section.startSeconds + beat * (index + 1),
+      section.startSeconds,
+      section.endSeconds - 0.05,
+    );
+    const end = Math.min(section.endSeconds - 0.01, start + beat * 1.4);
+    addIntensityArc(cues, section, fixtures, start, end, 0.10 + index * 0.025, `intro-layer-${index}`);
+  });
+
+  const motionStart = Math.min(section.endSeconds - beat * 1.2, section.startSeconds + bar * 2);
+  if (motionStart > section.startSeconds) {
+    addPushHoldRelease(
+      cues,
+      section,
+      selectInnerPair(groups.rear),
+      homes,
+      motionStart,
+      Math.min(section.endSeconds - 0.01, motionStart + bar * 1.5),
+      5,
+      -1.5,
+      'intro-riff-lean',
+      1,
+    );
   }
 }
 
-function addSweepGesture(
-  cues: LightingCue[], section: ShowSection, selected: RigFixtureSnapshot[], start: number, end: number,
-  basePan: Map<string, number>, baseTilt: Map<string, number>, panAmount: number, tiltAmount: number, seed: number, label: string,
+function addVerseStalk(
+  cues: LightingCue[],
+  score: SongScore,
+  section: ShowSection,
+  groups: RigGroups,
+  homes: Map<string, { pan: number; tilt: number }>,
+  beat: number,
+  bar: number,
+  mirror: number,
 ): void {
+  let phrase = 0;
+  for (let start = section.startSeconds + beat * 1.5; start + bar * 1.2 < section.endSeconds; start += bar * 4) {
+    const end = Math.min(section.endSeconds - 0.01, start + bar * 2.2);
+    const density = roleDensity(score.events, start, Math.min(end, start + bar * 2), 'bass');
+    const amount = lerp(5.5, 9.5, clamp(density / 5, 0, 1));
+
+    const sidePair = selectPair(groups.side, phrase);
+    const rearPair = selectPair(groups.rear, phrase + 1);
+
+    addPushHoldRelease(
+      cues,
+      section,
+      sidePair,
+      homes,
+      start,
+      end,
+      amount * mirror,
+      -2.3,
+      `verse-side-step-${phrase}`,
+      phrase,
+    );
+
+    const rearStart = start + beat * 1.4;
+    addPushHoldRelease(
+      cues,
+      section,
+      rearPair,
+      homes,
+      rearStart,
+      Math.min(end, rearStart + bar * 1.45),
+      -amount * 0.58 * mirror,
+      1.4,
+      `verse-rear-answer-${phrase}`,
+      phrase + 10,
+    );
+
+    addIntensityArc(
+      cues,
+      section,
+      [...sidePair, ...rearPair],
+      start + beat * 0.35,
+      Math.min(end, start + bar * 1.3),
+      0.055,
+      `verse-breath-${phrase}`,
+    );
+    phrase += 1;
+  }
+}
+
+function addHookBite(
+  cues: LightingCue[],
+  section: ShowSection,
+  groups: RigGroups,
+  homes: Map<string, { pan: number; tilt: number }>,
+  beat: number,
+  bar: number,
+  mirror: number,
+): void {
+  let phrase = 0;
+  for (let start = section.startSeconds + beat * 0.35; start + bar * 1.5 < section.endSeconds; start += bar * 4) {
+    const closeEnd = Math.min(section.endSeconds - 0.01, start + bar * 1.65);
+
+    addFanClampRelease(
+      cues,
+      section,
+      groups.rear,
+      homes,
+      start,
+      closeEnd,
+      0.42,
+      12 * mirror,
+      `hook-rear-bite-${phrase}`,
+      phrase,
+    );
+
+    const floorStart = start + beat * 0.8;
+    addFanClampRelease(
+      cues,
+      section,
+      groups.floor,
+      homes,
+      floorStart,
+      Math.min(section.endSeconds - 0.01, floorStart + bar * 1.45),
+      0.55,
+      -9 * mirror,
+      `hook-floor-bite-${phrase}`,
+      phrase + 20,
+    );
+
+    addDominoLift(
+      cues,
+      section,
+      groups.rear,
+      start + beat * 0.15,
+      Math.min(section.endSeconds - 0.01, start + beat * 2.2),
+      0.13,
+      `hook-domino-${phrase}`,
+      mirror < 0,
+    );
+
+    const sideStart = start + bar * 1.9;
+    if (sideStart + beat * 1.2 < section.endSeconds) {
+      addPushHoldRelease(
+        cues,
+        section,
+        groups.side,
+        homes,
+        sideStart,
+        Math.min(section.endSeconds - 0.01, sideStart + bar * 1.2),
+        7 * mirror,
+        -2,
+        `hook-side-release-${phrase}`,
+        phrase + 40,
+      );
+    }
+    phrase += 1;
+  }
+}
+
+function addBreakdownSwirl(
+  cues: LightingCue[],
+  score: SongScore,
+  section: ShowSection,
+  groups: RigGroups,
+  homes: Map<string, { pan: number; tilt: number }>,
+  beat: number,
+  bar: number,
+): void {
+  const electricDensity = roleDensity(score.events, section.startSeconds, section.endSeconds, 'electric')
+    + roleDensity(score.events, section.startSeconds, section.endSeconds, 'guitar');
+  const scale = clamp(0.8 + electricDensity / 60, 0.8, 1.25);
+
+  let phrase = 0;
+  for (let start = section.startSeconds + beat; start + bar * 2.8 < section.endSeconds; start += bar * 4) {
+    const end = Math.min(section.endSeconds - 0.01, start + bar * 3.25);
+    addOrbitPhrase(
+      cues,
+      section,
+      groups.side,
+      homes,
+      start,
+      end,
+      15 * scale * (phrase % 2 ? -1 : 1),
+      4.5 * scale,
+      `breakdown-side-orbit-${phrase}`,
+      phrase,
+    );
+
+    const rearPair = selectInnerPair(groups.rear);
+    addOrbitPhrase(
+      cues,
+      section,
+      rearPair,
+      homes,
+      start + beat * 1.2,
+      Math.min(end, start + bar * 2.8),
+      -7 * scale * (phrase % 2 ? -1 : 1),
+      2.2 * scale,
+      `breakdown-rear-shadow-${phrase}`,
+      phrase + 20,
+    );
+
+    addIntensityArc(
+      cues,
+      section,
+      groups.side,
+      start + bar * 0.7,
+      Math.min(end, start + bar * 2.6),
+      0.07,
+      `breakdown-side-glow-${phrase}`,
+    );
+    phrase += 1;
+  }
+}
+
+function addRebuild(
+  cues: LightingCue[],
+  section: ShowSection,
+  groups: RigGroups,
+  homes: Map<string, { pan: number; tilt: number }>,
+  beat: number,
+  bar: number,
+): void {
+  const duration = section.endSeconds - section.startSeconds;
+  const starts = [
+    section.startSeconds + duration * 0.10,
+    section.startSeconds + duration * 0.28,
+    section.startSeconds + duration * 0.46,
+    section.startSeconds + duration * 0.64,
+  ];
+  const layers: Array<[RigFixtureSnapshot[], number, string]> = [
+    [selectInnerPair(groups.rear), 0.08, 'rear'],
+    [selectInnerPair(groups.floor), 0.07, 'floor'],
+    [selectOuterPair(groups.side), 0.08, 'side'],
+    [groups.rear, 0.10, 'rear-full'],
+  ];
+
+  layers.forEach(([fixtures, gain, label], index) => {
+    const start = starts[index] ?? section.startSeconds;
+    const end = Math.min(section.endSeconds - 0.01, start + bar * 2);
+    addIntensityArc(cues, section, fixtures, start, end, gain, `rebuild-${label}-${index}`);
+  });
+
+  const moveStart = Math.min(section.endSeconds - bar * 1.6, section.startSeconds + duration * 0.52);
+  if (moveStart > section.startSeconds) {
+    addFanClampRelease(
+      cues,
+      section,
+      groups.rear,
+      homes,
+      moveStart,
+      Math.min(section.endSeconds - 0.01, moveStart + bar * 2.5),
+      1.35,
+      10,
+      'rebuild-open',
+      1,
+    );
+  }
+}
+
+function addFinalRelease(
+  cues: LightingCue[],
+  section: ShowSection,
+  groups: RigGroups,
+  homes: Map<string, { pan: number; tilt: number }>,
+  beat: number,
+  bar: number,
+): void {
+  let phrase = 0;
+  for (let start = section.startSeconds + beat * 0.25; start + bar * 1.6 < section.endSeconds; start += bar * 4) {
+    const end = Math.min(section.endSeconds - 0.01, start + bar * 2.4);
+    const direction = phrase % 2 ? -1 : 1;
+
+    addCrossPhrase(
+      cues,
+      section,
+      groups.rear,
+      groups.floor,
+      homes,
+      start,
+      end,
+      13 * direction,
+      `final-cross-${phrase}`,
+      phrase,
+    );
+
+    const sideStart = start + bar * 1.4;
+    addPushHoldRelease(
+      cues,
+      section,
+      groups.side,
+      homes,
+      sideStart,
+      Math.min(section.endSeconds - 0.01, sideStart + bar * 1.4),
+      10 * direction,
+      -3.2,
+      `final-side-slice-${phrase}`,
+      phrase + 30,
+    );
+
+    addIntensityArc(
+      cues,
+      section,
+      groups.allBeams,
+      start + beat * 0.2,
+      Math.min(end, start + beat * 2.8),
+      0.09,
+      `final-arena-lift-${phrase}`,
+    );
+    phrase += 1;
+  }
+}
+
+function addOutroContraction(
+  cues: LightingCue[],
+  section: ShowSection,
+  groups: RigGroups,
+  homes: Map<string, { pan: number; tilt: number }>,
+  beat: number,
+  bar: number,
+): void {
+  const start = Math.min(section.endSeconds - bar * 1.1, section.startSeconds + beat);
+  if (start <= section.startSeconds) return;
+  const end = Math.min(section.endSeconds - beat * 0.6, start + bar * 1.7);
+
+  addFanClampRelease(
+    cues,
+    section,
+    groups.rear,
+    homes,
+    start,
+    end,
+    0.28,
+    -4,
+    'outro-contract-rear',
+    0,
+    false,
+  );
+  addFanClampRelease(
+    cues,
+    section,
+    groups.floor,
+    homes,
+    start + beat * 0.6,
+    Math.min(section.endSeconds - 0.02, end + beat * 0.5),
+    0.35,
+    3,
+    'outro-contract-floor',
+    1,
+    false,
+  );
+}
+
+function addPushHoldRelease(
+  cues: LightingCue[],
+  section: ShowSection,
+  selected: RigFixtureSnapshot[],
+  homes: Map<string, { pan: number; tilt: number }>,
+  start: number,
+  end: number,
+  panAmount: number,
+  tiltAmount: number,
+  label: string,
+  seed: number,
+): void {
+  if (end <= start + 0.05) return;
+  const t1 = lerp(start, end, 0.23);
+  const t2 = lerp(start, end, 0.58);
+  const t3 = lerp(start, end, 0.78);
+
   selected.forEach((fixture, index) => {
-    const pan = basePan.get(`${section.id}:${fixture.id}`) ?? fixture.home.pan;
-    const tilt = baseTilt.get(`${section.id}:${fixture.id}`) ?? fixture.home.tilt;
+    const home = homes.get(`${section.id}:${fixture.id}`) ?? { pan: fixture.home.pan, tilt: fixture.home.tilt };
     const sign = (index + seed) % 2 ? -1 : 1;
-    const t1 = lerp(start, end, 0.28);
-    const t2 = lerp(start, end, 0.68);
     cues.push({
-      id: `${label}-${seed}-${fixture.id}`,
+      id: `${section.id}-${label}-${seed}-${fixture.id}`,
       sectionId: section.id,
       startSeconds: start,
       endSeconds: end,
@@ -238,131 +821,329 @@ function addSweepGesture(
       priority: 100 + seed,
       select: { ids: [fixture.id], order: 'given' },
       channels: {
-        pan: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: start, value: pan }, { time: t1, value: pan + panAmount * sign }, { time: t2, value: pan - panAmount * 0.35 * sign }, { time: end - 0.005, value: pan }] } },
-        tilt: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: start, value: tilt }, { time: t1, value: tilt + tiltAmount }, { time: end - 0.005, value: tilt }] } },
+        pan: {
+          blend: 'replace',
+          effect: {
+            op: 'curve',
+            keyframes: [
+              { time: start, value: home.pan },
+              { time: t1, value: home.pan + panAmount * sign },
+              { time: t2, value: home.pan + panAmount * sign },
+              { time: t3, value: home.pan + panAmount * 0.25 * sign },
+              { time: end - 0.004, value: home.pan },
+            ],
+          },
+        },
+        tilt: {
+          blend: 'replace',
+          effect: {
+            op: 'curve',
+            keyframes: [
+              { time: start, value: home.tilt },
+              { time: t1, value: home.tilt + tiltAmount },
+              { time: t2, value: home.tilt + tiltAmount },
+              { time: end - 0.004, value: home.tilt },
+            ],
+          },
+        },
       },
     });
   });
 }
 
-function addFanBreath(
-  cues: LightingCue[], section: ShowSection, selected: RigFixtureSnapshot[], start: number, end: number,
-  basePan: Map<string, number>, baseTilt: Map<string, number>, panAmount: number, tiltAmount: number, seed: number, label: string,
+function addFanClampRelease(
+  cues: LightingCue[],
+  section: ShowSection,
+  selected: RigFixtureSnapshot[],
+  homes: Map<string, { pan: number; tilt: number }>,
+  start: number,
+  end: number,
+  clampScale: number,
+  overshoot: number,
+  label: string,
+  seed: number,
+  returnHome = true,
 ): void {
+  if (end <= start + 0.05) return;
+  const t1 = lerp(start, end, 0.24);
+  const t2 = lerp(start, end, 0.48);
+  const t3 = lerp(start, end, 0.72);
+
   selected.forEach((fixture, index) => {
-    const pan = basePan.get(`${section.id}:${fixture.id}`) ?? fixture.home.pan;
-    const tilt = baseTilt.get(`${section.id}:${fixture.id}`) ?? fixture.home.tilt;
-    const outward = index < selected.length / 2 ? -1 : 1;
-    const mid = lerp(start, end, 0.56);
+    const home = homes.get(`${section.id}:${fixture.id}`) ?? { pan: fixture.home.pan, tilt: fixture.home.tilt };
+    const sign = index < selected.length / 2 ? -1 : 1;
+    const clamped = home.pan * clampScale;
+    const opened = home.pan + overshoot * sign;
+
     cues.push({
-      id: `${label}-${seed}-${fixture.id}`,
+      id: `${section.id}-${label}-${seed}-${fixture.id}`,
       sectionId: section.id,
       startSeconds: start,
       endSeconds: end,
       layer: 'motion',
-      priority: 120 + seed,
+      priority: 260 + seed,
       select: { ids: [fixture.id], order: 'given' },
       channels: {
-        pan: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: start, value: pan }, { time: mid, value: pan + panAmount * outward }, { time: end - 0.005, value: pan }] } },
-        tilt: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: start, value: tilt }, { time: mid, value: tilt - tiltAmount }, { time: end - 0.005, value: tilt }] } },
+        pan: {
+          blend: 'replace',
+          effect: {
+            op: 'curve',
+            keyframes: [
+              { time: start, value: home.pan },
+              { time: t1, value: clamped },
+              { time: t2, value: clamped },
+              { time: t3, value: opened },
+              { time: end - 0.004, value: returnHome ? home.pan : clamped },
+            ],
+          },
+        },
+        tilt: {
+          blend: 'replace',
+          effect: {
+            op: 'curve',
+            keyframes: [
+              { time: start, value: home.tilt },
+              { time: t1, value: home.tilt + 2.5 },
+              { time: t2, value: home.tilt + 2.5 },
+              { time: t3, value: home.tilt - 1.2 },
+              { time: end - 0.004, value: home.tilt },
+            ],
+          },
+        },
       },
     });
   });
 }
 
-function addCrossGesture(
-  cues: LightingCue[], section: ShowSection, rear: RigFixtureSnapshot[], floor: RigFixtureSnapshot[], start: number, end: number,
-  basePan: Map<string, number>, baseTilt: Map<string, number>, amount: number, seed: number,
+function addOrbitPhrase(
+  cues: LightingCue[],
+  section: ShowSection,
+  selected: RigFixtureSnapshot[],
+  homes: Map<string, { pan: number; tilt: number }>,
+  start: number,
+  end: number,
+  panAmount: number,
+  tiltAmount: number,
+  label: string,
+  seed: number,
 ): void {
-  addSweepGesture(cues, section, rear, start, end, basePan, baseTilt, amount, 1.8, seed + 300, 'rear-cross');
-  addSweepGesture(cues, section, floor, start + (end - start) * 0.12, end, basePan, baseTilt, -amount * 0.75, -2.8, seed + 400, 'floor-cross');
-}
+  if (end <= start + 0.05) return;
+  const t1 = lerp(start, end, 0.20);
+  const t2 = lerp(start, end, 0.45);
+  const t3 = lerp(start, end, 0.70);
+  const t4 = lerp(start, end, 0.86);
 
-function addBassMotionBites(
-  cues: LightingCue[], score: SongScore, sections: ShowSection[], rear: RigFixtureSnapshot[], side: RigFixtureSnapshot[],
-  basePan: Map<string, number>, baseTilt: Map<string, number>, beat: number,
-): void {
-  const bass = score.events.filter((event) => event.i === 'bass').sort((a, b) => a.s - b.s);
-  let last = -Infinity;
-  let sequence = 0;
-  for (const event of bass) {
-    const velocity = clamp((Number(event.v) || 90) / 127, 0, 1);
-    if (velocity < 0.42 || event.s - last < beat * 0.58) continue;
-    const section = sectionAt(sections, event.s);
-    const end = Math.min(section.endSeconds - 0.01, event.s + beat * 0.48);
-    if (end <= event.s + 0.06) continue;
-    const selected = sequence % 3 === 2 ? side : rear;
-    const pair = selectPair(selected, sequence);
-    const amount = lerp(2.6, 6.2, velocity);
-    pair.forEach((fixture, index) => {
-      const pan = basePan.get(`${section.id}:${fixture.id}`) ?? fixture.home.pan;
-      const tilt = baseTilt.get(`${section.id}:${fixture.id}`) ?? fixture.home.tilt;
-      const sign = (sequence + index) % 2 ? -1 : 1;
-      const peak = event.s + (end - event.s) * 0.34;
-      cues.push({
-        id: `bass-motion-${sequence}-${fixture.id}`,
-        sectionId: section.id,
-        startSeconds: event.s,
-        endSeconds: end,
-        layer: 'motion',
-        priority: 20_000 + sequence,
-        select: { ids: [fixture.id], order: 'given' },
-        channels: {
-          pan: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: event.s, value: pan }, { time: peak, value: pan + amount * sign }, { time: end - 0.004, value: pan }] } },
-          tilt: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: event.s, value: tilt }, { time: peak, value: tilt - 1.2 * velocity }, { time: end - 0.004, value: tilt }] } },
+  selected.forEach((fixture, index) => {
+    const home = homes.get(`${section.id}:${fixture.id}`) ?? { pan: fixture.home.pan, tilt: fixture.home.tilt };
+    const sign = (index + seed) % 2 ? -1 : 1;
+    cues.push({
+      id: `${section.id}-${label}-${seed}-${fixture.id}`,
+      sectionId: section.id,
+      startSeconds: start,
+      endSeconds: end,
+      layer: 'motion',
+      priority: 500 + seed,
+      select: { ids: [fixture.id], order: 'given' },
+      channels: {
+        pan: {
+          blend: 'replace',
+          effect: {
+            op: 'curve',
+            keyframes: [
+              { time: start, value: home.pan },
+              { time: t1, value: home.pan + panAmount * sign },
+              { time: t2, value: home.pan + panAmount * 0.35 * sign },
+              { time: t3, value: home.pan - panAmount * 0.72 * sign },
+              { time: t4, value: home.pan - panAmount * 0.18 * sign },
+              { time: end - 0.004, value: home.pan },
+            ],
+          },
         },
-      });
+        tilt: {
+          blend: 'replace',
+          effect: {
+            op: 'curve',
+            keyframes: [
+              { time: start, value: home.tilt },
+              { time: t1, value: home.tilt - tiltAmount },
+              { time: t2, value: home.tilt + tiltAmount * 0.35 },
+              { time: t3, value: home.tilt + tiltAmount },
+              { time: t4, value: home.tilt - tiltAmount * 0.2 },
+              { time: end - 0.004, value: home.tilt },
+            ],
+          },
+        },
+      },
     });
-    last = event.s;
-    sequence += 1;
-  }
+  });
 }
 
-function addSelectiveDrumAccents(
-  cues: LightingCue[], sections: ShowSection[], rear: RigFixtureSnapshot[], floor: RigFixtureSnapshot[], side: RigFixtureSnapshot[],
-  frontFloor: RigFixtureSnapshot[], allBeams: RigFixtureSnapshot[], beat: number,
+function addCrossPhrase(
+  cues: LightingCue[],
+  section: ShowSection,
+  rear: RigFixtureSnapshot[],
+  floor: RigFixtureSnapshot[],
+  homes: Map<string, { pan: number; tilt: number }>,
+  start: number,
+  end: number,
+  amount: number,
+  label: string,
+  seed: number,
 ): void {
-  for (const section of sections) {
-    addEnvelope(cues, section, [...rear, ...side], `snare-mark-${section.id}`, [37, 38, 39, 40], 0.008, Math.max(0.09, beat * 0.20), 0.085);
-    addEnvelope(cues, section, [...floor, ...frontFloor], `kick-mark-${section.id}`, [35, 36], 0.006, Math.max(0.07, beat * 0.16), 0.055);
-    addEnvelope(cues, section, allBeams, `crash-open-${section.id}`, [49, 52, 55, 57], 0.006, Math.max(0.22, beat * 0.58), 0.28);
-  }
+  addPushHoldRelease(cues, section, rear, homes, start, end, amount, -3.1, `${label}-rear`, seed);
+  const floorStart = start + (end - start) * 0.16;
+  addPushHoldRelease(
+    cues,
+    section,
+    floor,
+    homes,
+    floorStart,
+    end,
+    -amount * 0.82,
+    4.2,
+    `${label}-floor`,
+    seed + 1,
+  );
 }
 
-function addEnvelope(
-  cues: LightingCue[], section: ShowSection, selected: RigFixtureSnapshot[], id: string, noteNumbers: number[],
-  attackSeconds: number, decaySeconds: number, gain: number,
+function addDominoLift(
+  cues: LightingCue[],
+  section: ShowSection,
+  selected: RigFixtureSnapshot[],
+  start: number,
+  end: number,
+  gain: number,
+  label: string,
+  reverse: boolean,
+): void {
+  if (!selected.length || end <= start + 0.05) return;
+  const ordered = reverse ? selected.slice().reverse() : selected.slice();
+  const span = end - start;
+
+  ordered.forEach((fixture, index) => {
+    const offset = span * 0.34 * (index / Math.max(1, ordered.length - 1));
+    const localStart = start + offset;
+    const peak = Math.min(end - 0.025, localStart + span * 0.20);
+    const hold = Math.min(end - 0.012, peak + span * 0.18);
+
+    cues.push({
+      id: `${section.id}-${label}-${index}-${fixture.id}`,
+      sectionId: section.id,
+      startSeconds: localStart,
+      endSeconds: end,
+      layer: 'accent',
+      priority: 220,
+      select: { ids: [fixture.id], order: 'given' },
+      channels: {
+        intensity: {
+          blend: 'add',
+          effect: {
+            op: 'curve',
+            keyframes: [
+              { time: localStart, value: 0 },
+              { time: peak, value: gain },
+              { time: hold, value: gain * 0.72 },
+              { time: end - 0.004, value: 0 },
+            ],
+          },
+        },
+      },
+    });
+  });
+}
+
+function addIntensityArc(
+  cues: LightingCue[],
+  section: ShowSection,
+  selected: RigFixtureSnapshot[],
+  start: number,
+  end: number,
+  gain: number,
+  label: string,
 ): void {
   const ids = [...new Set(selected.map((fixture) => fixture.id))];
-  if (!ids.length) return;
+  if (!ids.length || end <= start + 0.05) return;
+  const t1 = lerp(start, end, 0.28);
+  const t2 = lerp(start, end, 0.68);
+
   cues.push({
-    id,
+    id: `${section.id}-${label}`,
     sectionId: section.id,
-    startSeconds: section.startSeconds,
-    endSeconds: section.endSeconds,
+    startSeconds: start,
+    endSeconds: end,
     layer: 'accent',
-    priority: 100,
+    priority: 90,
     select: { ids, order: 'given' },
     channels: {
       intensity: {
         blend: 'add',
-        effect: { op: 'eventEnvelope', roleIds: ['drums'], noteNumbers, attackSeconds, decaySeconds, gain, reducer: 'max' },
+        effect: {
+          op: 'curve',
+          keyframes: [
+            { time: start, value: 0 },
+            { time: t1, value: gain },
+            { time: t2, value: gain * 0.72 },
+            { time: end - 0.004, value: 0 },
+          ],
+        },
       },
     },
   });
 }
 
-function addOutroBlack(
-  cues: LightingCue[], current: Map<string, FixtureState>, sections: ShowSection[], rig: RigSnapshot, duration: number, beat: number,
+function addCrashPunctuation(
+  cues: LightingCue[],
+  sections: ShowSection[],
+  allBeams: RigFixtureSnapshot[],
+  beat: number,
+): void {
+  const ids = allBeams.map((fixture) => fixture.id);
+  if (!ids.length) return;
+
+  for (const section of sections) {
+    cues.push({
+      id: `${section.id}-crash-punctuation`,
+      sectionId: section.id,
+      startSeconds: section.startSeconds,
+      endSeconds: section.endSeconds,
+      layer: 'accent',
+      priority: 800,
+      select: { ids, order: 'given' },
+      channels: {
+        intensity: {
+          blend: 'add',
+          effect: {
+            op: 'eventEnvelope',
+            roleIds: ['drums'],
+            noteNumbers: [49, 52, 55, 57],
+            attackSeconds: 0.006,
+            decaySeconds: Math.max(0.18, beat * 0.48),
+            gain: section.id === 'final' ? 0.24 : 0.15,
+            reducer: 'max',
+          },
+        },
+      },
+    });
+  }
+}
+
+function addFinalBlackout(
+  cues: LightingCue[],
+  current: Map<string, FixtureState>,
+  sections: ShowSection[],
+  rig: RigSnapshot,
+  duration: number,
+  beat: number,
 ): void {
   const section = sections[sections.length - 1];
   if (!section) return;
-  const fadeStart = Math.max(section.startSeconds, duration - beat * 4);
+  const fadeStart = Math.max(section.startSeconds, duration - beat * 4.5);
+
   for (const fixture of rig.fixtures) {
     const state = current.get(fixture.id);
     if (!state) continue;
     cues.push({
-      id: `kinetic-outro-black-${fixture.id}`,
+      id: `${section.id}-blackout-${fixture.id}`,
       sectionId: section.id,
       startSeconds: fadeStart,
       endSeconds: duration,
@@ -370,73 +1151,139 @@ function addOutroBlack(
       priority: 100_000,
       select: { ids: [fixture.id], order: 'given' },
       channels: {
-        intensity: { blend: 'replace', effect: { op: 'curve', keyframes: [{ time: fadeStart, value: state.intensity }, { time: Math.max(fadeStart + 0.01, duration - 0.02), value: 0 }] } },
+        intensity: {
+          blend: 'replace',
+          effect: {
+            op: 'curve',
+            keyframes: [
+              { time: fadeStart, value: state.intensity },
+              { time: Math.max(fadeStart + 0.01, duration - 0.02), value: 0 },
+            ],
+          },
+        },
       },
     });
   }
 }
 
-function buildSections(duration: number, bar: number): ShowSection[] {
-  const labels: Array<[string, string, string]> = [
-    ['intro', 'Intro · Pressure', '建立低频重心，不急着把所有灯都动起来'],
-    ['groove-a', 'Groove A · Kinetic Riff', 'Bass riff 驱动小幅动作，2 小节出现一次完整 gesture'],
-    ['groove-b', 'Groove B · Cross Talk', '后排、地排、侧灯开始有问答式运动'],
-    ['break', 'Break · Space', '让空间真正掉下来，给下一次动作留余量'],
-    ['build', 'Build · Expansion', '用有限 sweep/fan 扩大舞台，不使用持续 oscillator'],
-    ['climax', 'Climax · Movement Grid', '更密的 gesture 叠加少量 crash 白光，不靠鼓点闪屏撑场'],
-    ['outro', 'Outro · Release', '运动逐渐减少，最后明确淡黑'],
-  ];
-  const fractions = [0, 0.12, 0.30, 0.48, 0.62, 0.80, 0.92, 1];
-  const marks = [0];
-  for (let index = 1; index < fractions.length - 1; index += 1) {
-    const raw = duration * fractions[index]!;
-    const snapped = Math.round(raw / bar) * bar;
+function buildSongSpecificSections(score: SongScore, bar: number): ShowSection[] {
+  const marks: number[] = [0];
+  for (let index = 1; index < TARGET_FRACTIONS.length - 1; index += 1) {
+    const target = score.duration * TARGET_FRACTIONS[index]!;
     const previous = marks[marks.length - 1] ?? 0;
-    marks.push(clamp(snapped, previous + bar, duration - (fractions.length - 1 - index) * bar));
+    const min = previous + bar * 2;
+    const remaining = TARGET_FRACTIONS.length - 1 - index;
+    const max = score.duration - remaining * bar * 2;
+    marks.push(findBoundaryNear(score.events, target, bar, min, max));
   }
-  marks.push(duration);
-  return labels.map(([id, label, intent], index) => ({ id, label, intent, startSeconds: marks[index] ?? 0, endSeconds: marks[index + 1] ?? duration }));
+  marks.push(score.duration);
+
+  return SECTION_DEFS.map(([id, label, intent], index) => ({
+    id,
+    label,
+    intent,
+    startSeconds: marks[index] ?? 0,
+    endSeconds: marks[index + 1] ?? score.duration,
+  }));
 }
 
-function sectionEnergy(events: SongEvent[], section: ShowSection): number {
-  let weighted = 0;
-  let count = 0;
-  for (const event of events) {
-    if (event.s < section.startSeconds || event.s >= section.endSeconds) continue;
-    const velocity = clamp((Number(event.v) || 90) / 127, 0, 1);
-    const roleWeight = event.i === 'drums' ? 1.15 : event.i === 'bass' ? 1.1 : event.i === 'electric' ? 0.92 : 0.72;
-    weighted += velocity * roleWeight;
-    count += 1;
+function findBoundaryNear(
+  events: SongEvent[],
+  target: number,
+  bar: number,
+  min: number,
+  max: number,
+): number {
+  let best = clamp(Math.round(target / bar) * bar, min, max);
+  let bestScore = -Infinity;
+
+  for (let delta = -2; delta <= 2; delta += 1) {
+    const candidate = clamp(Math.round(target / bar) * bar + delta * bar, min, max);
+    const score = boundaryContrast(events, candidate, bar) - Math.abs(candidate - target) / Math.max(0.001, bar) * 0.08;
+    if (score > bestScore) {
+      bestScore = score;
+      best = candidate;
+    }
   }
-  const seconds = Math.max(1, section.endSeconds - section.startSeconds);
-  return clamp((weighted / seconds) / 6.5 + Math.min(0.25, count / seconds / 60), 0.15, 1);
+  return best;
 }
 
-function dominantRole(events: SongEvent[], start: number, end: number): string {
-  const totals = new Map<string, number>();
+function boundaryContrast(events: SongEvent[], time: number, bar: number): number {
+  const before = roleVector(events, time - bar, time);
+  const after = roleVector(events, time, time + bar);
+  const roles = new Set([...before.keys(), ...after.keys()]);
+  let contrast = 0;
+  let beforeTotal = 0;
+  let afterTotal = 0;
+
+  for (const value of before.values()) beforeTotal += value;
+  for (const value of after.values()) afterTotal += value;
+
+  for (const role of roles) {
+    const a = (before.get(role) ?? 0) / Math.max(0.001, beforeTotal);
+    const b = (after.get(role) ?? 0) / Math.max(0.001, afterTotal);
+    contrast += Math.abs(a - b);
+  }
+  contrast += Math.abs(beforeTotal - afterTotal) / Math.max(1, beforeTotal + afterTotal);
+  return contrast;
+}
+
+function roleVector(events: SongEvent[], start: number, end: number): Map<string, number> {
+  const result = new Map<string, number>();
   for (const event of events) {
     if (event.s < start || event.s >= end) continue;
     const role = event.i || 'other';
     const velocity = clamp((Number(event.v) || 90) / 127, 0, 1);
-    totals.set(role, (totals.get(role) ?? 0) + velocity);
+    const weight = role === 'bass' ? 1.15 : role === 'drums' ? 1.05 : role === 'electric' ? 0.95 : 0.8;
+    result.set(role, (result.get(role) ?? 0) + velocity * weight);
   }
-  return [...totals.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'bass';
+  return result;
 }
 
-function sectionAt(sections: ShowSection[], time: number): ShowSection {
-  return sections.find((section) => time >= section.startSeconds && time < section.endSeconds) ?? sections[sections.length - 1]!;
+function roleDensity(events: SongEvent[], start: number, end: number, role: string): number {
+  let count = 0;
+  for (const event of events) {
+    if (event.s >= start && event.s < end && event.i === role) count += 1;
+  }
+  return count / Math.max(0.25, end - start);
+}
+
+function fixtureActive(index: number, count: number, mode: BeamGroupLook['active']): boolean {
+  if (mode === 'all') return true;
+  if (mode === 'alternating') return index % 2 === 0;
+  if (mode === 'inner') return Math.abs(index - (count - 1) / 2) <= Math.max(0.6, count * 0.24);
+  return index === 0 || index === count - 1;
+}
+
+function selectInnerPair(fixtures: RigFixtureSnapshot[]): RigFixtureSnapshot[] {
+  if (fixtures.length <= 2) return fixtures;
+  const center = (fixtures.length - 1) / 2;
+  return fixtures
+    .slice()
+    .sort((a, b) => {
+      const ai = fixtures.indexOf(a);
+      const bi = fixtures.indexOf(b);
+      return Math.abs(ai - center) - Math.abs(bi - center);
+    })
+    .slice(0, 2);
+}
+
+function selectOuterPair(fixtures: RigFixtureSnapshot[]): RigFixtureSnapshot[] {
+  if (fixtures.length <= 2) return fixtures;
+  return [fixtures[0], fixtures[fixtures.length - 1]].filter(
+    (fixture): fixture is RigFixtureSnapshot => Boolean(fixture),
+  );
 }
 
 function selectPair(fixtures: RigFixtureSnapshot[], sequence: number): RigFixtureSnapshot[] {
   if (fixtures.length <= 2) return fixtures;
-  const left = sequence % Math.ceil(fixtures.length / 2);
+  const half = Math.ceil(fixtures.length / 2);
+  const left = sequence % half;
   const right = fixtures.length - 1 - left;
-  const selected = [fixtures[left], fixtures[right]].filter((fixture): fixture is RigFixtureSnapshot => Boolean(fixture));
-  return [...new Map(selected.map((fixture) => [fixture.id, fixture])).values()];
-}
-
-function fixtures(rig: RigSnapshot, type: string, group: string): RigFixtureSnapshot[] {
-  return rig.fixtures.filter((fixture) => fixture.type === type && fixture.groups.includes(group)).slice().sort((a, b) => a.id.localeCompare(b.id));
+  const pair = [fixtures[left], fixtures[right]].filter(
+    (fixture): fixture is RigFixtureSnapshot => Boolean(fixture),
+  );
+  return [...new Map(pair.map((fixture) => [fixture.id, fixture])).values()];
 }
 
 function fan(index: number, count: number, width: number): number {
