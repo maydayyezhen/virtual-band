@@ -7,10 +7,18 @@ import {
 } from './BassProgram';
 import type { ProgramToneBackend, ProgramTonePerformanceProfile } from './ProgramToneBackend';
 
+/**
+ * Per-program tone shaping. Values for the three programs that shipped first are the
+ * tuned ones; the three added later are first guesses sitting between their neighbours
+ * and are still waiting for a pass through the mix tuner.
+ */
 const PERFORMANCE_PROFILE: Readonly<Record<BassProgramId, ProgramTonePerformanceProfile>> = {
+  32: { brightnessCents: -180, velocityToFilterCents: -820, filterEnvelopeScale: 0.9 },
   33: { brightnessCents: -100, velocityToFilterCents: -780, filterEnvelopeScale: 0.95 },
   34: { brightnessCents: 100, velocityToFilterCents: -650, filterEnvelopeScale: 1 },
+  35: { brightnessCents: -60, velocityToFilterCents: -720, filterEnvelopeScale: 0.98 },
   36: { brightnessCents: 170, velocityToFilterCents: -520, filterEnvelopeScale: 1.08 },
+  37: { brightnessCents: 200, velocityToFilterCents: -500, filterEnvelopeScale: 1.1 },
 };
 
 type BassGesture = 'gated' | 'pluck';

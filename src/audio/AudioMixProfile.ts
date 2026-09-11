@@ -50,7 +50,8 @@ const MIX_TARGETS: readonly AudioMixTarget[] = Object.freeze([
 
 const ACOUSTIC_PROGRAMS = Object.freeze([24, 25] as const);
 const ELECTRIC_PROGRAMS = Object.freeze([26, 27, 28, 29, 30, 31] as const);
-const BASS_PROGRAMS = Object.freeze([33, 34, 36] as const);
+/** Every GM bass program the instrument can be asked to play, minus the synth basses. */
+const BASS_PROGRAMS = Object.freeze([32, 33, 34, 35, 36, 37] as const);
 
 /**
  * Git-tracked source of truth for production mix calibration.
