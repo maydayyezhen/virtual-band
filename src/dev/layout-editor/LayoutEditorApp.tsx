@@ -3,8 +3,8 @@ import {
   LAYOUT_INSTRUMENTS,
   parseLayoutDocument,
   stringifyLayout,
-} from './LayoutDocument';
-import { BAND_SCALE } from './BandPresentation';
+} from '../../layout/LayoutDocument';
+import { BAND_SCALE } from '../../layout/BandPresentation';
 import { LayoutEditorRuntime, type LayoutEditorSnapshot } from './LayoutEditorRuntime';
 
 export function LayoutEditorApp() {

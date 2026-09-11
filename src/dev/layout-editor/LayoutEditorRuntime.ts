@@ -15,10 +15,10 @@ import {
   type LayoutDocument,
   type LayoutInstrumentInstance,
   type LayoutInstrumentType,
-} from './LayoutDocument';
-import { autoArrangeLayout, type InstrumentFootprints } from './AutoLayout';
+} from '../../layout/LayoutDocument';
+import { autoArrangeLayout, type InstrumentFootprints } from '../../layout/AutoLayout';
 import { frameBounds } from '../../camera/CameraFraming';
-import { normalizeInstrument } from './BandPresentation';
+import { normalizeInstrument } from '../../layout/BandPresentation';
 
 export interface LayoutEditorSnapshot {
   ready: boolean;

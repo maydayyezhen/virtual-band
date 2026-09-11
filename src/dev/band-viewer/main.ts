@@ -14,15 +14,23 @@ import { KeyboardInstrument } from '../../instruments/keyboard/KeyboardInstrumen
 import { ViolinInstrument } from '../../instruments/violin/ViolinInstrument';
 import { createAtelierShowcase, registerAtelierViews } from '../../presentation/atelier/createAtelierShowcase';
 import { PresentationManager } from '../../presentation/PresentationManager';
+import type { Instrument } from '../../instruments/Instrument';
 import { AtelierStudioVenue } from '../../venues/atelier-studio/AtelierStudioVenue';
-import { autoArrangeLayout, type InstrumentFootprints } from '../layout-editor/AutoLayout';
-import { normalizeInstrument } from '../layout-editor/BandPresentation';
+import {
+  createHomeLayout,
+  footprintsOf,
+  prepareMember,
+  presentBand,
+  type PresentedBand,
+  type PreparedMember,
+} from '../../layout/presentBand';
+import type { LayoutDocument } from '../../layout/LayoutDocument';
 import { registerBandViews, BAND_VIEW_SCOPE } from './BandViews';
 import { analyzeMidi } from '../../midi';
 import { buildMidiBand, type BuiltBand } from './buildMidiBand';
 import { BandPlayer } from './BandPlayer';
 import { DropHint, TransportBar } from './TransportBar';
-import { createDefaultLayout, LAYOUT_INSTRUMENTS, type LayoutInstrumentType } from '../layout-editor/LayoutDocument';
+import type { LayoutInstrumentType } from '../../layout/LayoutDocument';
 import { installNocturneLayoutStage } from '../layout-editor/NocturneLayoutStage';
 import { StageDirector } from './StageDirector';
 
@@ -104,11 +112,18 @@ host.applySceneProfile(venue.sceneProfile);
 const cameraRegistry = new CameraRegistry();
 const camera = new CameraSystem(cameraRegistry, instruments);
 
-/** Holds the six instruments; lifted so their bases land on the stage deck. */
-const band = new THREE.Group();
+/** Holds the current band. Replaced whenever the band is rebuilt from a score. */
+let band = new THREE.Group();
 band.name = 'band:instruments';
-band.position.y = STAGE_SURFACE_Y;
 host.scene.add(band);
+
+/**
+ * Where each instrument type stands, and the one arrangement every band is grown from.
+ *
+ * Measured once, from the six instruments the page builds at load, and reused when a file asks for
+ * a different set — so the instruments a file does not mention keep the exact spot they had.
+ */
+let homeLayout: LayoutDocument | null = null;
 
 const interactions = new InstrumentInteractionSystem({
   element: host.renderer.domElement,
@@ -146,11 +161,12 @@ function instrumentAt(clientX: number, clientY: number): string | null {
   return null;
 }
 
-const presentation = new PresentationManager();
+let presentation = new PresentationManager();
 
 /** Stage views, filled in once the layout is known. Index 0 is the audience view. */
 let bandViewIds: string[] = [];
 let bandViewIndex = 0;
+
 
 /**
  * Stage orbit. World space (no subject), so the camera swings around the whole band rather than
@@ -165,6 +181,20 @@ const orbit = new OrbitController({
 
 let stage!: StageDirector;
 
+/**
+ * Swap in a freshly presented band.
+ *
+ * The old group is removed rather than emptied, so the scene never holds two bands at once while a
+ * replacement is being measured.
+ */
+function adoptBand(presented: PresentedBand): void {
+  host.scene.remove(band);
+  band = presented.group;
+  host.scene.add(band);
+  host.invalidateShadows();
+  band.updateMatrixWorld(true);
+}
+
 async function buildBand(): Promise<void> {
   const [drums, keyboard, violin, electric, acoustic, bass] = await Promise.all([
     DrumsInstrument.create(drumSampler),
@@ -175,41 +205,22 @@ async function buildBand(): Promise<void> {
     BassInstrument.create(bassSampler),
   ]);
 
-  const members = { drums, keyboard, violin, electric, acoustic, bass };
-  for (const instrument of Object.values(members)) instruments.register(instrument);
+  const six = { drums, keyboard, violin, electric, acoustic, bass };
+  for (const instrument of Object.values(six)) instruments.register(instrument);
 
   // Saved instrument views: the same 29 the instrument library uses.
-  registerAtelierViews(cameraRegistry, members);
+  registerAtelierViews(cameraRegistry, six);
 
-  const donors: Record<LayoutInstrumentType, THREE.Object3D> = {
-    drums: drums.root,
-    keyboard: keyboard.root,
-    violin: violin.root,
-    electric: electric.root,
-    acoustic: acoustic.root,
-    bass: bass.root,
-  };
-
-  const footprints = {} as InstrumentFootprints;
-  const holders = new Map<LayoutInstrumentType, THREE.Group>();
-  for (const type of Object.keys(donors) as LayoutInstrumentType[]) {
-    // Keep userData: the interaction system hit-tests userData.hit / userData.instrumentId.
-    const normalized = normalizeInstrument(type, donors[type], { stripUserData: false });
-    footprints[type] = normalized.footprint;
-    holders.set(type, normalized.holder);
-  }
-
-  const document = autoArrangeLayout(createDefaultLayout(), footprints);
-  for (const instance of document.instances) {
-    const holder = holders.get(instance.type);
-    if (!holder) continue;
-    holder.position.x = instance.transform.position[0];
-    holder.position.y += instance.transform.position[1];
-    holder.position.z = instance.transform.position[2];
-    holder.rotation.y = instance.transform.rotation[1];
-    holder.scale.multiplyScalar(instance.transform.scale);
-    band.add(holder);
-  }
+  // The six instruments the page starts with are also the yardstick for the arrangement: their
+  // measured footprints define where each type stands, and that arrangement is what a band from a
+  // file is grown from later.
+  const members = (Object.keys(six) as LayoutInstrumentType[]).map((type) =>
+    prepareMember(six[type].id, type, six[type].root),
+  );
+  homeLayout = createHomeLayout(footprintsOf(members));
+  adoptBand(
+    presentBand({ members, home: homeLayout, surfaceY: STAGE_SURFACE_Y, clearanceZ: LED_CLEARANCE_Z }),
+  );
   host.invalidateShadows();
 
   band.updateMatrixWorld(true);
@@ -234,7 +245,7 @@ async function buildBand(): Promise<void> {
     camera,
     cameraRegistry,
     interactions,
-    instruments: members,
+    instruments: six,
   });
   for (const mode of showcase.modes) presentation.register(mode);
 
@@ -386,7 +397,15 @@ function loop(): void {
   presentation.update(dt);
   stage?.update();
   // Only the band state drives the orbit controller; a live mode owns the camera itself.
-  if (!performanceBand && stage?.isBand) orbit.update(dt);
+  // The orbit owns the camera whenever the whole band is on screen, so it must not fight the
+  // flight to a new stage view: wait for the move to land, then adopt where it arrived.
+  if (stage?.isBand && !camera.isTransitioning) {
+    if (pendingOrbitAdopt) {
+      orbit.adoptCamera();
+      pendingOrbitAdopt = false;
+    }
+    orbit.update(dt);
+  }
   camera.update(dt);
   resize();
   host.render(camera.output);
@@ -416,6 +435,8 @@ const transport = new TransportBar({
 });
 const dropHint = new DropHint();
 let performanceBand: BuiltBand | null = null;
+/** The stage view is being flown to; the orbit takes over once it lands. */
+let pendingOrbitAdopt = false;
 let player: BandPlayer | null = null;
 let loading = false;
 
@@ -444,78 +465,90 @@ async function enterPerformanceMode(
   analysis: ReturnType<typeof analyzeMidi>,
   fileName: string,
 ): Promise<void> {
-  // The interactive band steps aside: its modes, its views and its instruments all describe six
-  // fixed instruments, and none of that is meaningful for a band built from a score.
-  presentation.dispose();
-  stage = undefined as unknown as StageDirector;
-  performanceBand?.dispose();
-  performanceBand = null;
   player?.dispose();
   player = null;
-  for (const instrument of instruments.list()) {
+  performanceBand?.dispose();
+  performanceBand = null;
+
+  // The old modes hold the old instruments, so the manager goes with them and a fresh one takes
+  // over. Everything else — the camera, the orbit, the stage director — is rebuilt below rather
+  // than switched off: looking around and stepping into an instrument are the point of this page.
+  const replaced = instruments.list();
+  for (const instrument of replaced) {
+    cameraRegistry.clearInstrumentViews(instrument.id);
     instruments.unregister(instrument.id);
-    instrument.root.removeFromParent();
   }
+  presentation.dispose();
+  presentation = new PresentationManager();
   band.clear();
-  cameraRegistry.clearScopedViews(BAND_VIEW_SCOPE);
-  for (const instrument of instruments.list()) cameraRegistry.clearInstrumentViews(instrument.id);
 
   const built = await buildMidiBand(analysis.plan, graph);
   performanceBand = built;
-  for (const record of built.built) instruments.register(record.instrument);
-
-  const holders = new Map<string, THREE.Group>();
-  const footprints = {} as InstrumentFootprints;
+  // The first of each type keeps the plain name (`violin.main`), because the 29 authored views and
+  // the six showcase modes are keyed by instrument type. Extra instances get their own names and
+  // can play, but have no close-up to step into.
+  const seen = new Map<string, number>();
   for (const record of built.built) {
-    const type = record.type as LayoutInstrumentType;
-    const normalized = normalizeInstrument(type, record.instrument.root, { stripUserData: false });
-    normalized.holder.name = `band:${record.type}.${record.instance + 1}`;
-    holders.set(`${record.type}.${record.instance}`, normalized.holder);
-    footprints[type] ??= normalized.footprint;
+    const index = seen.get(record.type) ?? 0;
+    seen.set(record.type, index + 1);
+    record.instrument.setInstanceId(index === 0 ? `${record.type}.main` : `${record.type}.${index + 1}`);
+    instruments.register(record.instrument);
   }
 
-  const base = createDefaultLayout();
-  const instances = analysis.plan.instruments.flatMap((entry) =>
-    Array.from({ length: entry.count }, (_, index) => {
-      const type = entry.type as LayoutInstrumentType;
-      const definition = LAYOUT_INSTRUMENTS.find((item) => item.id === type);
-      return {
-        id: `${entry.type}-${index + 1}`,
-        type,
-        transform: {
-          position: [0, 0, 0] as [number, number, number],
-          rotation: [0, definition?.defaultYaw ?? 0, 0] as [number, number, number],
-          scale: 1,
-        },
-      };
+  // Same placement path the interactive band used: each type stands where the home layout puts it
+  // and extras hang off their sibling, so instruments the file never mentioned do not move.
+  if (!homeLayout) throw new Error('home layout is missing; the interactive band never finished building');
+  adoptBand(
+    presentBand({
+      members: built.built.map((record) =>
+        prepareMember(record.instrument.id, record.type as LayoutInstrumentType, record.instrument.root),
+      ),
+      home: homeLayout,
+      surfaceY: STAGE_SURFACE_Y,
+      clearanceZ: LED_CLEARANCE_Z,
     }),
   );
 
-  const placed = autoArrangeLayout({ ...base, instances }, footprints);
-  for (const instance of placed.instances) {
-    const index = Number(instance.id.slice(instance.id.lastIndexOf('-') + 1)) - 1;
-    const holder = holders.get(`${instance.type}.${index}`);
-    if (!holder) continue;
-    holder.position.set(
-      instance.transform.position[0],
-      instance.transform.position[1],
-      Math.max(instance.transform.position[2], LED_CLEARANCE_Z),
-    );
-    holder.rotation.y = instance.transform.rotation[1];
-    holder.scale.multiplyScalar(instance.transform.scale);
-    band.add(holder);
+  // Interaction comes back, built for whichever instruments the file kept.
+  const firstOfType = new Map<string, Instrument>();
+  for (const record of built.built) {
+    if (!firstOfType.has(record.type)) firstOfType.set(record.type, record.instrument);
   }
-  host.invalidateShadows();
-  band.updateMatrixWorld(true);
+  const showcaseInstruments = {
+    drums: firstOfType.get('drums') as DrumsInstrument | undefined,
+    keyboard: firstOfType.get('keyboard') as KeyboardInstrument | undefined,
+    violin: firstOfType.get('violin') as ViolinInstrument | undefined,
+    electric: firstOfType.get('electric') as ElectricGuitarInstrument | undefined,
+    acoustic: firstOfType.get('acoustic') as AcousticGuitarInstrument | undefined,
+    bass: firstOfType.get('bass') as BassInstrument | undefined,
+  };
+  const showcase = createAtelierShowcase({
+    element: host.renderer.domElement,
+    camera,
+    cameraRegistry,
+    interactions,
+    instruments: showcaseInstruments,
+  });
+  for (const mode of showcase.modes) presentation.register(mode);
+  registerAtelierViews(cameraRegistry, showcaseInstruments);
 
   bandViewIds = registerBandViews(cameraRegistry, new THREE.Box3().setFromObject(band));
   bandViewIndex = 0;
+  stage = new StageDirector({
+    camera,
+    instruments,
+    presentation,
+    modes: showcase.byInstrumentId,
+    entryViewIds: showcase.wholeViewIds,
+    bandViewId: bandViewIds[0],
+  });
+
   camera.setCameraBounds(VENUE_CAMERA_BOUNDS);
   for (const problem of camera.validateViews()) {
     console.warn(`[Band View] ${problem.viewId} — ${problem.problem}`);
   }
-  camera.goToView(bandViewIds[0], true);
-  orbit.adoptCamera();
+  // A move, not a cut: the band changed under the camera, and snapping there reads as a glitch.
+  camera.goToView(bandViewIds[0]);
 
   player = new BandPlayer({
     graph,
@@ -593,8 +626,9 @@ if (import.meta.env.DEV) {
   Object.defineProperty(window, 'bandView', {
     configurable: true,
     value: {
-      host, band, instruments, interactions, camera, cameraRegistry, presentation, audio,
+      host, instruments, interactions, camera, cameraRegistry, presentation, audio,
       instrumentAt,
+      get band() { return band; },
       get stage() { return stage; },
       get orbit() { return orbit; },
       get player() { return player; },
