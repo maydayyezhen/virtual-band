@@ -17,8 +17,12 @@ import { PresentationManager } from '../../presentation/PresentationManager';
 import { AtelierStudioVenue } from '../../venues/atelier-studio/AtelierStudioVenue';
 import { autoArrangeLayout, type InstrumentFootprints } from '../layout-editor/AutoLayout';
 import { normalizeInstrument } from '../layout-editor/BandPresentation';
-import { registerBandViews } from './BandViews';
-import { createDefaultLayout, type LayoutInstrumentType } from '../layout-editor/LayoutDocument';
+import { registerBandViews, BAND_VIEW_SCOPE } from './BandViews';
+import { analyzeMidi } from '../../midi';
+import { buildMidiBand, type BuiltBand } from './buildMidiBand';
+import { BandPlayer } from './BandPlayer';
+import { DropHint, TransportBar } from './TransportBar';
+import { createDefaultLayout, LAYOUT_INSTRUMENTS, type LayoutInstrumentType } from '../layout-editor/LayoutDocument';
 import { installNocturneLayoutStage } from '../layout-editor/NocturneLayoutStage';
 import { StageDirector } from './StageDirector';
 
@@ -46,6 +50,9 @@ const VENUE_CAMERA_BOUNDS = new THREE.Box3(
   new THREE.Vector3(-16, 0.4, -8),
   new THREE.Vector3(16, 15, 11),
 );
+
+/** The band never stands behind the LED wall; anything past it is pushed back in front. */
+const LED_CLEARANCE_Z = -8.17 + 0.95;
 
 installNocturneLayoutStage();
 
@@ -373,16 +380,196 @@ function loop(): void {
   const dt = Math.min(MAX_FRAME_SECONDS, (now - lastFrame) / 1000);
   lastFrame = now;
 
+  player?.update();
+  for (const record of performanceBand?.built ?? []) record.instrument.update(dt);
   instruments.update(dt);
   presentation.update(dt);
   stage?.update();
   // Only the band state drives the orbit controller; a live mode owns the camera itself.
-  if (stage?.isBand) orbit.update(dt);
+  if (!performanceBand && stage?.isBand) orbit.update(dt);
   camera.update(dt);
   resize();
   host.render(camera.output);
+  if (player) transport.update(player.time, player.total, player.isPlaying);
   requestAnimationFrame(loop);
 }
+
+/* ------------------------------------------------------------------ *
+ * Performance mode — drop a MIDI file and this band plays it
+ * ------------------------------------------------------------------ */
+
+/**
+ * Dropping a file replaces the six-instrument band with whatever that file asks for.
+ *
+ * The arrangement is not a fixed ensemble: a file with two guitar parts gets two guitars, one whose
+ * keyboard writing needs three manuals gets three keyboards. `src/midi` decides all of that from the
+ * file alone, and this only puts the answer on the stage.
+ *
+ * Focus and close-ups belong to the interactive band, so they are switched off for the duration —
+ * an eight-piece built from a score has no saved views and nothing to step into.
+ */
+const transport = new TransportBar({
+  onPlay: () => void player?.play(),
+  onPause: () => player?.pause(),
+  onStop: () => player?.stop(),
+  onSeek: (seconds) => player?.seek(seconds),
+});
+const dropHint = new DropHint();
+let performanceBand: BuiltBand | null = null;
+let player: BandPlayer | null = null;
+let loading = false;
+
+async function loadMidiFile(file: File): Promise<void> {
+  if (loading) return;
+  loading = true;
+  dropHint.setVisible(true);
+  dropHint.setText(`正在解析 ${file.name} …`);
+
+  try {
+    const analysis = analyzeMidi(new Uint8Array(await file.arrayBuffer()));
+    dropHint.setText(
+      `${file.name}<br><span style="opacity:.6">${analysis.plan.totalInstruments} 件乐器，正在搭建…</span>`,
+    );
+    await enterPerformanceMode(analysis, file.name);
+  } catch (error) {
+    console.error('[Band View] MIDI 装载失败', error);
+    dropHint.setVisible(true);
+    dropHint.setText(`${file.name} 无法解析<br><span style="opacity:.6">${String(error)}</span>`);
+  } finally {
+    loading = false;
+  }
+}
+
+async function enterPerformanceMode(
+  analysis: ReturnType<typeof analyzeMidi>,
+  fileName: string,
+): Promise<void> {
+  // The interactive band steps aside: its modes, its views and its instruments all describe six
+  // fixed instruments, and none of that is meaningful for a band built from a score.
+  presentation.dispose();
+  stage = undefined as unknown as StageDirector;
+  performanceBand?.dispose();
+  performanceBand = null;
+  player?.dispose();
+  player = null;
+  for (const instrument of instruments.list()) {
+    instruments.unregister(instrument.id);
+    instrument.root.removeFromParent();
+  }
+  band.clear();
+  cameraRegistry.clearScopedViews(BAND_VIEW_SCOPE);
+  for (const instrument of instruments.list()) cameraRegistry.clearInstrumentViews(instrument.id);
+
+  const built = await buildMidiBand(analysis.plan, graph);
+  performanceBand = built;
+  for (const record of built.built) instruments.register(record.instrument);
+
+  const holders = new Map<string, THREE.Group>();
+  const footprints = {} as InstrumentFootprints;
+  for (const record of built.built) {
+    const type = record.type as LayoutInstrumentType;
+    const normalized = normalizeInstrument(type, record.instrument.root, { stripUserData: false });
+    normalized.holder.name = `band:${record.type}.${record.instance + 1}`;
+    holders.set(`${record.type}.${record.instance}`, normalized.holder);
+    footprints[type] ??= normalized.footprint;
+  }
+
+  const base = createDefaultLayout();
+  const instances = analysis.plan.instruments.flatMap((entry) =>
+    Array.from({ length: entry.count }, (_, index) => {
+      const type = entry.type as LayoutInstrumentType;
+      const definition = LAYOUT_INSTRUMENTS.find((item) => item.id === type);
+      return {
+        id: `${entry.type}-${index + 1}`,
+        type,
+        transform: {
+          position: [0, 0, 0] as [number, number, number],
+          rotation: [0, definition?.defaultYaw ?? 0, 0] as [number, number, number],
+          scale: 1,
+        },
+      };
+    }),
+  );
+
+  const placed = autoArrangeLayout({ ...base, instances }, footprints);
+  for (const instance of placed.instances) {
+    const index = Number(instance.id.slice(instance.id.lastIndexOf('-') + 1)) - 1;
+    const holder = holders.get(`${instance.type}.${index}`);
+    if (!holder) continue;
+    holder.position.set(
+      instance.transform.position[0],
+      instance.transform.position[1],
+      Math.max(instance.transform.position[2], LED_CLEARANCE_Z),
+    );
+    holder.rotation.y = instance.transform.rotation[1];
+    holder.scale.multiplyScalar(instance.transform.scale);
+    band.add(holder);
+  }
+  host.invalidateShadows();
+  band.updateMatrixWorld(true);
+
+  bandViewIds = registerBandViews(cameraRegistry, new THREE.Box3().setFromObject(band));
+  bandViewIndex = 0;
+  camera.setCameraBounds(VENUE_CAMERA_BOUNDS);
+  for (const problem of camera.validateViews()) {
+    console.warn(`[Band View] ${problem.viewId} — ${problem.problem}`);
+  }
+  camera.goToView(bandViewIds[0], true);
+  orbit.adoptCamera();
+
+  player = new BandPlayer({
+    graph,
+    band: built,
+    routed: analysis.routed,
+    plan: analysis.plan,
+    songDuration: analysis.midi.duration,
+    onEnded: () => transport.update(0, player?.total ?? 0, false),
+  });
+  transport.setDuration(player.total);
+  transport.setSummary(summarisePlan(analysis, fileName));
+  transport.setVisible(true);
+  transport.update(0, player.total, false);
+  dropHint.setVisible(false);
+  console.info('[Band View]\n' + analysis.report);
+}
+
+function summarisePlan(analysis: ReturnType<typeof analyzeMidi>, fileName: string): string {
+  const label: Record<string, string> = {
+    drums: '鼓',
+    bass: '贝斯',
+    keyboard: '键盘',
+    acoustic: '木吉他',
+    electric: '电吉他',
+    violin: '提琴',
+  };
+  const parts = analysis.plan.instruments.map((entry) => `${label[entry.type] ?? entry.type}×${entry.count}`);
+  return `${fileName}    ${parts.join('   ')}    共 ${analysis.plan.totalInstruments} 件    ${analysis.midi.tracks.length} 条轨`;
+}
+
+// The band page stays free of interface, so the drop target only announces itself while a file is
+// actually being dragged over it.
+for (const type of ['dragenter', 'dragover'] as const) {
+  window.addEventListener(type, (event) => {
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    if (!loading && !performanceBand) dropHint.setVisible(true);
+  });
+}
+window.addEventListener('dragleave', (event) => {
+  if (event.relatedTarget) return;
+  if (!loading && !performanceBand) dropHint.setVisible(false);
+});
+window.addEventListener('drop', (event) => {
+  event.preventDefault();
+  const file = event.dataTransfer?.files?.[0];
+  if (file) void loadMidiFile(file);
+  else dropHint.setVisible(false);
+});
+
+// A hidden tab keeps its audio clock running, so playback needs rebuilding when it returns.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) player?.resumeFromSuspension();
+});
 
 attachStageInput();
 resize();
@@ -410,6 +597,10 @@ if (import.meta.env.DEV) {
       instrumentAt,
       get stage() { return stage; },
       get orbit() { return orbit; },
+      get player() { return player; },
+      get performanceBand() { return performanceBand; },
+      loadMidiFile,
+      analyzeMidi,
     },
   });
 }

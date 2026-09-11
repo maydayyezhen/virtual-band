@@ -28,7 +28,33 @@ interface InteractionVoice {
 const STRING_ORDER = [6, 5, 4, 3, 2, 1] as const;
 
 export class AcousticGuitarInstrument implements Instrument {
-  readonly id = 'acoustic.main';
+  private instanceId = 'acoustic.main';
+
+
+  /**
+
+   * Instance name. One instrument type can stand on stage more than once — two violins are
+
+   * `violin.1` and `violin.2` — so the name belongs to the instance, not the class. This is
+
+   * the default for the first one.
+
+   */
+
+  get id(): string {
+
+    return this.instanceId;
+
+  }
+
+
+  /** Name this instance. Call before registering it, while nothing refers to it yet. */
+
+  setInstanceId(value: string): void {
+
+    this.instanceId = value;
+
+  }
   readonly role = 'acoustic';
   readonly label = 'Atelier · Acoustic 01';
   readonly root: THREE.Group;

@@ -31,7 +31,33 @@ export interface KeyboardStatus {
 }
 
 export class KeyboardInstrument implements Instrument {
-  readonly id = 'keyboard.main';
+  private instanceId = 'keyboard.main';
+
+
+  /**
+
+   * Instance name. One instrument type can stand on stage more than once — two violins are
+
+   * `violin.1` and `violin.2` — so the name belongs to the instance, not the class. This is
+
+   * the default for the first one.
+
+   */
+
+  get id(): string {
+
+    return this.instanceId;
+
+  }
+
+
+  /** Name this instance. Call before registering it, while nothing refers to it yet. */
+
+  setInstanceId(value: string): void {
+
+    this.instanceId = value;
+
+  }
   readonly role = 'keyboard';
   readonly label = 'Atelier · Dual Stage Keys';
   readonly root: THREE.Group;

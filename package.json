@@ -17,6 +17,7 @@
     "sf2:verify": "node --experimental-strip-types scripts/verify-sf2-parser.mjs"
   },
   "dependencies": {
+    "@tonejs/midi": "^2.0.28",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "three": "^0.169.0"

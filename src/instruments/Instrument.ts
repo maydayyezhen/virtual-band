@@ -29,6 +29,21 @@ export interface Instrument {
   role: InstrumentRole;
   label: string;
   root: THREE.Object3D;
+  /**
+   * Name this instance, e.g. `violin.2`.
+   *
+   * One instrument type can stand on stage more than once, and the registry keys on `id`, so a
+   * second violin needs a name of its own. Call it while nothing refers to the instrument yet.
+   */
+  setInstanceId(value: string): void;
+  /**
+   * Adopt another tone.
+   *
+   * Signatures differ by instrument — the keyboard takes `(tier, program)`, everything else takes
+   * `(program)` — so this is deliberately loose. Optional, and skipped for drums, where a program
+   * selects a kit rather than a tone.
+   */
+  setProgram?(first: number | string, second?: number): boolean;
   noteOn(note: number, velocity: number): void;
   noteOff(note: number): void;
   update(dt: number): InstrumentFrameResult | void;
