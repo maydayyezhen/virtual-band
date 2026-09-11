@@ -121,7 +121,15 @@ export class DrumsInstrument implements Instrument {
 
   noteOn(note: number, velocity: number): void {
     const accepted = this.controller.noteOn(note, velocity);
-    if (!accepted) return;
+    if (!accepted) {
+      // The kit has no piece for this note, so nothing can move — but the percussion bank does
+      // hold a sample for it. Sound it anyway rather than dropping it silently: there are 27
+      // notes like this (hand clap, tambourine, cowbell, the Latin percussion, the effects) and
+      // several of them are common in ordinary MIDI. A piece that sounds without moving beats a
+      // note that is simply missing.
+      this.sampler.noteOn(note, velocity);
+      return;
+    }
 
     if (note === HI_HAT_NOTES.closed || note === HI_HAT_NOTES.pedal) {
       this.hiHatOpenness = 0;

@@ -27,6 +27,7 @@ export const ATELIER_DRUM_KEYMAP: Readonly<Record<string, AtelierDrumKeyAction>>
   KeyW: { kind: 'note', note: 57 }, // Crash Right
   KeyE: { kind: 'note', note: 51 }, // Ride
   KeyT: { kind: 'note', note: 55 }, // Splash
+  KeyP: { kind: 'note', note: 59 }, // Ride 2 — the kit has one ride, so it lands on that one
 
   // Core kit.
   KeyA: { kind: 'note', note: 36 }, // Kick
@@ -38,8 +39,22 @@ export const ATELIER_DRUM_KEYMAP: Readonly<Record<string, AtelierDrumKeyAction>>
   KeyL: { kind: 'note', note: 43 }, // Floor Tom
   KeyY: { kind: 'note', note: 53 }, // Ride bell — the ride struck on its bell
 
+  // GM's remaining percussion notes. The kit has three toms where GM expects six, so the keys
+  // above each tom play the notes that fall between it and its neighbour, and the keys below the
+  // kick and snare play their alternate articulations. The donor already routes all of these to
+  // the right piece, so they sound like themselves rather than like their neighbour.
+  KeyZ: { kind: 'note', note: 35 }, // Acoustic bass drum — alternate kick
+  KeyX: { kind: 'note', note: 40 }, // Electric snare — alternate snare
+  KeyU: { kind: 'note', note: 48 }, // Hi-mid tom, between the high and mid toms
+  KeyI: { kind: 'note', note: 45 }, // Low tom, between the mid and floor toms
+  KeyO: { kind: 'note', note: 41 }, // Low floor tom, below the floor tom
+
   // Hold = close/chick, release = reopen to the donor's normal loose-open position.
   Space: { kind: 'hihat-pedal', releaseOpenness: 0.8 },
+
+  // Notes the kit has no piece for. They sound but nothing moves, so this key is here to make
+  // one of them reachable by hand; every other such note arrives from a score.
+  KeyG: { kind: 'note', note: 39 }, // Hand clap — sounds only, no drum moves
 
   // Swap the kit. Every GM2 percussion preset shares one note map, so no hit can misroute.
   BracketLeft: { kind: 'program-step', delta: -1 },
