@@ -1,7 +1,7 @@
 # Band View 与相机层 · 交接备忘
 
 这份文档记的是 `/studio/band/`（无 UI 乐队页）和它依赖的相机/音频层。
-**重点在第 4 节"没做完的"** —— 后面出问题先看那里。
+**重点在第 4 节"已知取舍"** —— 那里记录有意没做的事和它们的实际影响，排查先看那里。
 
 ---
 
@@ -9,7 +9,7 @@
 
 | 层 | 变化 |
 |---|---|
-| **相机** | 新增第 4 种视图 kind `band-orbit`；`CameraSystem` 补 `currentViewId`、resize 重算机位、`setCameraBounds` + `validateViews`；取景数学统一到 `CameraFraming`；删除死代码 `InstrumentOrbitMode.ts` |
+| **相机** | 新增第 4 种视图 kind `band-orbit`；`CameraSystem` 补 `currentViewId`、resize 重算机位、`setCameraBounds` + `validateViews`；取景数学统一到 `CameraFraming`；新增共用转视角控制器 `OrbitController`（Band View 已用）；删除死代码 `InstrumentOrbitMode.ts` |
 | **展示** | 6 个 Atelier 模式装配抽成 `createAtelierShowcase()`；机位注册抽成 `registerAtelierViews()` |
 | **鼓** | 与其他 5 件统一：距离改用共享函数、删过期 `viewportFraming`、补 `localToWorld`（它原本是唯一不做坐标转换的） |
 | **音频** | 整套音频图抽成 `createBandAudioGraph()` |
@@ -138,27 +138,43 @@ bandView.camera.update(10);   // dt 一大，缓动一步到位并清空 desired
 
 ---
 
-## 4. ★ 没做完的（排查先看这里）
+## 4. ★ 已知取舍（排查先看这里）
 
-### 4.1 ① OrbitController 未合并 —— **最大的结构遗留**
+这一节记录**有意没有做的事**，以及它们的实际影响。都不是缺陷，是权衡后的停点。
 
-**现象**：全景转视角和近景转视角**是两套代码**，手感不一致。
+### 4.1 六个乐器近景仍各自实现转视角 —— **有意保留，不影响能力**
 
-| | 全景（`main.ts` 的 `stageOrbit`） | 近景（6 个 mode 各自内建） |
+**状态：已知、已接受、暂不改。**
+
+Band View 已经改用共用的 `OrbitController`；**六个乐器近景仍然各自内建一份**。
+两套同时存在，**新旧共存，功能都正常**。
+
+**唯一影响是"手感"，不是功能**：
+
+| 操作 | 全景（Band View） | 近景（乐器展示） |
 |---|---|---|
-| 惯性 | ❌ 松手即停 | ✅ 会滑一段 |
-| 平移 | ❌ | ✅ Shift+拖 / 右键拖 |
-| 双指 | ❌ | ✅ |
-| 俯仰范围 | `[-0.15, 1.35]` | `[0.04, 1.43]` |
-| 提交 | `setPose(..., true)` | `setPose(..., true)` |
+| 拖动转视角 | ✅ | ✅ |
+| 滚轮缩放 | ✅ | ✅ |
+| 松手后的惯性 | ✅ | ✅ |
+| Shift+拖 / 右键拖平移 | ❌ 没有 | ✅ |
+| 双指捏合 | ❌ 没有 | ✅ |
 
-**排查入口**：`src/dev/band-viewer/main.ts` 的 `stageOrbit` + `applyStageCamera()`；
-以及 `src/presentation/atelier/Atelier*ShowcaseMode.ts` 里各自的 `want/current` 状态。
+**全景少两个手势，但能转能缩 —— 不影响任何能力。**
 
-**要做的事**：在 `src/camera/` 抽 `OrbitController`（yaw/pitch/distance/target + 惯性 + 平移 + 缩放 + 缓动），
-Band View 先用，再把 6 个 mode 逐个迁过去。**每迁一个跑一次 3.1 + 3.2 回归。**
+**为什么不做**：收益只是"两处手感完全一致"，代价是改动主应用正在用的 6 个文件。不划算。
 
-**风险**：中。动主应用正在用的代码路径。
+**将来真要做时**：
+
+1. `OrbitController` 已经写好并在 Band View 上验证过，照着套：删掉 mode 里的
+   `want` / `current` / `momentumX/Y` / `zoom` / `width` / `height`，以及
+   `pan` / `changeZoom` / `syncViewport` / `distanceFor` / `applyCamera`，
+   换成一个 `OrbitController` 实例（`subject` 传该乐器 `root`，`floorY` 用该 donor 的地板值：
+   鼓 `0.13`、提琴 `-2.17`、木吉他 `-3.65`）。
+2. **两个坑**：
+   - `Atelier*ShowcaseMode.ts` **整份是 CRLF 行尾**，脚本做多行替换会全部匹配不上。
+   - 方向键改的是 `want.yaw/pitch`，需要给 `OrbitController` 补 `nudge(yawDelta, pitchDelta)`。
+3. **一次只改一个文件**，改完立刻跑 §3.1 截图比对 + §3.2 数值比对，通过再改下一个。
+
 
 ### 4.2 `CalibrationAudioRuntime` 是第三份音频图
 
