@@ -4,6 +4,7 @@ import type { ViolinArticulation } from '../../instruments/violin/legacyViolinAs
 export type AtelierViolinKeyAction =
   | { kind: 'string'; stringNumber: number }
   | { kind: 'articulation'; articulation: ViolinArticulation }
+  | { kind: 'program-step'; delta: -1 | 1 }
   | { kind: 'clear-fingering' }
   | { kind: 'view'; view: AtelierViolinViewName }
   | { kind: 'demo' }
@@ -15,6 +16,11 @@ export const ATELIER_VIOLIN_KEYMAP: Readonly<Record<string, AtelierViolinKeyActi
   KeyD: { kind: 'string', stringNumber: 2 },
   KeyF: { kind: 'string', stringNumber: 1 },
 
+  // Two orthogonal axes: Q/E pick which member of the family this model is (tuning and tone
+  // together), 1/2 pick how it is played — 1 bows, 2 plucks. Switching family never changes
+  // the playing style.
+  KeyQ: { kind: 'program-step', delta: -1 },
+  KeyE: { kind: 'program-step', delta: 1 },
   Digit1: { kind: 'articulation', articulation: 'arco' },
   Digit2: { kind: 'articulation', articulation: 'pizzicato' },
   Digit0: { kind: 'clear-fingering' },

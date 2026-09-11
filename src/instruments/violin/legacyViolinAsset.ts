@@ -56,6 +56,15 @@ export interface LegacyViolinApi {
   allNotesOff(): boolean;
   panic(): boolean;
   setArticulation(value: ViolinArticulation): boolean;
+  /**
+   * Re-tune the four strings, lowest first, and recompute the playable range with them.
+   *
+   * Fingering is an interval above the open string, so this is all it takes for one violin model
+   * to cover a viola, cello or double bass. Standard tunings, lowest first:
+   * violin `[55, 62, 69, 76]`, viola `[48, 55, 62, 69]`,
+   * cello `[36, 43, 50, 57]`, double bass `[28, 33, 38, 43]`.
+   */
+  setTuning(notes: readonly number[]): boolean;
   setPitchBend(value: number): boolean;
   setVibrato(value: number): boolean;
   setBow(options: { speed?: number; pressure?: number }): boolean;

@@ -10,6 +10,7 @@ import type { InstrumentHit, InstrumentInteractionSystem } from '../../instrumen
 import type { ViolinInstrument } from '../../instruments/violin/ViolinInstrument';
 import type { PresentationMode } from '../PresentationManager';
 import { ATELIER_VIOLIN_KEYMAP } from './AtelierViolinKeymap';
+import { getViolinProgram } from '../../audio/ViolinProgram';
 
 interface CameraState {
   target: THREE.Vector3;
@@ -328,6 +329,13 @@ export class AtelierViolinShowcaseMode implements PresentationMode {
     } else if (action?.kind === 'articulation') {
       this.violin.setArticulation(action.articulation);
       if (action.articulation === 'pizzicato') this.setBowFramed(false);
+    } else if (action?.kind === 'program-step') {
+      // Family only: the playing style set by 1 / 2 is left exactly as it was.
+      if (event.repeat) return;
+      const program = this.violin.stepProgram(action.delta);
+      console.info(
+        `[Virtual Band V2] violin program ${program} · ${getViolinProgram(program)?.name ?? 'Violin'}`,
+      );
     } else if (action?.kind === 'clear-fingering') {
       if (!event.repeat) this.violin.clearFingering();
     } else if (action?.kind === 'view') {

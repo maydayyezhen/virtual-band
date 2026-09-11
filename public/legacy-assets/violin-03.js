@@ -74,7 +74,9 @@
       }
     }
     batch(bow);batch(root);archCache.clear();
-    return {root,strings,bow,nutY,bridgeY,scale,boardEnd,boardHalf,boardZ,frontPlate,backPlate,fholes,rim};
+    // minNote/maxNote are the playable range, derived from the tuning. They live on the model
+    // rather than as literals in the note checks so setTuning can move them.
+    return {root,strings,bow,nutY,bridgeY,scale,boardEnd,boardHalf,boardZ,frontPlate,backPlate,fholes,rim,minNote:VIOLIN_TUNING[0],maxNote:VIOLIN_TUNING[3]+24};
   }
   function createViolinController(model,hooks={}){
     const voices=[...model.strings.values()],park=V(1.92,1.48,.92),parkQ=new T.Quaternion().setFromAxisAngle(V(0,0,1),Math.PI/2+.045);
@@ -83,7 +85,7 @@
     const byte=v=>Number.isInteger(v)&&v>=0&&v<=127,validInterval=n=>Number.isInteger(n)&&n>=0&&n<=24;
     function wake(){dirty=true;hooks.wake?.();}
     function noteOn(note,velocity=100,stringNumber=null){
-      if(!byte(note)||!byte(velocity)||note<55||note>100)return false;
+      if(!byte(note)||!byte(velocity)||note<model.minNote||note>model.maxNote)return false;
       if(stringNumber!==null&&(!Number.isInteger(stringNumber)||!model.strings.has(stringNumber)))return false;
       if(velocity===0)return noteOff(note);
       const eligible=voices.filter(s=>validInterval(note-s.openNote)&&(stringNumber===null||s.number===stringNumber));if(!eligible.length)return false;
@@ -96,5 +98,5 @@
       const result={note,velocity,string:s.number,stringName:s.name,semitones:s.interval};hooks.onHit?.(result);wake();return result;
     }
     function noteOff(note){
-      if(!byte(note)||note<55||note>100)return false;for(const s of voices)if(s.note===note)s.held=false;wake();return true;
+      if(!byte(note)||note<model.minNote||note>model.maxNote)return false;for(const s of voices)if(s.note===note)s.held=false;wake();return true;
     }

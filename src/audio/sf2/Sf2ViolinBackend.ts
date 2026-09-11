@@ -19,10 +19,26 @@ export class Sf2ViolinBackend implements ViolinSustainBackend {
   private readonly activeStrings = new Map<number, ActiveStringVoice>();
   private preparePromise: Promise<boolean> | null = null;
   private failed = false;
+  private programId: number = VIOLIN_PROGRAM;
 
   constructor(audio: AudioEngine, banks: Sf2BankLibrary, url = DEFAULT_URL) {
     this.synth = new Sf2Synth(audio, banks);
     this.url = url;
+  }
+
+  get program(): number {
+    return this.programId;
+  }
+
+  /**
+   * Select a different GM program on the loaded bank. The instrument type is the caller's idea;
+   * this only knows about program numbers, so a violin model can sound like a cello.
+   */
+  setProgram(program: number, bank: number = VIOLIN_BANK): boolean {
+    if (!Number.isInteger(program) || program < 0 || program > 127) return false;
+    this.programId = program;
+    if (!this.ready) return true; // applied once the bank finishes loading
+    return this.synth.programChange(program, bank);
   }
 
   get ready(): boolean {
@@ -36,8 +52,8 @@ export class Sf2ViolinBackend implements ViolinSustainBackend {
 
     this.preparePromise = this.synth.load(this.url)
       .then(() => {
-        const selected = this.synth.programChange(VIOLIN_PROGRAM, VIOLIN_BANK);
-        if (!selected) throw new Error('Unable to select GM Violin program');
+        const selected = this.synth.programChange(this.programId, VIOLIN_BANK);
+        if (!selected) throw new Error(`Unable to select GM program ${this.programId}`);
         console.info('[SF2] violin backend ready');
         return true;
       })
@@ -69,7 +85,7 @@ export class Sf2ViolinBackend implements ViolinSustainBackend {
 
     let durationSeconds = 0;
     if (active) {
-      const regions = this.synth.inspect(active.note, active.velocity, VIOLIN_PROGRAM, VIOLIN_BANK);
+      const regions = this.synth.inspect(active.note, active.velocity, this.programId, VIOLIN_BANK);
       for (const region of regions) durationSeconds = Math.max(durationSeconds, region.releaseSeconds);
       durationSeconds = clamp(durationSeconds, 0.005, 30);
     }

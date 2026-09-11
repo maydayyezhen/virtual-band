@@ -39,6 +39,16 @@ export class ViolinSampler {
     this.sustainBackend?.setGain(mixGain('violin.arco'), 0);
   }
 
+  /** GM program the sustain backend is playing, or null when there is no backend. */
+  get program(): number | null {
+    return this.sustainBackend?.program ?? null;
+  }
+
+  /** Which member of the violin family the sustain backend sounds like. */
+  setProgram(program: number): boolean {
+    return this.sustainBackend?.setProgram(program) ?? false;
+  }
+
   noteOn(
     stringNumber: number,
     note: number,

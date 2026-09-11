@@ -1,5 +1,11 @@
 import * as THREE from 'three';
 import type { ViolinSampler } from '../../audio/ViolinSampler';
+import {
+  DEFAULT_VIOLIN_PROGRAM,
+  VIOLIN_PROGRAM_IDS,
+  getViolinProgram,
+  type ViolinProgramId,
+} from '../../audio/ViolinProgram';
 import type { Instrument, InstrumentFrameResult, InstrumentInteraction } from '../Instrument';
 import {
   applyFingeringMarkerStyle,
@@ -64,7 +70,10 @@ export class ViolinInstrument implements Instrument {
 
   static async create(sampler: ViolinSampler): Promise<ViolinInstrument> {
     const { model, controller } = await buildLegacyViolinAsset();
-    return new ViolinInstrument(model, controller, sampler);
+    const instrument = new ViolinInstrument(model, controller, sampler);
+    // Make the starting tuning and tone explicit rather than relying on donor literals.
+    instrument.setProgram(DEFAULT_VIOLIN_PROGRAM);
+    return instrument;
   }
 
   noteOn(note: number, velocity: number): void {
@@ -119,6 +128,50 @@ export class ViolinInstrument implements Instrument {
     if (!this.fingeringState.toggle(stringNumber, semitones)) return false;
     this.syncFingeringMarkers();
     return true;
+  }
+
+  private programId: ViolinProgramId = DEFAULT_VIOLIN_PROGRAM;
+
+  get program(): ViolinProgramId {
+    return this.programId;
+  }
+
+  /**
+   * Switch which member of the violin family this model stands in for.
+   *
+   * One model covers violin, viola, cello and double bass because fingering is computed as an
+   * interval above the open string: re-tuning the four strings moves the whole playable range
+   * with them, and the tone follows from the GM program.
+   *
+   * Playing style is deliberately untouched — plucking and bowing are orthogonal to instrument
+   * type, and a cellist plucks as readily as a violinist does.
+   */
+  setProgram(value: number): boolean {
+    const preset = getViolinProgram(value);
+    if (!preset) return false;
+
+    // A missing tone backend must not block the type change: the tuning is what makes the range
+    // playable, and the tone can still follow once the bank loads.
+    if (!this.sampler.setProgram(preset.id)) {
+      console.warn(`[violin] tone ${preset.id} (${preset.name}) unavailable; retuning anyway`);
+    }
+    if (!this.controller.api.setTuning(preset.tuning)) return false;
+
+    // Changing program only decides what *new* notes sound like; anything already ringing keeps
+    // its old timbre. Without this, playing Acoustic Bass and then switching away leaves a
+    // plucked voice sounding under a bowed instrument.
+    this.releaseTails.clear();
+    this.sampler.reset();
+
+    this.programId = preset.id;
+    return true;
+  }
+
+  stepProgram(delta: -1 | 1): ViolinProgramId {
+    const index = VIOLIN_PROGRAM_IDS.indexOf(this.programId);
+    const next = (index + delta + VIOLIN_PROGRAM_IDS.length) % VIOLIN_PROGRAM_IDS.length;
+    this.setProgram(VIOLIN_PROGRAM_IDS[next]);
+    return this.programId;
   }
 
   setArticulation(value: ViolinArticulation): boolean {

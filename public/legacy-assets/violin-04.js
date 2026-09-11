@@ -81,9 +81,21 @@
     }
     const api={noteOn,noteOff,playString,allNotesOff,panic,setArticulation,setPitchBend,setVibrato,setBow,controlChange,handleMIDIMessage,
       setMIDIChannel(value){if(!Number.isInteger(value)||value<1||value>16)return false;allNotesOff();channel=value;return true;},
+      // Re-tune the four strings at runtime, lowest first. This is what lets one violin model
+      // stand in for a viola, cello or double bass: fingering is computed as an interval above
+      // the open string, so moving the open note moves the whole playable range with it.
+      setTuning(notes){
+        if(!Array.isArray(notes)||notes.length!==4||!notes.every(byte))return false;
+        allNotesOff();
+        const names=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+        model.strings.forEach(s=>{const open=notes[4-s.number];s.openNote=open;s.name=names[open%12];});
+        model.minNote=api.minNote=Math.min.apply(null,notes);
+        model.maxNote=api.maxNote=Math.max.apply(null,notes)+24;
+        return true;
+      },
       get midiChannel(){return channel;},get articulation(){return mode;},get activeNotes(){return [...new Set(voices.filter(s=>s.held).map(s=>s.note))];},
       getFingering(){return voices.filter(s=>s.held).map(s=>({string:s.number,note:s.note,semitones:s.currentInterval,positionY:model.bridgeY+model.scale*2**(-s.currentInterval/12)}));},
-      strings:model.strings,bow:model.bow,root:model.root,minNote:55,maxNote:100
+      strings:model.strings,bow:model.bow,root:model.root,get minNote(){return model.minNote;},get maxNote(){return model.maxNote;}
     };
     tick(.016);return {api,tick,stringPoint};
   }
