@@ -38,6 +38,20 @@ export class KeyboardSampler {
     this.toneBackend?.setGain('upper', keyboardGain('upper'), 0);
   }
 
+  /**
+   * GM program a tier is set to, or null when there is no tone backend.
+   *
+   * The two tiers are independent synths of identical capability: anything from 0 to 127 can go
+   * on either. A change only affects notes started afterwards.
+   */
+  program(tier: KeyboardTier): number | null {
+    return this.toneBackend?.program(tier) ?? null;
+  }
+
+  setProgram(tier: KeyboardTier, program: number): boolean {
+    return this.toneBackend?.setProgram(tier, program) ?? false;
+  }
+
   noteOn(tier: KeyboardTier, note: number, velocity: number, source = 'runtime'): void {
     if (!Number.isInteger(note) || note < 0 || note > 127) return;
     const id = voiceId(tier, note, source);

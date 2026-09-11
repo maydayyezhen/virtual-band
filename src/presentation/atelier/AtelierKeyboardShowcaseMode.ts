@@ -11,6 +11,7 @@ import type { KeyboardInstrument } from '../../instruments/keyboard/KeyboardInst
 import type { KeyboardTier } from '../../instruments/keyboard/legacyKeyboardAsset';
 import type { PresentationMode } from '../PresentationManager';
 import { ATELIER_KEYBOARD_KEYMAP } from './AtelierKeyboardKeymap';
+import { AtelierKeyboardPanel, installKeyboardPanelStyles } from './AtelierKeyboardPanel';
 
 interface CameraState {
   target: THREE.Vector3;
@@ -42,6 +43,7 @@ export class AtelierKeyboardShowcaseMode implements PresentationMode {
   readonly id = 'atelier-keyboard';
 
   private readonly element: HTMLCanvasElement;
+  private readonly panel: AtelierKeyboardPanel;
   private readonly camera: CameraSystem;
   private readonly cameraRegistry: CameraRegistry;
   private readonly keyboard: KeyboardInstrument;
@@ -85,6 +87,8 @@ export class AtelierKeyboardShowcaseMode implements PresentationMode {
     this.cameraRegistry = options.cameraRegistry;
     this.keyboard = options.keyboard;
     this.interactions = options.interactions;
+    installKeyboardPanelStyles();
+    this.panel = new AtelierKeyboardPanel(options.keyboard, document.body);
   }
 
   activate(): void {
@@ -93,6 +97,7 @@ export class AtelierKeyboardShowcaseMode implements PresentationMode {
     this.attachInput();
     this.syncViewport(true);
     this.selectView('whole', true);
+    this.panel.setVisible(true);
   }
 
   deactivate(): void {
@@ -102,10 +107,12 @@ export class AtelierKeyboardShowcaseMode implements PresentationMode {
     this.detachInput();
     this.element.classList.remove('dragging', 'playable');
     this.camera.resetLens();
+    this.panel.setVisible(false);
   }
 
   update(dt: number): void {
     if (!this.active) return;
+    this.panel.update();
     this.syncViewport(false);
 
     if (
@@ -165,6 +172,7 @@ export class AtelierKeyboardShowcaseMode implements PresentationMode {
 
   dispose(): void {
     this.deactivate();
+    this.panel.dispose();
   }
 
   private getPreset(id: AtelierKeyboardViewName): InstrumentOrbitCameraView | null {

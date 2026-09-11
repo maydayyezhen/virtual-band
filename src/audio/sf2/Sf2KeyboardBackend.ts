@@ -18,11 +18,31 @@ export class Sf2KeyboardBackend implements KeyboardToneBackend {
   private readonly url: string;
   private preparePromise: Promise<boolean> | null = null;
   private failed = false;
+  private readonly programs: Record<KeyboardTier, number> = { ...PROGRAMS };
 
   constructor(audio: AudioEngine, banks: Sf2BankLibrary, url = DEFAULT_URL) {
     this.lower = new Sf2Synth(audio, banks);
     this.upper = new Sf2Synth(audio, banks);
     this.url = url;
+  }
+
+  /** GM program a tier is currently set to. */
+  program(tier: KeyboardTier): number {
+    return this.programs[tier];
+  }
+
+  /**
+   * Select a GM program for one tier.
+   *
+   * The two tiers are independent synths with identical capability, so anything from 0 to 127
+   * can go on either — there is no "pianos downstairs" rule. A program change only decides what
+   * *new* notes sound like; anything already sounding keeps its own tone to the end.
+   */
+  setProgram(tier: KeyboardTier, program: number): boolean {
+    if (!Number.isInteger(program) || program < 0 || program > 127) return false;
+    this.programs[tier] = program;
+    if (!this.ready) return true; // applied as soon as the bank finishes loading
+    return this.synth(tier).programChange(program, GM_BANK);
   }
 
   get ready(): boolean {
@@ -39,10 +59,13 @@ export class Sf2KeyboardBackend implements KeyboardToneBackend {
       this.upper.load(this.url),
     ])
       .then(() => {
-        const lowerSelected = this.lower.programChange(PROGRAMS.lower, GM_BANK);
-        const upperSelected = this.upper.programChange(PROGRAMS.upper, GM_BANK);
+        // Apply whatever the tiers are set to now, which may have changed while loading.
+        const lowerSelected = this.lower.programChange(this.programs.lower, GM_BANK);
+        const upperSelected = this.upper.programChange(this.programs.upper, GM_BANK);
         if (!lowerSelected || !upperSelected) throw new Error('Unable to select keyboard GM programs');
-        console.info('[SF2] keyboard backend ready: lower=piano, upper=warm pad');
+        console.info(
+          `[SF2] keyboard backend ready: lower=${this.programs.lower}, upper=${this.programs.upper}`,
+        );
         return true;
       })
       .catch((error) => {

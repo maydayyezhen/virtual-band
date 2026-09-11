@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { generalMidiToneName } from '../../audio/GeneralMidiTones';
 import type { KeyboardSampler } from '../../audio/KeyboardSampler';
 import type { Instrument, InstrumentFrameResult, InstrumentInteraction } from '../Instrument';
 import {
@@ -9,6 +10,25 @@ import {
   type LegacyKeyboardModel,
   type LegacyKeyboardPedalRecord,
 } from './legacyKeyboardAsset';
+
+/** One tier's displayable state. */
+export interface KeyboardTierStatus {
+  readonly tier: KeyboardTier;
+  readonly program: number | null;
+  readonly tone: string;
+  readonly minNote: number;
+  readonly maxNote: number;
+  readonly pressedNotes: number;
+  readonly pitchWheel: number;
+  readonly modWheel: number;
+}
+
+/** A snapshot of the whole instrument for a control surface to render. */
+export interface KeyboardStatus {
+  readonly lower: KeyboardTierStatus;
+  readonly upper: KeyboardTierStatus;
+  readonly pedals: Readonly<Record<'soft' | 'sostenuto' | 'sustain', boolean>>;
+}
 
 export class KeyboardInstrument implements Instrument {
   readonly id = 'keyboard.main';
@@ -65,6 +85,67 @@ export class KeyboardInstrument implements Instrument {
     this.sampler.setSustain(tier, pressed);
     if (tier !== 'lower') return true;
     return this.setPedal('sustain', pressed, source);
+  }
+
+  /**
+   * GM program a tier is set to, or null when there is no tone backend.
+   *
+   * Every tier is a whole synth, so one program covers all of its keys — a tier cannot have a
+   * different tone per key. A second simultaneous tone comes from the other tier, and a third
+   * from a second keyboard.
+   */
+  program(tier: KeyboardTier): number | null {
+    return this.sampler.program(tier);
+  }
+
+  setProgram(tier: KeyboardTier, program: number): boolean {
+    if (tier !== 'lower' && tier !== 'upper') return false;
+    return this.sampler.setProgram(tier, program);
+  }
+
+  /** Step a tier through the 128 programs, wrapping at both ends. */
+  stepProgram(tier: KeyboardTier, delta: -1 | 1): number | null {
+    const current = this.program(tier);
+    if (current === null) return null;
+    const next = (current + delta + 128) % 128;
+    return this.setProgram(tier, next) ? next : current;
+  }
+
+  /**
+   * A plain snapshot of everything a control surface needs to display.
+   *
+   * The model stays private; a panel reads this instead of reaching into it, so the shape of the
+   * donor's data never leaks into presentation code.
+   */
+  status(): KeyboardStatus {
+    return {
+      lower: this.tierStatus('lower'),
+      upper: this.tierStatus('upper'),
+      pedals: {
+        soft: this.model.pedals.soft?.target > 0,
+        sostenuto: this.model.pedals.sostenuto?.target > 0,
+        sustain: this.model.pedals.sustain?.target > 0,
+      },
+    };
+  }
+
+  private tierStatus(tier: KeyboardTier): KeyboardTierStatus {
+    const layer = this.model.layers[tier];
+    const program = this.program(tier);
+    let pressed = 0;
+    for (const key of layer?.keys.values() ?? []) {
+      if (key.sources.size > 0 || key.amount > 0.01) pressed += 1;
+    }
+    return {
+      tier,
+      program,
+      tone: program === null ? '—' : generalMidiToneName(program),
+      minNote: layer?.minNote ?? 0,
+      maxNote: layer?.maxNote ?? 127,
+      pressedNotes: pressed,
+      pitchWheel: layer?.pitchWheel?.amount ?? 0,
+      modWheel: layer?.modWheel?.amount ?? 0,
+    };
   }
 
   setPedal(
