@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { createBandAudioGraph } from '../../audio/BandAudioGraph';
 import { CameraRegistry } from '../../camera/CameraRegistry';
-import { orbitPosition } from '../../camera/CameraFraming';
 import { CameraSystem } from '../../camera/CameraSystem';
+import { OrbitController } from '../../camera/OrbitController';
 import { RendererHost } from '../../engine/RendererHost';
 import { AcousticGuitarInstrument } from '../../instruments/acoustic/AcousticGuitarInstrument';
 import { BassInstrument } from '../../instruments/bass/BassInstrument';
@@ -35,10 +35,7 @@ import { StageDirector } from './StageDirector';
  */
 
 const STAGE_SURFACE_Y = 1.2;
-const CAMERA_FOV = 38;
-const VIEW_MARGIN = 1.35;
 const MAX_FRAME_SECONDS = 0.05;
-const ORBIT_SENSITIVITY = 0.005;
 const PITCH_RANGE: readonly [number, number] = [-0.15, 1.35];
 /**
  * The volume a camera may sit in, from the NOCTURNE venue: a 30 × 16 m deck spanning z ∈ [-8, 8],
@@ -147,27 +144,19 @@ const presentation = new PresentationManager();
 /** Stage views, filled in once the layout is known. Index 0 is the audience view. */
 let bandViewIds: string[] = [];
 let bandViewIndex = 0;
-const stageOrbit = {
-  target: new THREE.Vector3(0, 2, 0),
-  distance: 12,
-  yaw: 0,
-  pitch: 0.34,
-  homeDistance: 12,
-  homeTarget: new THREE.Vector3(0, 2, 0),
-};
+
+/**
+ * Stage orbit. World space (no subject), so the camera swings around the whole band rather than
+ * around one instrument — the same controller the instrument close-ups use, which is what makes
+ * the two feel alike.
+ */
+const orbit = new OrbitController({
+  camera,
+  element: host.renderer.domElement,
+  pitchRange: PITCH_RANGE,
+});
 
 let stage!: StageDirector;
-
-/** Stage camera is pushed straight into CameraSystem until the orbit layer is unified. */
-function applyStageCamera(instant: boolean): void {
-  const position = orbitPosition(
-    stageOrbit.target,
-    stageOrbit.distance,
-    stageOrbit.yaw,
-    stageOrbit.pitch,
-  );
-  camera.setPose({ position, target: stageOrbit.target, fov: CAMERA_FOV }, instant);
-}
 
 async function buildBand(): Promise<void> {
   const [drums, keyboard, violin, electric, acoustic, bass] = await Promise.all([
@@ -253,11 +242,8 @@ async function buildBand(): Promise<void> {
 
   camera.goToView(bandViewIds[0], true);
 
-  // Seed the interactive stage orbit from the resolved view, so the first drag continues from it.
-  stageOrbit.target.copy(camera.targetPosition);
-  stageOrbit.distance = camera.output.position.distanceTo(camera.targetPosition);
-  stageOrbit.homeDistance = stageOrbit.distance;
-  stageOrbit.homeTarget.copy(stageOrbit.target);
+  // Seed the orbit from the resolved view, so the first drag continues from where it landed.
+  orbit.adoptCamera();
 }
 
 /* ------------------------------------------------------------------ *
@@ -300,7 +286,10 @@ function attachStageInput(): void {
       button: event.button,
       moved: false,
     };
-    if (stage.isBand && event.button === 0) capturePointer(element, event.pointerId);
+    if (stage.isBand && event.button === 0) {
+      capturePointer(element, event.pointerId);
+      orbit.beginOrbit();
+    }
   });
 
   element.addEventListener('pointermove', (event) => {
@@ -311,19 +300,14 @@ function attachStageInput(): void {
     press.moved = true;
 
     if (press.button !== 0 || !stage.isBand) return;
-    stageOrbit.yaw -= dx * ORBIT_SENSITIVITY;
-    stageOrbit.pitch = THREE.MathUtils.clamp(
-      stageOrbit.pitch + dy * ORBIT_SENSITIVITY * 0.8,
-      PITCH_RANGE[0],
-      PITCH_RANGE[1],
-    );
+    orbit.orbitBy(dx, dy);
     press.x = event.clientX;
     press.y = event.clientY;
-    applyStageCamera(true);
   });
 
   const release = (event: PointerEvent): void => {
     releasePointer(element, event.pointerId);
+    orbit.endOrbit();
     const gesture = press;
     press = null;
     if (!gesture || gesture.moved || event.button !== gesture.button) return;
@@ -338,12 +322,7 @@ function attachStageInput(): void {
   element.addEventListener('wheel', (event) => {
     if (!stage.isBand) return;
     event.preventDefault();
-    stageOrbit.distance = THREE.MathUtils.clamp(
-      stageOrbit.distance * Math.exp(event.deltaY * 0.001),
-      1.5,
-      stageOrbit.homeDistance * VIEW_MARGIN,
-    );
-    applyStageCamera(true);
+    orbit.zoomBy(Math.exp(event.deltaY * 0.001));
   }, { passive: false });
 
   // Double click is the one way in and the one way across: from the wide band it steps into an
@@ -397,6 +376,8 @@ function loop(): void {
   instruments.update(dt);
   presentation.update(dt);
   stage?.update();
+  // Only the band state drives the orbit controller; a live mode owns the camera itself.
+  if (stage?.isBand) orbit.update(dt);
   camera.update(dt);
   resize();
   host.render(camera.output);
@@ -428,7 +409,7 @@ if (import.meta.env.DEV) {
       host, band, instruments, interactions, camera, cameraRegistry, presentation, audio,
       instrumentAt,
       get stage() { return stage; },
-      get orbit() { return stageOrbit; },
+      get orbit() { return orbit; },
     },
   });
 }
