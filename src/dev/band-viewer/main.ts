@@ -17,14 +17,15 @@ import { PresentationManager } from '../../presentation/PresentationManager';
 import type { Instrument } from '../../instruments/Instrument';
 import { AtelierStudioVenue } from '../../venues/atelier-studio/AtelierStudioVenue';
 import {
-  createHomeLayout,
+  bandLayout,
   footprintsOf,
   prepareMember,
   presentBand,
+  type BandComposition,
   type PresentedBand,
   type PreparedMember,
 } from '../../layout/presentBand';
-import type { LayoutDocument } from '../../layout/LayoutDocument';
+import type { InstrumentFootprints } from '../../layout/AutoLayout';
 import { registerBandViews, BAND_VIEW_SCOPE } from './BandViews';
 import { analyzeMidi } from '../../midi';
 import { buildMidiBand, type BuiltBand } from './buildMidiBand';
@@ -117,14 +118,6 @@ let band = new THREE.Group();
 band.name = 'band:instruments';
 host.scene.add(band);
 
-/**
- * Where each instrument type stands, and the one arrangement every band is grown from.
- *
- * Measured once, from the six instruments the page builds at load, and reused when a file asks for
- * a different set — so the instruments a file does not mention keep the exact spot they had.
- */
-let homeLayout: LayoutDocument | null = null;
-
 const interactions = new InstrumentInteractionSystem({
   element: host.renderer.domElement,
   camera: camera.output,
@@ -211,15 +204,20 @@ async function buildBand(): Promise<void> {
   // Saved instrument views: the same 29 the instrument library uses.
   registerAtelierViews(cameraRegistry, six);
 
-  // The six instruments the page starts with are also the yardstick for the arrangement: their
-  // measured footprints define where each type stands, and that arrangement is what a band from a
-  // file is grown from later.
+  // The six instruments the page starts with are also the yardstick for every arrangement: their
+  // measured footprints are what the layout engine packs rows with, here and for any band a file
+  // asks for later. Measured once, from a complete band.
   const members = (Object.keys(six) as LayoutInstrumentType[]).map((type) =>
     prepareMember(six[type].id, type, six[type].root),
   );
-  homeLayout = createHomeLayout(footprintsOf(members));
+  footprints = footprintsOf(members);
   adoptBand(
-    presentBand({ members, home: homeLayout, surfaceY: STAGE_SURFACE_Y, clearanceZ: LED_CLEARANCE_Z }),
+    presentBand({
+      members,
+      home: bandLayout(COMPLETE_BAND, footprints),
+      surfaceY: STAGE_SURFACE_Y,
+      clearanceZ: LED_CLEARANCE_Z,
+    }),
   );
   host.invalidateShadows();
 
@@ -435,10 +433,29 @@ const transport = new TransportBar({
 });
 const dropHint = new DropHint();
 let performanceBand: BuiltBand | null = null;
+/**
+ * Measured extent of all six instruments, taken from the band the page opens with.
+ *
+ * It is deliberately not re-measured from a band built out of a score: row packing asks how wide
+ * an instrument is, and a score that leaves the violin out would then arrange the band as if
+ * violins did not exist. A seven-piece and a one-piece band of the same instruments must agree
+ * about how much room a violin takes.
+ */
+let footprints: InstrumentFootprints | null = null;
 /** The stage view is being flown to; the orbit takes over once it lands. */
 let pendingOrbitAdopt = false;
 let player: BandPlayer | null = null;
 let loading = false;
+
+/** One of every instrument: the band the page opens with before a file says otherwise. */
+const COMPLETE_BAND: BandComposition = {
+  drums: 1,
+  keyboard: 1,
+  violin: 1,
+  electric: 1,
+  acoustic: 1,
+  bass: 1,
+};
 
 async function loadMidiFile(file: File): Promise<void> {
   if (loading) return;
@@ -495,15 +512,20 @@ async function enterPerformanceMode(
     instruments.register(record.instrument);
   }
 
-  // Same placement path the interactive band used: each type stands where the home layout puts it
-  // and extras hang off their sibling, so instruments the file never mentioned do not move.
-  if (!homeLayout) throw new Error('home layout is missing; the interactive band never finished building');
+  // The arrangement is the layout engine's, not this page's. The plan's counts become a layout
+  // document, the engine packs it into rows, and every member stands on the slot it was given — so
+  // an eight-piece band from a score is arranged exactly as the same eight instruments would be if
+  // someone opened that document in the layout editor. Nothing here decides where anything stands.
+  if (!footprints) throw new Error('footprints are missing; the interactive band never finished building');
+  const composition: BandComposition = {};
+  for (const entry of analysis.plan.instruments) composition[entry.type] = entry.count;
+  const midiLayout = bandLayout(composition, footprints);
   adoptBand(
     presentBand({
       members: built.built.map((record) =>
-        prepareMember(record.instrument.id, record.type as LayoutInstrumentType, record.instrument.root),
+        prepareMember(record.instrument.id, record.type, record.instrument.root),
       ),
-      home: homeLayout,
+      home: midiLayout,
       surfaceY: STAGE_SURFACE_Y,
       clearanceZ: LED_CLEARANCE_Z,
     }),

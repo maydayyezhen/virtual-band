@@ -1,7 +1,14 @@
 import * as THREE from 'three';
 import { autoArrangeLayout, type InstrumentFootprint, type InstrumentFootprints } from './AutoLayout';
 import { normalizeInstrument } from './BandPresentation';
-import { createDefaultLayout, type LayoutDocument, type LayoutInstrumentType } from './LayoutDocument';
+import {
+  createDefaultLayout,
+  LAYOUT_INSTRUMENTS,
+  type LayoutDocument,
+  type LayoutInstrumentInstance,
+  type LayoutInstrumentType,
+  type LayoutTransform,
+} from './LayoutDocument';
 
 /**
  * Putting a band on a stage.
@@ -16,9 +23,11 @@ import { createDefaultLayout, type LayoutDocument, type LayoutInstrumentType } f
  * would nest one holder inside another. `presentBand` then arranges the prepared members, which is
  * pure placement and needs no model at all.
  *
- * Arranging is **additive**: every type stands where the home layout puts it, and extra instances
- * of a type stand beside their first one. Re-packing the whole band whenever the count changes
- * would move instruments nobody asked to move — adding a third guitar must not shift the drums.
+ * Arranging is the layout engine's job and nothing else's. Every member is placed at the instance
+ * the engine gave its type — the first keyboard where the document puts the first keyboard, the
+ * third where it puts the third. A band from a score therefore stands exactly where the same
+ * document stands in the layout editor, and the only thing a score changes is how many instances
+ * the document has.
  */
 
 export interface PreparedMember {
@@ -39,11 +48,6 @@ export interface PresentedBand {
   /** Measured extent per type, reusable as a home layout's input. */
   readonly footprints: InstrumentFootprints;
 }
-
-/** Space between an instrument and the sibling added next to it. */
-const SIBLING_GAP = 0.3;
-/** How far each extra column steps away from the audience. */
-const SIBLING_DEPTH = 0.9;
 
 /**
  * Measure one instrument and wrap it so it is ready to stand on the deck.
@@ -70,30 +74,44 @@ export function footprintsOf(members: readonly PreparedMember[]): InstrumentFoot
   return footprints;
 }
 
-/**
- * The standard arrangement of one of each instrument, which every band is grown from.
- *
- * It needs a footprint for all six types, so it is built from a complete six-instrument band
- * before that band is replaced by anything.
- */
-export function createHomeLayout(footprints: InstrumentFootprints): LayoutDocument {
-  return autoArrangeLayout(createDefaultLayout(), footprints);
-}
+/** How many of each instrument a band has. A missing type is not on stage. */
+export type BandComposition = Partial<Record<LayoutInstrumentType, number>>;
 
 /**
- * Which column a sibling stands in: 0 for the first, then right, left, two right, two left.
+ * A layout for a band of a given size, arranged by the layout engine.
  *
- * Alternating rather than counting upwards keeps a pair or a trio centred on the spot its type
- * already occupies, instead of walking off the end of the stage.
+ * This is the one way a composition becomes positions, whether the composition is "one of
+ * everything" or "what a score asked for". The document it returns is an ordinary layout
+ * document — the layout editor can open it, and it means the same thing there.
+ *
+ * Footprints must cover all six types, including any the band leaves out: row packing asks how
+ * wide an instrument is, not whether this band happens to have one, and answering that from the
+ * band at hand would make the arrangement depend on what a score omitted.
  */
-function siblingColumn(index: number): number {
-  if (index === 0) return 0;
-  return index % 2 === 1 ? Math.ceil(index / 2) : -index / 2;
+export function bandLayout(
+  composition: BandComposition,
+  footprints: InstrumentFootprints,
+): LayoutDocument {
+  const document = createDefaultLayout();
+  document.instances = LAYOUT_INSTRUMENTS.flatMap((definition) => {
+    const count = Math.max(0, Math.floor(composition[definition.id] ?? 0));
+    return Array.from({ length: count }, (_, index): LayoutInstrumentInstance => ({
+      id: `${definition.id}-${index + 1}`,
+      type: definition.id,
+      transform: { position: [0, 0, 0], rotation: [0, definition.defaultYaw, 0], scale: 1 },
+    }));
+  });
+  return autoArrangeLayout(document, footprints);
+}
+
+/** One of every instrument, which is the band the page opens with. */
+export function createHomeLayout(footprints: InstrumentFootprints): LayoutDocument {
+  return bandLayout({ drums: 1, keyboard: 1, violin: 1, electric: 1, acoustic: 1, bass: 1 }, footprints);
 }
 
 export function presentBand(input: {
   readonly members: readonly PreparedMember[];
-  /** Where each type stands, from `createHomeLayout` or a saved layout document. */
+  /** Where every member stands, from `bandLayout` or a saved layout document. */
   readonly home: LayoutDocument;
   /** Deck height the band stands on. */
   readonly surfaceY?: number;
@@ -108,7 +126,14 @@ export function presentBand(input: {
 
   const holders = new Map<string, THREE.Group>();
   const footprints = {} as InstrumentFootprints;
-  const homeByType = new Map(home.instances.map((instance) => [instance.type, instance.transform]));
+  // Instances of a type in document order, so the n-th member of a type reads the n-th slot. The
+  // engine has already decided where each one stands; this only pairs them up.
+  const slotsByType = new Map<LayoutInstrumentType, LayoutTransform[]>();
+  for (const instance of home.instances) {
+    const slots = slotsByType.get(instance.type);
+    if (slots) slots.push(instance.transform);
+    else slotsByType.set(instance.type, [instance.transform]);
+  }
   const placedPerType = new Map<LayoutInstrumentType, number>();
 
   for (const member of members) {
@@ -118,18 +143,24 @@ export function presentBand(input: {
     const index = placedPerType.get(member.type) ?? 0;
     placedPerType.set(member.type, index + 1);
 
-    const base = homeByType.get(member.type);
-    const column = siblingColumn(index);
+    const slots = slotsByType.get(member.type) ?? [];
+    const base = slots[index];
+    if (!base) {
+      throw new Error(
+        `布局里没有 ${member.type} 的第 ${index + 1} 个位置：` +
+          `编制说有 ${index + 1} 件，文档只有 ${slots.length} 个槽位`,
+      );
+    }
     // The holder already carries the lift that puts the model's base on y = 0; the layout's own y
     // is added to it rather than replacing it, or every instrument sinks by the lift.
     const lift = member.holder.position.y;
     member.holder.position.set(
-      (base?.position[0] ?? 0) + column * (member.footprint.width + SIBLING_GAP),
-      lift + (base?.position[1] ?? 0),
-      Math.max((base?.position[2] ?? 0) - Math.abs(column) * SIBLING_DEPTH, clearanceZ),
+      base.position[0],
+      lift + base.position[1],
+      Math.max(base.position[2], clearanceZ),
     );
-    member.holder.rotation.y = base?.rotation[1] ?? 0;
-    if (base) member.holder.scale.multiplyScalar(base.scale);
+    member.holder.rotation.y = base.rotation[1];
+    member.holder.scale.multiplyScalar(base.scale);
     group.add(member.holder);
   }
 

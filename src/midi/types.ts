@@ -6,17 +6,21 @@
  * and every note has a start and an end.
  */
 
-/** The six instruments a track can be routed to. */
-export type BandInstrumentType = 'drums' | 'bass' | 'keyboard' | 'acoustic' | 'electric' | 'violin';
+import { LAYOUT_INSTRUMENTS, type LayoutInstrumentType } from '../layout/LayoutDocument';
 
-export const BAND_INSTRUMENT_TYPES: readonly BandInstrumentType[] = Object.freeze([
-  'drums',
-  'bass',
-  'keyboard',
-  'acoustic',
-  'electric',
-  'violin',
-]);
+/**
+ * The six instruments a track can be routed to.
+ *
+ * This is the layout vocabulary, not a copy of it. An instrument the router can choose is by
+ * definition one the placement engine can stand on a stage, so the two lists are the same list.
+ * Keeping a second one spelled out here is how a band ends up holding a type that has nowhere to
+ * stand, and how a layout comes to mean one thing in the editor and another in the band.
+ */
+export type BandInstrumentType = LayoutInstrumentType;
+
+export const BAND_INSTRUMENT_TYPES: readonly BandInstrumentType[] = Object.freeze(
+  LAYOUT_INSTRUMENTS.map((instrument) => instrument.id),
+);
 
 export interface MidiNote {
   /** MIDI note number, 0–127. */

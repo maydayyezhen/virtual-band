@@ -47,6 +47,12 @@ function packRows(
 
   for (const instance of instances) {
     const footprint = footprints[instance.type];
+    if (!footprint) {
+      throw new Error(
+        `自动排布缺少 ${instance.type} 的尺寸：请用一套包含全部六件乐器的编制测量 footprints，` +
+          `否则排布结果取决于谁先被量过`,
+      );
+    }
     const item: PackedItem = {
       instance,
       width: Math.max(0.28, footprint.width * instance.transform.scale),
