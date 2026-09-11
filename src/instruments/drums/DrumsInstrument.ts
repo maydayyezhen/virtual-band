@@ -1,4 +1,10 @@
 import * as THREE from 'three';
+import {
+  DEFAULT_DRUM_KIT,
+  DRUM_KIT_IDS,
+  getDrumKit,
+  type DrumKitId,
+} from '../../audio/DrumProgram';
 import { HI_HAT_NOTES, type DrumSampler } from '../../audio/DrumSampler';
 import type { Instrument, InstrumentFrameResult, InstrumentInteraction } from '../Instrument';
 import {
@@ -22,6 +28,21 @@ const PART_NOTE: Record<string, number> = {
 };
 
 const HI_HAT_CLOSED_MAX = 0.16;
+
+/**
+ * Parts that carry two sounds depending on where they are struck.
+ *
+ * `innerFraction` is how much of the part's radius counts as the inner zone: 0 is dead centre and
+ * 1 is the outer edge. Both pairs are real performance distinctions rather than fallbacks:
+ *
+ * - A side stick is the snare struck out on the rim, so it reads well away from the centre.
+ * - A ride's bell is the raised dome in the middle; everything outside it is the bow.
+ */
+const PART_ZONE: Readonly<Record<string, { inner: number; outer: number; innerFraction: number }>> =
+  Object.freeze({
+    snare: { inner: 38, outer: 37, innerFraction: 0.62 },
+    ride: { inner: 53, outer: 51, innerFraction: 0.38 },
+  });
 const HI_HAT_MOUSE_OPENNESS = 0.8;
 
 type HitListener = (event: LegacyDrumHitEvent) => void;
@@ -67,7 +88,35 @@ export class DrumsInstrument implements Instrument {
         for (const listener of panicListeners) listener();
       },
     });
-    return new DrumsInstrument(model.root, controller, sampler, hitListeners, panicListeners);
+    const instrument = new DrumsInstrument(model.root, controller, sampler, hitListeners, panicListeners);
+    instrument.setProgram(DEFAULT_DRUM_KIT);
+    return instrument;
+  }
+
+  private kitId: DrumKitId = DEFAULT_DRUM_KIT;
+
+  get program(): DrumKitId {
+    return this.kitId;
+  }
+
+  /**
+   * Swap the kit. Every GM2 percussion preset shares one note map, so no hit can land on the
+   * wrong piece; only the sound changes. The model keeps its acoustic look either way, which is
+   * a mismatch for the electronic kits but harmless for the acoustic ones.
+   */
+  setProgram(value: number): boolean {
+    const kit = getDrumKit(value);
+    if (!kit) return false;
+    if (!this.sampler.setProgram(kit.id)) return false;
+    this.kitId = kit.id;
+    return true;
+  }
+
+  stepProgram(delta: -1 | 1): DrumKitId {
+    const index = DRUM_KIT_IDS.indexOf(this.kitId);
+    const next = (index + delta + DRUM_KIT_IDS.length) % DRUM_KIT_IDS.length;
+    this.setProgram(DRUM_KIT_IDS[next]);
+    return this.kitId;
   }
 
   noteOn(note: number, velocity: number): void {
@@ -149,7 +198,7 @@ export class DrumsInstrument implements Instrument {
     return () => this.panicListeners.delete(listener);
   }
 
-  interact({ partId, velocity, phase }: InstrumentInteraction): boolean {
+  interact({ partId, velocity, phase, point }: InstrumentInteraction): boolean {
     if (partId === 'hihat') {
       if (phase === 'start') return this.strikePhysicalHiHat(velocity);
       if (this.interactiveHiHatNote !== null) this.controller.noteOff(this.interactiveHiHatNote);
@@ -171,7 +220,7 @@ export class DrumsInstrument implements Instrument {
       return true;
     }
 
-    const note = PART_NOTE[partId];
+    const note = point ? this.zoneNote(partId, point) : PART_NOTE[partId];
     if (note === undefined) return false;
 
     if (phase === 'start') {
@@ -181,6 +230,33 @@ export class DrumsInstrument implements Instrument {
 
     this.noteOff(note);
     return true;
+  }
+
+  /**
+   * Which note a struck point produces on a two-sound part.
+   *
+   * The part's own meshes supply the frame, so no world coordinates are hard-coded: the point is
+   * measured against the combined bounding box of every mesh carrying this part id, in the plane
+   * of the head. Falls back to the part's single note for anything without zones.
+   */
+  private zoneNote(partId: string, point: readonly [number, number, number]): number | undefined {
+    const zone = PART_ZONE[partId];
+    if (!zone) return PART_NOTE[partId];
+
+    this.root.updateWorldMatrix(true, true);
+    const bounds = new THREE.Box3();
+    this.root.traverse((node) => {
+      if (node.userData?.hit === partId) bounds.expandByObject(node);
+    });
+    if (bounds.isEmpty()) return PART_NOTE[partId];
+
+    const centre = bounds.getCenter(new THREE.Vector3());
+    const size = bounds.getSize(new THREE.Vector3());
+    const radius = Math.max(size.x, size.z) / 2;
+    if (radius <= 1e-4) return PART_NOTE[partId];
+
+    const radial = Math.hypot(point[0] - centre.x, point[2] - centre.z) / radius;
+    return radial <= zone.innerFraction ? zone.inner : zone.outer;
   }
 
   dispose(): void {

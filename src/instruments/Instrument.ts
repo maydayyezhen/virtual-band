@@ -9,6 +9,14 @@ export interface InstrumentInteraction {
   partId: string;
   velocity: number;
   phase: InstrumentInteractionPhase;
+  /**
+   * World-space point the ray struck, when the interaction came from a ray test.
+   *
+   * A single part can carry more than one sound depending on where it is struck — a snare rim
+   * against its head, a ride's bell against its bow — so an instrument that cares reads this and
+   * picks the matching note. Instruments that do not care simply ignore it.
+   */
+  point?: [number, number, number];
 }
 
 export interface InstrumentFrameResult {

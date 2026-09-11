@@ -1,4 +1,5 @@
 import type { AudioEngine, AudioVoice } from './AudioEngine';
+import { DRUM_KIT_BANK } from './DrumProgram';
 import { mixGain } from './AudioMixProfile';
 import type { ProgramToneBackend } from './ProgramToneBackend';
 import { percussionSamplePath, type SampleLibrary } from './SampleLibrary';
@@ -36,6 +37,20 @@ export class DrumSampler {
     this.samples = samples;
     this.toneBackend = toneBackend;
     this.toneBackend?.setGain(DRUM_MIX_GAIN, 0);
+  }
+
+  /** GM2 percussion program currently loaded, or null when there is no tone backend. */
+  get program(): number | null {
+    return this.toneBackend?.program ?? null;
+  }
+
+  /**
+   * Swap the whole kit. Every GM2 percussion preset shares one note map, so a hit never lands on
+   * the wrong piece — only the sound changes.
+   */
+  setProgram(program: number): boolean {
+    if (!this.toneBackend) return false;
+    return this.toneBackend.setProgram(program, DRUM_KIT_BANK);
   }
 
   async preload(notes: Iterable<number> = DEFAULT_DRUM_NOTES): Promise<void> {

@@ -4,6 +4,14 @@ import type { InstrumentInteractionPhase, InstrumentRegistry } from './Instrumen
 export interface InstrumentHit {
   instrumentId: string;
   partId: string;
+  /**
+   * World-space point the ray struck, when the hit came from a ray test.
+   *
+   * Some pieces are one object with more than one sound depending on where it is struck — a snare
+   * rim against its head, a ride's bell against its bow — so the instrument needs to know where,
+   * not only what.
+   */
+  point?: [number, number, number];
 }
 
 interface PendingFingeringClick {
@@ -79,7 +87,11 @@ export class InstrumentInteractionSystem {
     if (!partId && instrument.resolveHit) partId = instrument.resolveHit(intersection);
     if (!partId) return null;
 
-    return { instrumentId: resolvedInstrumentId, partId };
+    return {
+      instrumentId: resolvedInstrumentId,
+      partId,
+      point: intersection.point.toArray() as [number, number, number],
+    };
   }
 
   dispatch(hit: InstrumentHit, phase: InstrumentInteractionPhase, velocity: number): boolean {
@@ -89,6 +101,7 @@ export class InstrumentInteractionSystem {
       partId: hit.partId,
       velocity: Math.max(0, Math.min(127, Math.round(velocity))),
       phase,
+      point: hit.point,
     });
   }
 

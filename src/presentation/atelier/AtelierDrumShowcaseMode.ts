@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { getDrumKit } from '../../audio/DrumProgram';
 import { distanceForOrbitView } from '../../camera/CameraFraming';
 import type { CameraRegistry, InstrumentOrbitCameraView } from '../../camera/CameraRegistry';
 import type { CameraSystem } from '../../camera/CameraSystem';
@@ -356,6 +357,14 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
 
     if (binding.kind === 'panic') {
       if (!repeat) this.drums.reset();
+      return;
+    }
+
+    // Kit swap is an edge-triggered action, so it never joins the held-key set below.
+    if (binding.kind === 'program-step') {
+      if (repeat) return;
+      const kit = this.drums.stepProgram(binding.delta);
+      console.info(`[Virtual Band V2] drum kit ${kit} · ${getDrumKit(kit)?.name ?? 'Kit'}`);
       return;
     }
 
