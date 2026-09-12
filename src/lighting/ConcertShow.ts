@@ -3,6 +3,7 @@ import type { SectionShow, ShowSection } from './SectionShow.ts';
 import type { FixtureGroup, LightingFrame } from './Lighting.ts';
 import { concertLook } from './patterns/ConcertLooks.ts';
 import { clamp, mix, mixColor, rgb, scaleColor, smooth } from './math.ts';
+import { withLightingEffects, type LightingEffect } from './LightingProgram.ts';
 
 export interface ConcertSection extends ShowSection, ConcertLook { color: string; second: string }
 export interface ConcertShowOptions {
@@ -13,6 +14,8 @@ export interface ConcertShowOptions {
   level?: number;
   flash?: number;
   fadeOutSeconds?: number;
+  /** Original effects may extend or replace any part of the library look's current frame. */
+  effects?: readonly LightingEffect<ConcertSection>[];
 }
 const WHITE = rgb('#fff4dd');
 const BACKGROUND = rgb('#060d16');
@@ -28,7 +31,7 @@ export function createConcertShow(options: ConcertShowOptions): SectionShow<Conc
   if (options.sections.some(section => !kinds.has(section.kind) || !Number.isFinite(section.power) || section.power < 0))
     throw new Error('Invalid concert section');
   const colors = new Map(options.sections.flatMap(section => [section.color, section.second]).map(hex => [hex, rgb(hex)]));
-  return { id: options.id, title: options.title, sections: options.sections, transitionSeconds: options.transitionSeconds ?? 1.15,
+  return withLightingEffects({ id: options.id, title: options.title, sections: options.sections, transitionSeconds: options.transitionSeconds ?? 1.15,
     evaluate({ music, current, previous, transition: k, rig }): LightingFrame {
       const f = { ...music, tail: fadeOutSeconds > 0 ? 1 - smooth((music.t - (music.duration - fadeOutSeconds)) / fadeOutSeconds) : music.finished ? 0 : 1 };
 
@@ -68,5 +71,5 @@ export function createConcertShow(options: ConcertShowOptions): SectionShow<Conc
           ambient: .10 + .04 * f.tail, background: BACKGROUND, hazeDensity: .15 + .07 * current.power, hazeTime: f.t * .12 },
       };
     },
-  };
+  }, options.effects ?? []);
 }

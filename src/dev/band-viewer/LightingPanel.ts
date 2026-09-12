@@ -8,6 +8,7 @@ export class LightingPanel {
   private readonly toggle = document.createElement('input');
   private readonly sections = document.createElement('select');
   private readonly load = document.createElement('button');
+  private readonly study = document.createElement('button');
   private busy = false;
   private showId: string | undefined;
   constructor(private readonly session: LightingSession, actions: {
@@ -16,9 +17,12 @@ export class LightingPanel {
     this.element.className = 'band-lighting'; this.element.setAttribute('aria-label', '灯光编排');
     this.load.type = 'button'; this.load.textContent = '载入波西米亚示例';
     this.load.addEventListener('click', () => actions.loadExample(SHOW_EXAMPLES[0].id));
+    this.study.type = 'button'; this.study.textContent = '自由创作示例';
+    this.study.title = '自定义镜头轨迹与原创灯光；使用同一首 MIDI';
+    this.study.addEventListener('click', () => actions.loadExample('freeform-study'));
     this.toggle.type = 'checkbox'; this.toggle.addEventListener('change', () => actions.toggle(this.toggle.checked));
     const label = document.createElement('label'); label.append(this.toggle, document.createTextNode('歌曲灯光'));
-    const controls = document.createElement('div'); controls.className = 'band-camera__controls'; controls.append(this.load, label);
+    const controls = document.createElement('div'); controls.className = 'band-camera__controls'; controls.append(this.load, this.study, label);
     this.sections.setAttribute('aria-label', '灯光段落');
     this.sections.addEventListener('change', () => actions.seek(Number(this.sections.value)));
     this.status.setAttribute('role', 'status');
@@ -28,6 +32,7 @@ export class LightingPanel {
   update(): void {
     const show = this.session.currentShow;
     this.load.disabled = this.busy;
+    this.study.disabled = this.busy;
     this.toggle.disabled = this.busy || !show; this.toggle.checked = this.session.enabled;
     this.sections.disabled = this.busy; this.sections.hidden = !show;
     if (this.showId !== show?.id) {
@@ -38,7 +43,7 @@ export class LightingPanel {
     const section = show?.sections.find(s => s.name === this.session.frame?.section);
     if (section && document.activeElement !== this.sections) this.sections.value = String(section.time);
     const text = this.busy ? '正在载入…' : !show ? '装饰灯光 · 载入示例后点击播放'
-      : this.session.enabled ? `${show.title} · ${this.session.frame?.section ?? ''}` : '装饰灯光 · 歌曲编排已关闭';
+      : this.session.enabled ? this.session.error ?? `${show.title} · ${this.session.frame?.section ?? ''}` : '装饰灯光 · 歌曲编排已关闭';
     if (this.status.textContent !== text) this.status.textContent = text;
   }
   dispose(): void { this.element.remove(); }

@@ -28,10 +28,11 @@ export async function renderMidiAudio({ midiPath, fontPath, output, duration, st
     const amplitude = Math.abs(channel[i]); peak = Math.max(peak, amplitude); energy += channel[i] * channel[i];
     if (amplitude > 1) clipped++;
   }
-  if (!Number.isFinite(peak) || peak === 0) throw new Error('离线音频为空或无效');
+  if (!Number.isFinite(peak)) throw new Error('离线音频包含无效采样');
   // One constant attenuation preserves balance/dynamics and leaves 1 dB for lossy encoding.
   // Never boost quiet pieces. Record the adjustment explicitly in the export report.
-  const headroomGain = Math.min(1, Math.pow(10, -1 / 20) / peak);
+  // A selected interval can legitimately be silent (an opening curtain or ending blackout).
+  const headroomGain = peak === 0 ? 1 : Math.min(1, Math.pow(10, -1 / 20) / peak);
   if (headroomGain < 1) for (const channel of channels) for (let i = 0; i < channel.length; i++) channel[i] *= headroomGain;
   await fs.writeFile(output, new Uint8Array(audioToWav(channels, sampleRate, { normalizeAudio: false })));
   return { sampleRate, samples: channels[0].length, sourcePeak: peak, sourceClippedSamples: clipped,

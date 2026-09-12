@@ -2,41 +2,19 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#0c1218" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#080e19" />
   <link rel="icon" type="image/svg+xml" href="/virtual-band-icon.svg" />
-  <title>Virtual Band · Workspace</title>
+  <title>返场 ENCORE</title>
   <style>
-    :root { color-scheme: dark; font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif; background:#0c1218; color:#eaf0f4; }
-    * { box-sizing:border-box; }
-    body { margin:0; min-height:100vh; display:grid; place-items:center; padding:32px; background:radial-gradient(circle at 50% 0%, #17232d 0, #0c1218 48%, #080c10 100%); }
-    main { width:min(980px,100%); }
-    header { margin-bottom:26px; }
-    h1 { margin:0; font-size:clamp(30px,6vw,58px); letter-spacing:-.04em; font-weight:650; }
-    p { color:#92a4b0; margin:10px 0 0; }
-    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:14px; }
-    a { display:block; min-height:150px; padding:20px; border:1px solid #ffffff18; border-radius:14px; text-decoration:none; color:inherit; background:#101920cc; transition:.16s ease; }
-    a:hover { transform:translateY(-2px); border-color:#ffffff38; background:#15212a; }
-    strong { display:block; font-size:19px; margin-bottom:8px; }
-    span { display:block; color:#899ba7; line-height:1.6; font-size:13px; }
-    .tag { margin-top:20px; color:#6f818d; font-size:11px; letter-spacing:.12em; text-transform:uppercase; }
+    :root { color-scheme: dark; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #080e19; }
+    [data-band-view] { position: fixed; inset: 0; }
+    [data-band-view] canvas { display: block; width: 100%; height: 100%; }
   </style>
 </head>
 <body>
-  <main>
-    <header>
-      <h1>Virtual Band</h1>
-      <p>Assets → Studio → Tools</p>
-    </header>
-    <section class="grid" aria-label="工作区入口">
-      <a href="/studio/band/"><strong>乐队舞台 · 主工作区</strong><span>播放 MIDI、自由弹奏，切换近景或进入观众视角行走。</span><span class="tag">Studio / Band</span></a>
-      <a href="/tools/audio/player/"><strong>MIDI 播放器</strong><span>独立检查音色、节奏与控制器效果。</span><span class="tag">Audio / Player</span></a>
-      <a href="/assets/instruments/"><strong>乐器资产库</strong><span>选择乐器与模型款式，近距离查看并自由弹奏。</span><span class="tag">Assets / Instruments</span></a>
-      <a href="/assets/venues/"><strong>场景资产库</strong><span>独立查看和验证演出场景；下一步接入 NOCTURNE。</span><span class="tag">Assets / Venues</span></a>
-      <a href="/studio/layout/"><strong>Layout Lab</strong><span>选择资产并编辑乐器位置、旋转与布局。</span><span class="tag">Studio / Layout</span></a>
-      <a href="/tools/audio/calibration/"><strong>Audio Calibration</strong><span>音频校准与后端验证工具。</span><span class="tag">Tools / Audio</span></a>
-      <a href="/tools/audio/mix/"><strong>Audio Mix</strong><span>混音参数和声部平衡调试。</span><span class="tag">Tools / Audio</span></a>
-    </section>
-  </main>
+  <div data-band-view></div>
+  <script type="module" src="/src/dev/band-viewer/main.ts"></script>
 </body>
 </html>

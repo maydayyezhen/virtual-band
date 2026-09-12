@@ -73,6 +73,6 @@ The authored instrument controllers and six presentation modes still contain sub
 
 Future changes should remain runnable in stages. Validate with typecheck/build, visual timeline checks, layout checks and Chrome behavior tests after the last relevant edit.
 
-The band viewer is the primary integration page. See [CAMERA_SYSTEM.md](CAMERA_SYSTEM.md) for camera responsibilities and verification.
+The band viewer is the primary integration page. See [CAMERA_SYSTEM.md](CAMERA_SYSTEM.md) for camera responsibilities and verification. The unified agent entry for lighting, camera and LED authoring, reusable techniques, extension contracts and export limits is [SHOW_AUTHORING.md](SHOW_AUTHORING.md).
 
-See [BAND_MAINLINE_PLAN.md](BAND_MAINLINE_PLAN.md) for the delivered venue/layout boundaries and remaining work. Song lighting and the reference theatre are connected through independent ports. Automatic camera control remains outside this integration.
+See [BAND_MAINLINE_PLAN.md](BAND_MAINLINE_PLAN.md) for venue/layout boundaries. Song lighting, the reference theatre and authored camera shows are connected through independent ports. The current broadcast is authored, not an automatic editorial planner.

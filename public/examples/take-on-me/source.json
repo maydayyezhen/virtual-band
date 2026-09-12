@@ -1,0 +1,25 @@
+{
+  "id": "take-on-me",
+  "title": "Take On Me",
+  "artist": "a-ha",
+  "credit": "yezhen 制作",
+  "midiUrl": "/examples/take-on-me/take-on-me.mid",
+  "cover": "/artwork/take-on-me-cover.png",
+  "sha256": "b6dcc3d462af80fe643153a56ec333a150a35223adf79ff86ebdd8c2a770f79a",
+  "durationSeconds": 224.98546958333336,
+  "tempos": [
+    {
+      "time": 0,
+      "quarter": 0,
+      "bpm": 120
+    },
+    {
+      "time": 0,
+      "quarter": 0,
+      "bpm": 168.99980283356336
+    }
+  ],
+  "sourcePage": "https://bitmidi.com/a-ha-take-on-me-k-mid",
+  "downloadUrl": "https://bitmidi.com/uploads/2965.mid",
+  "instrumentCount": 4
+}

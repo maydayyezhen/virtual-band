@@ -1,0 +1,25 @@
+.loading-curtain {
+  position: fixed; inset: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none;
+  margin: 0; padding: 0; border: 0; color: #edf7ff; overflow: hidden;
+  background: #081321; font-family: 'Encore Menu SC', 'Microsoft YaHei', sans-serif;
+}
+.loading-curtain::backdrop { background: #081321; }
+.loading-curtain[open] { display: grid; place-items: center; }
+.loading-curtain::before { content: ''; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 50% 44%, #24445b80, transparent 57%); }
+.loading-curtain-content { position: relative; text-align: center; }
+.loading-curtain-kicker { display: block; margin-top: 40px; color: #83bfd6; font: 600 12px 'Oxanium', sans-serif; letter-spacing: .32em; }
+.loading-curtain h2 { margin: 14px 0; font-size: clamp(24px, 2.3vw, 38px); font-weight: 700; letter-spacing: .12em; }
+.loading-curtain h2:focus { outline: none; }
+.loading-curtain p { margin: 0; color: #8d9fb2; font-size: 13px; letter-spacing: .14em; }
+.loading-curtain-mark { display: flex; justify-content: center; align-items: center; gap: 9px; height: 70px; transform: skewX(-12deg); }
+.loading-curtain-mark i { width: 8px; height: 56px; background: #a5e1ed; transform: scaleY(.25); animation: curtain-soundcheck 1.25s ease-in-out infinite; box-shadow: 0 0 24px #79d6ef20; }
+.loading-curtain-mark i:nth-child(2) { animation-delay: -.95s; }
+.loading-curtain-mark i:nth-child(3) { animation-delay: -.7s; }
+.loading-curtain-mark i:nth-child(4) { animation-delay: -.45s; }
+.loading-curtain-mark i:nth-child(5) { animation-delay: -.2s; }
+@keyframes curtain-soundcheck { 0%, 100% { transform: scaleY(.25); opacity: .45; } 45% { transform: scaleY(1); opacity: 1; } }
+.loading-curtain button { margin-top: 28px; padding: 13px 32px; border: 0; background: #ade0ed; color: #0a1d2c; font: inherit; cursor: pointer; }
+.loading-curtain button:hover { background: #e1f8ff; }
+.loading-curtain button:focus-visible { outline: 2px solid white; outline-offset: 5px; }
+.loading-curtain.has-error i { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { .loading-curtain-mark i { animation: none; transform: scaleY(.6); } }

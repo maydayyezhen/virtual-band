@@ -1,0 +1,9 @@
+.game-sound-control { position: fixed; left: 24px; bottom: 16px; z-index: 65; display: grid; place-items: center; width: 38px; height: 32px; padding: 6px; border: 1px solid #b9e7ff3b; background: #0c192bc9; color: #d2ebf9; cursor: pointer; }
+.game-sound-control svg { width: 19px; height: 19px; }
+.game-sound-control:hover { background: #23516ac9; }
+.game-sound-control:focus-visible { outline: 2px solid #bceaff; outline-offset: 3px; }
+.game-sound-control[data-error='true'] { border-color: #e5a272; }
+.concert-watch .game-sound-control { opacity: 0; }
+.concert-watch .game-sound-control:hover, .concert-watch .game-sound-control:focus-visible { opacity: 1; }
+
+body:is([data-stage-view='home'], [data-stage-view='songs']) .game-sound-control { display: none; }

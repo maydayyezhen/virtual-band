@@ -35,8 +35,17 @@ import { CameraShowPlayer } from '../../camera/CameraShowPlayer';
 import { DirectorPanel } from './DirectorPanel';
 import { TitleLayer } from '../../titles/TitleLayer';
 import { OfflineStage } from '../../export/OfflineStage';
+import { StageShell } from '../../app/stage/StageShell';
+import { LoadingCurtain } from '../../app/stage/LoadingCurtain';
+import type { LibrarySong } from '../../app/stage/SongLibrary';
+import { GameAudio } from '../../audio/GameAudio';
 
 const offlineMode = import.meta.env.DEV && new URLSearchParams(location.search).get('offline') === '1';
+const startupParams = new URLSearchParams(location.search);
+// Explicit workbench/model-preview URLs keep their direct entry, including the exporter.
+const directWorkspace = offlineMode || startupParams.get('workspace') === '1' || startupParams.has('electric') || startupParams.has('acoustic');
+let shell: StageShell | null = null;
+const loadingCurtain = offlineMode ? null : new LoadingCurtain();
 
 const STAGE_SURFACE_Y = NOCTURNE_STAGE.surfaceY;
 const MAX_FRAME_SECONDS = 0.05;
@@ -60,6 +69,7 @@ if (!mount) throw new Error('Band view mount is missing');
  * ------------------------------------------------------------------ */
 const graph = createBandAudioGraph();
 const { audio, live } = graph;
+const gameAudio = directWorkspace ? null : new GameAudio(audio);
 
 const prepareAudio = (): Promise<void> => graph.prepare();
 const midiOutput = audio.createBus(1);
@@ -189,9 +199,14 @@ const directorPanel = new DirectorPanel({
 });
 cameraPanel.appendPanel(directorPanel.element);
 function refreshCameraScene(): void {
-  const bounds = new THREE.Box3().setFromObject(band);
+  const bounds = bandBounds();
   camera.setTransitionClearance(bounds.max.y + 1);
   audience.setScene(bounds);
+}
+
+function bandBounds(): THREE.Box3 {
+  const bounds = new THREE.Box3().setFromObject(band);
+  return bounds.isEmpty() ? venue.overviewBounds.clone() : bounds;
 }
 
 
@@ -217,7 +232,7 @@ function mountBand(next: BandSession, list: readonly Instrument[], instant = fal
   registerAtelierViews(cameraRegistry, list);
   const showcase = createAtelierShowcase({ element: host.renderer.domElement, camera, cameraRegistry, interactions, instruments: list });
   for (const mode of showcase.modes) presentation.register(mode);
-  bandViewIds = registerBandViews(cameraRegistry, new THREE.Box3().setFromObject(band), venue.overviewBounds);
+  bandViewIds = registerBandViews(cameraRegistry, bandBounds(), venue.overviewBounds);
   refreshCameraScene();
   stage = new StageDirector({ camera, instruments, presentation,
     modes: showcase.byInstrumentId, entryViewIds: showcase.wholeViewIds,
@@ -340,6 +355,7 @@ function attachStageInput(): void {
   });
 
   document.addEventListener('keydown', (event) => {
+    if (shell?.inLobby || shell?.isPaused) return;
     if (event.ctrlKey || event.altKey || event.metaKey) return;
     const target = event.target;
     if (target instanceof HTMLElement && /INPUT|TEXTAREA|SELECT/.test(target.tagName)) return;
@@ -374,12 +390,12 @@ let lastFrame = performance.now();
 function loop(): void {
   if (offlineMode) return; // The export controller owns time and rendering in its isolated page.
   const now = performance.now();
-  const dt = Math.min(MAX_FRAME_SECONDS, (now - lastFrame) / 1000);
+  const dt = shell?.isPaused ? 0 : Math.min(MAX_FRAME_SECONDS, (now - lastFrame) / 1000);
   lastFrame = now;
 
   player?.update();
   lighting.update(player?.time ?? 0);
-  screens.update(dt, player ? { time: player.time, playing: player.isPlaying } : null, screenAudio.sample());
+  screens.update(dt, player ? { time: player.time, playing: player.isPlaying } : null, shell?.isPaused ? undefined : screenAudio.sample());
   venue.update(dt);
   lightingPanel.update();
   screenPanel.update();
@@ -391,6 +407,14 @@ function loop(): void {
   titles.update(player?.time ?? 0);
   titles.render(host.renderer);
   if (player) transport.update(player.time, player.total, player.isPlaying);
+  if (previewSong && !previewLooping && !document.hidden && shell?.inLobby &&
+    (!playback.isPlaying || playback.time >= Math.min(playback.total, previewSong.previewAt + previewSong.previewSeconds))) {
+    const request = previewVersion;
+    playback.seek(previewSong.previewAt); previewLooping = true;
+    void playback.play().catch(() => { if (request === previewVersion) cancelPreview(); }).finally(() => { previewLooping = false; });
+  }
+  shell?.updatePreview(playback.time, playback.isPlaying);
+  if (gameAudio) shell?.updateAudio(gameAudio.sample(), gameAudio.time);
   requestAnimationFrame(loop);
 }
 
@@ -421,35 +445,72 @@ let performanceBand: BuiltBand | null = null;
 /** The stage view is being flown to; the orbit takes over once it lands. */
 let player: BandPlayer | null = null;
 let loading = false;
+let previewVersion = 0;
+let previewQueue: Promise<void> = Promise.resolve();
+let previewAbort: AbortController | null = null;
+let previewSong: LibrarySong | null = null;
+let previewLooping = false;
+
+function cancelPreview(): void {
+  previewVersion++; previewAbort?.abort(); previewAbort = null; previewSong = null;
+  if (!player) playback.stop();
+  gameAudio?.setMenuPlaying(true);
+}
+
+function previewSelection(song: LibrarySong): Promise<void> {
+  cancelPreview();
+  const request = previewVersion;
+  const controller = new AbortController(); previewAbort = controller;
+  const work = previewQueue.catch(() => {}).then(async () => {
+    if (request !== previewVersion) return;
+    await audio.resume();
+    const entry = SHOW_EXAMPLES.find(entry => entry.id === song.id);
+    if (!entry) throw new Error('找不到这首歌曲');
+    const response = await fetch(entry.midiUrl, { signal: controller.signal });
+    if (!response.ok) throw new Error(`歌曲下载失败：${response.status}`);
+    const binary = await response.arrayBuffer();
+    if (request !== previewVersion) return;
+    await playback.load(binary, song.title);
+    if (request !== previewVersion) return;
+    playback.seek(song.previewAt); await playback.play();
+    if (request !== previewVersion) { playback.stop(); return; }
+    previewSong = song; gameAudio?.setMenuPlaying(false);
+  });
+  previewQueue = work;
+  return work;
+}
 
 
 async function loadMidiFile(file: File): Promise<void> {
-  await loadMidiSource(() => Promise.resolve(file), file.name);
+  const loaded = await loadMidiSource(() => Promise.resolve(file), file.name);
+  if (loaded && shell?.inLobby && !shell.isBusy) shell.enterPerformance(true);
 }
 
-async function loadLightingExample(id: string): Promise<void> {
+async function loadLightingExample(id: string): Promise<boolean> {
   const example = SHOW_EXAMPLES.find(item => item.id === id);
   if (!example) throw new Error('未知灯光示例');
-  await loadMidiSource(async () => {
+  return loadMidiSource(async () => {
     const response = await fetch(example.midiUrl);
     if (!response.ok) throw new Error(`示例下载失败：${response.status}`);
     return new File([await response.arrayBuffer()], `${example.title}.mid`, { type: 'audio/midi' });
-  }, example.title);
+  }, example.title, example.id);
 }
 
-async function loadMidiSource(source: () => Promise<File>, label: string): Promise<void> {
-  if (loading) return;
+async function loadMidiSource(source: () => Promise<File>, label: string, exampleId?: string): Promise<boolean> {
+  if (loading) return false;
   loading = true;
   lightingPanel.setBusy(true);
   dropHint.setVisible(true);
   dropHint.setText(`正在解析 ${label} …`);
+  const reveal = await loadingCurtain?.begin();
 
   try {
+    if (shell) { cancelPreview(); await previewQueue.catch(() => {}); }
     await initialBandReady;
     await audio.resume();
     const file = await source();
     const binary = await file.arrayBuffer();
-    const show = await prepareMatchingShow(binary, venue.lighting.rig);
+    const show = await prepareMatchingShow(binary, venue.lighting.rig, exampleId);
     const analysis = analyzeMidi(new Uint8Array(binary));
     if (!analysis.plan.totalInstruments) throw new Error("MIDI 中没有可显示的音符");
     dropHint.setText('正在准备乐队和布局…');
@@ -457,11 +518,14 @@ async function loadMidiSource(source: () => Promise<File>, label: string): Promi
       `${file.name}\n${analysis.plan.totalInstruments} 件乐器，正在搭建…`,
     );
     await enterPerformanceMode(analysis, file.name, binary, show);
+    return true;
   } catch (error) {
     console.error('[Band View] MIDI 装载失败', error);
     dropHint.setVisible(true);
     dropHint.setText(`${label} 载入失败\n${String(error)}`);
+    return false;
   } finally {
+    await reveal?.();
     loading = false;
     lightingPanel.setBusy(false);
   }
@@ -473,6 +537,7 @@ async function loadLayoutFile(file: File): Promise<void> {
   loading = true;
   lightingPanel.setBusy(true);
   const created: Instrument[] = [];
+  const reveal = await loadingCurtain?.begin('给每件乐器找个好位置');
   try {
     await initialBandReady;
     if (file.size > 1_000_000) throw new Error('布局文件不能超过 1 MB');
@@ -495,10 +560,11 @@ async function loadLayoutFile(file: File): Promise<void> {
     performanceBand = null;
     transport.setVisible(false);
     dropHint.setVisible(false);
+    if (shell?.inLobby) shell.enterPerformance(true);
   } catch (error) {
     for (const instrument of created) if (instruments.get(instrument.id) !== instrument) instrument.dispose();
     dropHint.setText(`布局未应用：${String(error)}`); dropHint.setVisible(true);
-  } finally { loading = false; lightingPanel.setBusy(false); }
+  } finally { await reveal?.(); loading = false; lightingPanel.setBusy(false); }
 }
 
 async function enterPerformanceMode(
@@ -521,7 +587,7 @@ async function enterPerformanceMode(
     playback,
     band: built,
     plan: analysis.plan,
-    onEnded: () => transport.update(playback.total, playback.total, false),
+    onEnded: () => { transport.update(playback.total, playback.total, false); gameAudio?.setMenuPlaying(true); },
   });
   lighting.setShow(show?.lighting ?? null, player.time);
   cameraShow.setShow(show?.camera ?? null, built.built.map(b => ({ type: b.type, instance: b.instance, instrumentId: b.instrument.id })));
@@ -570,6 +636,8 @@ window.addEventListener('dragleave', (event) => {
 });
 window.addEventListener('drop', (event) => {
   event.preventDefault();
+  if (shell?.isBusy) return;
+  if (shell?.inLobby) shell.stopPreview();
   const file = event.dataTransfer?.files?.[0];
   if (file) void (/\.json$/i.test(file.name) ? loadLayoutFile(file) : loadMidiFile(file));
   else dropHint.setVisible(false);
@@ -577,26 +645,72 @@ window.addEventListener('drop', (event) => {
 
 // Audio continues in the worklet; only the visual pose needs rebuilding on return.
 document.addEventListener('visibilitychange', () => {
+  if (shell?.inLobby && previewSong) {
+    if (document.hidden) playback.pause();
+    else { playback.seek(previewSong.previewAt); void playback.play(); }
+  }
   if (!document.hidden) player?.resumeFromSuspension();
 });
 
-attachStageInput();
-resize();
-loop();
 live.onError = (error) => {
   console.error('[自由弹奏]', error);
   dropHint.setText(`自由弹奏音源载入失败：${String(error)}`);
   dropHint.setVisible(true);
 };
-void prepareAudio().catch(live.onError);
-
-const initialBandReady = buildBand();
+// The lobby starts with real empty geometry, without constructing the default instrument set.
+function mountEmptyStage(): void {
+  mountBand(BandSession.prepare([], venue.layout), [], true);
+  stage?.selectBandView('band:venue', true);
+}
+const initialBandReady = directWorkspace ? (async () => {
+  const reveal = await loadingCurtain?.begin();
+  try { await buildBand(); } finally { await reveal?.(); }
+})() : Promise.resolve().then(mountEmptyStage);
 void initialBandReady.catch((error) => {
   console.error('[Band View] 装配失败：', error);
   dropHint.setText(`乐队载入失败：${String(error)}`); dropHint.setVisible(true);
 });
 
+if (!directWorkspace) {
+  shell = new StageShell({
+    preview: previewSelection,
+    stopPreview: cancelPreview,
+    onView: view => gameAudio?.setMenuPlaying(view !== 'performance'),
+    pause: () => { player?.pause(); if (document.pointerLockElement) document.exitPointerLock(); },
+    resume: async () => { await player?.play(); gameAudio?.setMenuPlaying(false); },
+    uiSound: kind => gameAudio?.uiSound(kind),
+    start: async song => {
+      if (!await loadLightingExample(song.id)) throw new Error('歌曲载入失败');
+      await player?.play();
+      gameAudio?.setMenuPlaying(false);
+    },
+    home: async () => {
+      player?.stop(); player?.dispose(); player = null; performanceBand = null;
+      cameraShow.setShow(null); directorPanel.setShow(null);
+      titles.setShow(null); directorPanel.setTitles(null); lighting.setShow(null);
+      await screenPanel.setSong(null); screens.restore();
+      transport.setVisible(false); dropHint.setVisible(false);
+      const previous = instruments.list(); mountEmptyStage();
+      for (const instrument of previous) instrument.dispose();
+    },
+    importFile: async file => {
+      if (!await loadMidiSource(() => Promise.resolve(file), file.name)) throw new Error('MIDI 载入失败');
+      await player?.play();
+    },
+    roam: () => stage?.enterAudience(),
+    broadcast: () => { if (cameraShow.available) stage?.startBroadcast(); else stage?.showBand(); },
+  }, loadingCurtain!);
+}
+
+attachStageInput();
+resize();
+loop();
+if (directWorkspace) void prepareAudio().catch(live.onError);
+
 window.addEventListener('pagehide', () => {
+  shell?.dispose();
+  loadingCurtain?.dispose();
+  gameAudio?.dispose();
   player?.dispose();
   playback.dispose();
   midiOutput.disconnect();
@@ -621,7 +735,7 @@ if (import.meta.env.DEV) {
   Object.defineProperty(window, 'bandView', {
     configurable: true,
     value: {
-      host, venue, lighting, screens, instruments, interactions, camera, cameraRegistry, audio, live,
+      host, venue, lighting, screens, instruments, interactions, camera, cameraRegistry, audio, live, playback,
       get presentation() { return presentation; },
       instrumentAt, audience,
       get band() { return band; },
@@ -630,7 +744,8 @@ if (import.meta.env.DEV) {
       get orbit() { return orbit; },
       get player() { return player; },
       get performanceBand() { return performanceBand; },
-      cameraShow, titles,
+      cameraShow, titles, gameAudio,
+      get previewState() { return { id: previewSong?.id ?? null, time: playback.time, playing: playback.isPlaying, version: previewVersion }; },
       offline: offlineMode ? new OfflineStage({ player: () => player, instruments, lighting, screens, venue, camera, cameraShow, titles, host }) : null,
       loadMidiFile,
       loadLightingExample,

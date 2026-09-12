@@ -1,3 +1,5 @@
+import { gameIcon, type GameIcon } from '../../app/stage/icons';
+
 /**
  * The play bar: transport controls, a scrubber and a one-line summary of the band that was built.
  *
@@ -29,9 +31,9 @@ export class TransportBar {
     const controls = document.createElement('div');
     controls.className = 'mb-bar__controls';
 
-    this.playButton = button('▶', '播放');
-    this.pauseButton = button('⏸', '暂停');
-    this.stopButton = button('⏹', '停止');
+    this.playButton = button('play', '播放');
+    this.pauseButton = button('pause', '暂停');
+    this.stopButton = button('stop', '停止');
     this.playButton.addEventListener('click', handlers.onPlay);
     this.pauseButton.addEventListener('click', handlers.onPause);
     this.stopButton.addEventListener('click', handlers.onStop);
@@ -99,11 +101,11 @@ export class TransportBar {
   }
 }
 
-function button(glyph: string, title: string): HTMLButtonElement {
+function button(glyph: GameIcon, title: string): HTMLButtonElement {
   const element = document.createElement('button');
   element.type = 'button';
   element.className = 'mb-bar__button';
-  element.textContent = glyph;
+  element.innerHTML = gameIcon(glyph);
   element.title = title;
   element.setAttribute('aria-label', title);
   return element;
@@ -134,6 +136,7 @@ function installTransportStyles(doc: Document = document): void {
   font: inherit; cursor: pointer;
 }
 .mb-bar__button:disabled { opacity: .35; cursor: default; }
+.mb-bar__button svg { width: 15px; height: 15px; vertical-align: middle; }
 .mb-bar__scrub { flex: 1; min-width: 0; accent-color: #7fb3ff; }
 .mb-bar__clock { width: 92px; text-align: right; opacity: .75; }
 .mb-bar__summary { margin-top: 6px; opacity: .65; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

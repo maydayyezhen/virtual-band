@@ -1,18 +1,13 @@
 import type { MusicAnalysis } from '../lighting/MusicAnalysis';
-import type { CameraShow, CameraCue, ShotFraming } from './CameraShow';
+import type { CameraShow, CameraCue } from './CameraShow';
+import { instrumentShot, nocturneShot } from '../camera/shots/ConcertShots.ts';
 
 /** Authored against both the theatre acts and the lighting changes, not note density alone. */
 export function prepareBohemianCamera(music: MusicAnalysis): CameraShow {
-  const wide: ShotFraming = { target: [0, 5, -1], yaw: 0, pitch: .12, width: 30, height: 11, fov: 42 };
-  const medium: ShotFraming = { ...wide, target: [0, 3.2, 0], width: 19, height: 6.5, pitch: .18, fov: 36 };
-  const piano: ShotFraming = { subject: { type: 'piano', instance: 0 }, target: [0, .83, -.2], yaw: .55, pitch: .42, width: 3, height: 1.9, fov: 38 };
-  const keys: ShotFraming = { ...piano, target: [0, .80, .47], yaw: -.35, pitch: .68, width: 1.7, height: .75, fov: 40 };
-  const guitar: ShotFraming = { subject: { type: 'electric', instance: 0 }, target: [0, .7, .2], yaw: -.22, pitch: .13, width: 5.5, height: 8.8, fov: 35 };
-  const bridge: ShotFraming = { ...guitar, target: [0, -1.45, .38], width: 2.1, height: 2.8, yaw: .24, pitch: .24, fov: 40 };
-  const bass: ShotFraming = { subject: { type: 'bass', instance: 0 }, target: [0, .7, .2], yaw: -.3, pitch: .15, width: 5, height: 8, fov: 36 };
-  const sax: ShotFraming = { subject: { type: 'saxophone', instance: 0 }, target: [0, .48, .05], yaw: .45, pitch: .12, width: 1.2, height: 1.3, fov: 38 };
-  const keyboard: ShotFraming = { subject: { type: 'keyboard', instance: 0 }, target: [0, 9.1, -.15], yaw: .18, pitch: .60, width: 15.4, height: 7.2, fov: 36 };
-  const drums: ShotFraming = { subject: { type: 'drums', instance: 0 }, target: [0, 1.65, -.4], yaw: Math.PI - .3, pitch: .86, width: 7.5, height: 4.6, fov: 36 };
+  const wide = nocturneShot('wide'), medium = nocturneShot('medium');
+  const keys = instrumentShot('keys'), guitar = instrumentShot('guitar'), bridge = instrumentShot('bridge');
+  const bass = instrumentShot('bass'), sax = instrumentShot('sax');
+  const keyboard = instrumentShot('keyboard'), drums = instrumentShot('drums');
   const authored: (Omit<CameraCue, 'time'> & { beat: number })[] = [
     { beat: 0, name: '序幕 · 留给幕布与合声', from: wide, to: { width: 28 } },
     // LED room act enters at beat 20: stay wide through the reveal before looking at the keys.
