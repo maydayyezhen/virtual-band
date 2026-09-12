@@ -1,4 +1,9 @@
 import * as THREE from 'three';
+import { createGrandPiano } from '../../instruments/piano/createGrandPiano';
+import { createAltoSax } from '../../instruments/saxophone/createAltoSax';
+import { createCelloAssembly } from '../../instruments/cello/createCelloAssembly';
+import { attachCameraPan } from './LayoutEditorCameraPan';
+import { NocturneVenue } from '../../venues/nocturne/NocturneVenue';
 import { RendererHost } from '../../engine/RendererHost';
 import { buildLegacyAcousticAsset } from '../../instruments/acoustic/legacyAcousticAsset';
 import { buildLegacyBassAsset } from '../../instruments/bass/legacyBassAsset';
@@ -6,7 +11,6 @@ import { buildLegacyDrumAsset } from '../../instruments/drums/legacyDrumAsset';
 import { buildLegacyElectricAsset } from '../../instruments/electric/legacyElectricAsset';
 import { buildLegacyKeyboardAsset } from '../../instruments/keyboard/legacyKeyboardAsset';
 import { buildLegacyViolinAsset } from '../../instruments/violin/legacyViolinAsset';
-import { AtelierStudioVenue } from '../../venues/atelier-studio/AtelierStudioVenue';
 import {
   cloneLayout,
   createDefaultLayout,
@@ -54,7 +58,8 @@ const FRAME_PADDING = 1.12;
 
 export class LayoutEditorRuntime {
   private readonly renderer: RendererHost;
-  private readonly venue = new AtelierStudioVenue();
+  private readonly venue: NocturneVenue;
+  private lastFrame = performance.now();
   private readonly camera = new THREE.PerspectiveCamera(38, 1, 0.05, 160);
   private readonly instrumentLayer = new THREE.Group();
   private readonly prototypes = new Map<LayoutInstrumentType, THREE.Group>();
@@ -85,27 +90,32 @@ export class LayoutEditorRuntime {
   private distance = 22;
   private raf = 0;
   private disposed = false;
+  private readonly detachPan: () => void;
 
   constructor(mount: HTMLElement) {
     this.renderer = new RendererHost(mount);
+    this.venue = new NocturneVenue(this.renderer);
     this.instrumentLayer.name = 'layout-editor:instruments';
-    this.grid.position.y = 0.003;
+    this.instrumentLayer.position.y = this.venue.layout.surfaceY;
+    this.groundPlane.constant = -this.venue.layout.surfaceY;
+    this.grid.position.y = this.venue.layout.surfaceY + .003;
     const gridMaterials = Array.isArray(this.grid.material) ? this.grid.material : [this.grid.material];
     for (const material of gridMaterials) {
       material.transparent = true;
       material.opacity = 0.42;
       material.depthWrite = false;
     }
-    this.renderer.scene.add(this.venue.root, this.grid, this.instrumentLayer);
-    this.renderer.applySceneProfile(this.venue.sceneProfile);
+    this.renderer.scene.add(this.grid, this.instrumentLayer);
     this.attachInput();
+    this.detachPan = attachCameraPan({ element: this.renderer.renderer.domElement,
+      camera: this.camera, cameraTarget: this.cameraTarget, applyCamera: () => this.applyCamera() });
     this.setCameraPreset('stage');
     this.frame();
   }
 
   async start(): Promise<void> {
     try {
-      this.loadingLabel = '载入六件乐器…';
+      this.loadingLabel = '载入乐器模型…';
       this.emit();
       const [drums, keyboard, violin, electric, acoustic, bass] = await Promise.all([
         buildLegacyDrumAsset(),
@@ -123,7 +133,10 @@ export class LayoutEditorRuntime {
       this.registerPrototype('electric', electric.model.root);
       this.registerPrototype('acoustic', acoustic.model.root);
       this.registerPrototype('bass', bass.model.root);
-      this.document = autoArrangeLayout(this.document, this.footprints);
+      this.registerPrototype('piano', createGrandPiano().root);
+      this.registerPrototype('saxophone', createAltoSax().root);
+      this.registerPrototype('cello', createCelloAssembly().root);
+      this.document = autoArrangeLayout(this.document, this.footprints, { stage: this.venue.layout });
       this.history = [cloneLayout(this.document)];
       this.historyCursor = 0;
       this.applyDocument();
@@ -188,9 +201,10 @@ export class LayoutEditorRuntime {
   }
 
   setSelectedLocked(locked: boolean): void {
+    this.getSelectedInstance().locked = locked;
     if (locked) this.lockedIds.add(this.selectedId);
     else this.lockedIds.delete(this.selectedId);
-    this.emit();
+    this.commitHistory();
   }
 
   setSelectedPosition(axis: 'x' | 'z', value: number): void {
@@ -257,8 +271,9 @@ export class LayoutEditorRuntime {
   }
 
   reset(): void {
+    this.error = null;
     this.document = createDefaultLayout();
-    this.document = autoArrangeLayout(this.document, this.footprints);
+    this.document = autoArrangeLayout(this.document, this.footprints, { stage: this.venue.layout });
     this.selectedId = this.document.instances[0].id;
     this.lockedIds.clear();
     this.applyDocument();
@@ -267,6 +282,8 @@ export class LayoutEditorRuntime {
   }
 
   load(document: LayoutDocument): void {
+    if (document.venueId !== this.venue.layout.venueId) throw new Error('布局与当前场馆不匹配');
+    this.error = null;
     this.document = cloneLayout(document);
     if (!this.document.instances.some((instance) => instance.id === this.selectedId)) {
       this.selectedId = this.document.instances[0].id;
@@ -308,10 +325,17 @@ export class LayoutEditorRuntime {
   }
 
   autoArrange(): void {
-    this.document = autoArrangeLayout(this.document, this.footprints);
-    this.applyDocument();
-    this.setCameraPreset('stage');
-    this.commitHistory();
+    try {
+      const next = autoArrangeLayout(this.document, this.footprints, { stage: this.venue.layout, lockedIds: this.lockedIds });
+      this.document = next;
+      this.error = null;
+      this.applyDocument();
+      this.setCameraPreset('stage');
+      this.commitHistory();
+    } catch (error) {
+      this.error = `自动排位未应用：${error instanceof Error ? error.message : String(error)}`;
+      this.emit();
+    }
   }
 
   setCameraPreset(preset: CameraPreset): void {
@@ -336,6 +360,7 @@ export class LayoutEditorRuntime {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
     this.detachInput();
+    this.detachPan();
     this.selectionBox?.geometry.dispose();
     this.selectionBox?.material.dispose();
     this.selectionBox?.removeFromParent();
@@ -362,6 +387,8 @@ export class LayoutEditorRuntime {
   }
 
   private applyDocument(): void {
+    this.lockedIds.clear();
+    for (const instance of this.document.instances) if (instance.locked) this.lockedIds.add(instance.id);
     this.syncInstanceRoots();
     for (const instance of this.document.instances) this.applyTransform(instance.id);
     this.selectionBox?.update();
@@ -640,6 +667,9 @@ export class LayoutEditorRuntime {
       this.camera.updateProjectionMatrix();
     }
     this.selectionBox?.update();
+    const now = performance.now();
+    this.venue.update((now - this.lastFrame) / 1000);
+    this.lastFrame = now;
     this.renderer.render(this.camera);
     this.raf = requestAnimationFrame(this.frame);
   };

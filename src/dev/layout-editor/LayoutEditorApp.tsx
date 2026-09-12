@@ -4,7 +4,6 @@ import {
   parseLayoutDocument,
   stringifyLayout,
 } from '../../layout/LayoutDocument';
-import { BAND_SCALE } from '../../layout/BandPresentation';
 import { LayoutEditorRuntime, type LayoutEditorSnapshot } from './LayoutEditorRuntime';
 
 export function LayoutEditorApp() {
@@ -186,8 +185,7 @@ export function LayoutEditorApp() {
           </div>
 
           <p className="scale-note">
-            1× 总高约 {((selectedDefinition?.targetHeight ?? 0) * BAND_SCALE).toFixed(2)} m
-            （现实 {selectedDefinition?.targetHeight.toFixed(2) ?? '—'} m × 乐队放大 {BAND_SCALE}×）。
+            1× 对应真实尺寸，总高约 {selectedDefinition?.targetHeight.toFixed(2) ?? '—'} m。
           </p>
 
           <div className="rotation-row">
@@ -242,7 +240,7 @@ export function LayoutEditorApp() {
           />
         </footer>
 
-        <p className="notice" aria-live="polite">{notice || 'JSON 只保存布局数据，不包含模型或音频。'}</p>
+        <p className="notice" aria-live="polite">{snapshot?.error || notice || '自动排位保留锁定乐器；JSON 保存位置、尺寸和锁定状态。'}</p>
       </aside>
     </main>
   );

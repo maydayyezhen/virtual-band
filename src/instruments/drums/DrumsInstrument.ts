@@ -5,7 +5,7 @@ import {
   getDrumKit,
   type DrumKitId,
 } from '../../audio/DrumProgram';
-import { HI_HAT_NOTES, type DrumSampler } from '../../audio/DrumSampler';
+import { HI_HAT_NOTES, type DrumAudio } from '../../audio/InstrumentAudio';
 import type { Instrument, InstrumentFrameResult, InstrumentInteraction } from '../Instrument';
 import {
   buildLegacyDrumAsset,
@@ -74,6 +74,7 @@ export class DrumsInstrument implements Instrument {
   setInstanceId(value: string): void {
 
     this.instanceId = value;
+    this.root.userData.instrumentId = value;
 
   }
   readonly role = 'drums';
@@ -81,7 +82,7 @@ export class DrumsInstrument implements Instrument {
   readonly root: THREE.Group;
 
   private readonly controller: LegacyDrumController;
-  private readonly sampler: DrumSampler;
+  private readonly sampler: DrumAudio;
   private readonly hitListeners: Set<HitListener>;
   private readonly panicListeners: Set<PanicListener>;
 
@@ -91,7 +92,7 @@ export class DrumsInstrument implements Instrument {
   private constructor(
     root: THREE.Group,
     controller: LegacyDrumController,
-    sampler: DrumSampler,
+    sampler: DrumAudio,
     hitListeners: Set<HitListener>,
     panicListeners: Set<PanicListener>,
   ) {
@@ -103,7 +104,7 @@ export class DrumsInstrument implements Instrument {
     this.panicListeners = panicListeners;
   }
 
-  static async create(sampler: DrumSampler): Promise<DrumsInstrument> {
+  static async create(sampler: DrumAudio): Promise<DrumsInstrument> {
     const hitListeners = new Set<HitListener>();
     const panicListeners = new Set<PanicListener>();
     const { model, controller } = await buildLegacyDrumAsset({
@@ -144,6 +145,9 @@ export class DrumsInstrument implements Instrument {
     this.setProgram(DRUM_KIT_IDS[next]);
     return this.kitId;
   }
+
+  visualNoteOn(note: number, velocity: number): void { this.controller.noteOn(note, velocity); }
+  visualNoteOff(note: number): void { this.controller.noteOff(note); }
 
   noteOn(note: number, velocity: number): void {
     const accepted = this.controller.noteOn(note, velocity);
@@ -294,7 +298,7 @@ export class DrumsInstrument implements Instrument {
   }
 
   dispose(): void {
-    this.sampler.resetHiHat();
+    this.sampler.dispose();
     this.controller.panic();
     this.hitListeners.clear();
     this.panicListeners.clear();

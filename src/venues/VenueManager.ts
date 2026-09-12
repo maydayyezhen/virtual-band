@@ -54,7 +54,7 @@ export class VenueManager {
 
   private applyLayout(venue: Venue): void {
     for (const instrument of this.instruments.list()) {
-      const transform = venue.layout[instrument.id];
+      const transform = venue.layout[instrument.id] ?? venue.layout[`${instrument.role}.main`];
       instrument.root.visible = Boolean(transform);
       if (!transform) continue;
       applyTransform(instrument.root, transform);

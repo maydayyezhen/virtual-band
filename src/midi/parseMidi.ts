@@ -11,7 +11,7 @@ type MidiConstructor = new (data: ArrayBuffer) => MidiFile;
  * Node exposes it on `default`, and Vite's pre-bundling exposes it directly. Reaching for both
  * keeps the same file usable from a script and from the page.
  */
-function resolveMidiConstructor(): MidiConstructor {
+export function resolveMidiConstructor(): MidiConstructor {
   const namespace = midiModule as unknown as {
     Midi?: MidiConstructor;
     default?: { Midi?: MidiConstructor };

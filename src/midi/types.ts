@@ -9,7 +9,7 @@
 import { LAYOUT_INSTRUMENTS, type LayoutInstrumentType } from '../layout/LayoutDocument';
 
 /**
- * The six instruments a track can be routed to.
+ * The instrument types a track can be routed to.
  *
  * This is the layout vocabulary, not a copy of it. An instrument the router can choose is by
  * definition one the placement engine can stand on a stage, so the two lists are the same list.
@@ -38,7 +38,7 @@ export interface MidiTrack {
   readonly name: string;
   /** Zero-based MIDI channel, 0–15. Channel 9 is percussion. */
   readonly channel: number;
-  /** Zero-based GM program the track mostly plays. */
+  /** Zero-based GM program supplied by the parser for this track. */
   readonly program: number;
   readonly isDrums: boolean;
   readonly notes: readonly MidiNote[];

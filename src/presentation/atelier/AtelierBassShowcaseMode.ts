@@ -1,52 +1,43 @@
 import * as THREE from 'three';
 import { getBassProgram } from '../../audio/BassProgram';
-import { distanceForOrbitView } from '../../camera/CameraFraming';
+import { OrbitController } from '../../camera/OrbitController';
 import type { CameraRegistry, InstrumentOrbitCameraView } from '../../camera/CameraRegistry';
 import type { CameraSystem } from '../../camera/CameraSystem';
-import { ATELIER_BASS_VIEW_IDS, type AtelierBassViewName } from '../../camera/presets/AtelierBassViews';
+import { type AtelierBassViewName } from '../../camera/presets/AtelierBassViews';
 import type { BassInstrument } from '../../instruments/bass/BassInstrument';
 import type { InstrumentHit, InstrumentInteractionSystem } from '../../instruments/InstrumentInteractionSystem';
 import type { PresentationMode } from '../PresentationManager';
 import { ATELIER_BASS_KEYMAP } from './AtelierBassKeymap';
 import { guitarKeyboardVelocity, guitarPointerVelocity } from './AtelierGuitarVelocity';
 
-interface CameraState { target: THREE.Vector3; yaw: number; pitch: number; distance: number }
 interface PointerState { id: number; x: number; y: number; velocity: number; mode: 'play' | 'pan' | 'orbit'; hit: InstrumentHit | null }
 interface HeldString { note: number; stringNumber: number }
 
 export class AtelierBassShowcaseMode implements PresentationMode {
-  readonly id = 'atelier-bass';
+  get id(): string { return `${this.bass.id}:showcase`; }
   private readonly element: HTMLCanvasElement;
-  private readonly camera: CameraSystem;
   private readonly cameraRegistry: CameraRegistry;
   private readonly bass: BassInstrument;
   private readonly interactions: InstrumentInteractionSystem;
-  private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  private readonly orbit: OrbitController;
   private readonly pointers = new Map<number, PointerState>();
   private readonly computerKeys = new Map<string, HeldString>();
-  private readonly current: CameraState = { target: new THREE.Vector3(), yaw: 0, pitch: 0, distance: 24 };
-  private readonly want: CameraState = { target: new THREE.Vector3(), yaw: 0, pitch: 0, distance: 24 };
   private active = false;
   private preset: AtelierBassViewName = 'whole';
-  private zoom = 1;
-  private width = 1;
-  private height = 1;
-  private momentumX = 0;
-  private momentumY = 0;
 
   constructor(options: { element: HTMLCanvasElement; camera: CameraSystem; cameraRegistry: CameraRegistry; bass: BassInstrument; interactions: InstrumentInteractionSystem }) {
     this.element = options.element;
-    this.camera = options.camera;
     this.cameraRegistry = options.cameraRegistry;
     this.bass = options.bass;
     this.interactions = options.interactions;
+    this.orbit = new OrbitController({ camera: options.camera, element: options.element,
+      subject: options.bass.root, pitchRange: [-0.92, 1.08], floorY: -3.65 });
   }
 
   activate(): void {
     if (this.active) return;
     this.active = true;
     this.attachInput();
-    this.syncViewport(true);
     this.selectView('whole', true);
   }
 
@@ -57,46 +48,18 @@ export class AtelierBassShowcaseMode implements PresentationMode {
     this.bass.reset();
     this.detachInput();
     this.element.classList.remove('dragging', 'playable');
-    this.camera.resetLens();
   }
 
   update(dt: number): void {
     if (!this.active) return;
-    this.syncViewport(false);
-    if (this.pointers.size === 0 && !this.reducedMotion.matches) {
-      const damping = Math.exp(-dt * 11);
-      this.momentumX *= damping;
-      this.momentumY *= damping;
-      this.want.yaw += this.momentumX * dt * 23;
-      this.want.pitch = THREE.MathUtils.clamp(this.want.pitch + this.momentumY * dt * 23, -0.92, 1.08);
-    }
-    const ease = this.reducedMotion.matches ? 1 : 1 - Math.exp(-dt * 13);
-    this.current.yaw += (this.want.yaw - this.current.yaw) * ease;
-    this.current.pitch += (this.want.pitch - this.current.pitch) * ease;
-    this.current.distance += (this.want.distance - this.current.distance) * ease;
-    this.current.target.lerp(this.want.target, ease);
-    this.applyCamera();
+    this.orbit.update(dt);
   }
 
   selectView(id: AtelierBassViewName, instant = false): boolean {
     const preset = this.getPreset(id);
     if (!preset) return false;
     this.preset = id;
-    this.zoom = 1;
-    this.momentumX = 0;
-    this.momentumY = 0;
-    this.camera.setLens({ fov: preset.fov, near: preset.near, far: preset.far });
-    this.want.target.set(...preset.target);
-    this.want.yaw = this.current.yaw + Math.atan2(Math.sin(preset.yaw - this.current.yaw), Math.cos(preset.yaw - this.current.yaw));
-    this.want.pitch = preset.pitch;
-    this.want.distance = this.distanceFor(preset);
-    if (instant || this.reducedMotion.matches) {
-      this.current.target.copy(this.want.target);
-      this.current.yaw = this.want.yaw;
-      this.current.pitch = this.want.pitch;
-      this.current.distance = this.want.distance;
-      this.applyCamera();
-    }
+    this.orbit.setView(preset, instant);
     return true;
   }
 
@@ -104,7 +67,7 @@ export class AtelierBassShowcaseMode implements PresentationMode {
   dispose(): void { this.deactivate(); }
 
   private getPreset(id: AtelierBassViewName): InstrumentOrbitCameraView | null {
-    const view = this.cameraRegistry.get(ATELIER_BASS_VIEW_IDS[id]);
+    const view = this.cameraRegistry.get(`${this.bass.id}:${id}`);
     return view?.kind === 'instrument-orbit' ? view : null;
   }
 
@@ -166,10 +129,7 @@ export class AtelierBassShowcaseMode implements PresentationMode {
     }
     if (pointer.mode === 'pan') this.pan(dx, dy);
     else {
-      this.momentumX = -dx * 0.0055;
-      this.momentumY = dy * 0.0047;
-      this.want.yaw += this.momentumX;
-      this.want.pitch = THREE.MathUtils.clamp(this.want.pitch + this.momentumY, -0.92, 1.08);
+      this.orbit.orbitBy(dx, dy);
     }
   };
 
@@ -184,9 +144,7 @@ export class AtelierBassShowcaseMode implements PresentationMode {
   private readonly onWheel = (event: WheelEvent): void => {
     if (!this.active) return;
     event.preventDefault();
-    this.zoom = THREE.MathUtils.clamp(this.zoom * Math.exp(THREE.MathUtils.clamp(event.deltaY, -150, 150) * 0.0018), 0.28, 1.7);
-    const preset = this.getPreset(this.preset);
-    if (preset) this.want.distance = this.distanceFor(preset) * this.zoom;
+    this.orbit.zoomBy(Math.exp(THREE.MathUtils.clamp(event.deltaY, -150, 150) * 0.0018));
   };
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
@@ -204,10 +162,10 @@ export class AtelierBassShowcaseMode implements PresentationMode {
       console.info(`[Virtual Band V2] bass program ${program} · ${getBassProgram(program)?.name ?? 'Bass'}`);
     } else if (action?.kind === 'view') this.selectView(action.view);
     else if (action?.kind === 'panic') { this.bass.reset(); this.computerKeys.clear(); }
-    else if (event.code === 'ArrowLeft') { this.want.yaw -= 0.10; handled = true; }
-    else if (event.code === 'ArrowRight') { this.want.yaw += 0.10; handled = true; }
-    else if (event.code === 'ArrowUp') { this.want.pitch = THREE.MathUtils.clamp(this.want.pitch + 0.08, -0.92, 1.08); handled = true; }
-    else if (event.code === 'ArrowDown') { this.want.pitch = THREE.MathUtils.clamp(this.want.pitch - 0.08, -0.92, 1.08); handled = true; }
+    else if (event.code === 'ArrowLeft') { this.orbit.rotateBy(-0.10, 0); handled = true; }
+    else if (event.code === 'ArrowRight') { this.orbit.rotateBy(0.10, 0); handled = true; }
+    else if (event.code === 'ArrowUp') { this.orbit.rotateBy(0, 0.08); handled = true; }
+    else if (event.code === 'ArrowDown') { this.orbit.rotateBy(0, -0.08); handled = true; }
     else if (!action) handled = false;
     if (handled) event.preventDefault();
   };
@@ -245,46 +203,6 @@ export class AtelierBassShowcaseMode implements PresentationMode {
     this.element.classList.remove('dragging');
   }
 
-  private pan(dx: number, dy: number): void {
-    if (this.height <= 0) return;
-    const preset = this.getPreset(this.preset);
-    if (!preset) return;
-    this.bass.root.updateWorldMatrix(true, true);
-    const worldTarget = this.bass.root.localToWorld(this.current.target.clone());
-    const scale = this.camera.output.position.distanceTo(worldTarget) * 2 * Math.tan(THREE.MathUtils.degToRad(preset.fov / 2)) / this.height;
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.output.quaternion);
-    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.output.quaternion);
-    const moved = worldTarget.addScaledVector(right, -dx * scale).addScaledVector(up, dy * scale);
-    this.want.target.copy(this.bass.root.worldToLocal(moved));
-  }
+  private pan(dx: number, dy: number): void { this.orbit.panBy(dx, dy); }
 
-  private syncViewport(force: boolean): void {
-    const width = this.element.clientWidth;
-    const height = this.element.clientHeight;
-    if (!width || !height || (!force && width === this.width && height === this.height)) return;
-    this.width = width;
-    this.height = height;
-    const preset = this.getPreset(this.preset);
-    if (!preset) return;
-    const distance = this.distanceFor(preset) * this.zoom;
-    this.want.distance = distance;
-    this.current.distance = distance;
-  }
-
-  private distanceFor(preset: InstrumentOrbitCameraView): number {
-    return distanceForOrbitView(preset, this.width, this.height);
-  }
-
-  private applyCamera(): void {
-    const preset = this.getPreset(this.preset);
-    if (!preset) return;
-    this.bass.root.updateWorldMatrix(true, true);
-    const cp = Math.cos(this.current.pitch);
-    const localPosition = new THREE.Vector3(
-      this.current.target.x + Math.sin(this.current.yaw) * cp * this.current.distance,
-      Math.max(-3.65, this.current.target.y + Math.sin(this.current.pitch) * this.current.distance),
-      this.current.target.z + Math.cos(this.current.yaw) * cp * this.current.distance,
-    );
-    this.camera.setPose({ position: this.bass.root.localToWorld(localPosition), target: this.bass.root.localToWorld(this.current.target.clone()), fov: preset.fov }, true);
-  }
 }

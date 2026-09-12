@@ -38,6 +38,7 @@ export class TransportBar {
 
     this.scrub = document.createElement('input');
     this.scrub.type = 'range';
+    this.scrub.setAttribute('aria-label', '播放进度');
     this.scrub.className = 'mb-bar__scrub';
     this.scrub.min = '0';
     this.scrub.max = '1000';
@@ -48,6 +49,8 @@ export class TransportBar {
     this.scrub.addEventListener('pointerup', () => {
       this.dragging = false;
     });
+    this.scrub.addEventListener('pointercancel', () => { this.dragging = false; });
+    this.scrub.addEventListener('lostpointercapture', () => { this.dragging = false; });
     this.scrub.addEventListener('input', () => {
       if (!this.duration) return;
       handlers.onSeek((Number(this.scrub.value) / 1000) * this.duration);
@@ -102,6 +105,7 @@ function button(glyph: string, title: string): HTMLButtonElement {
   element.className = 'mb-bar__button';
   element.textContent = glyph;
   element.title = title;
+  element.setAttribute('aria-label', title);
   return element;
 }
 
@@ -138,7 +142,7 @@ function installTransportStyles(doc: Document = document): void {
   padding: 18px 26px; border: 1px dashed rgba(255,255,255,.28); border-radius: 12px;
   color: #cfd8e3; background: rgba(12,16,22,.55); text-align: center;
   font: 14px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  pointer-events: none; transition: opacity .18s ease;
+  pointer-events: none; transition: opacity .18s ease; white-space: pre-line;
 }
 .mb-hint[hidden] { display: none; }
 `;
@@ -162,8 +166,8 @@ export class DropHint {
     this.root.hidden = !visible;
   }
 
-  setText(html: string): void {
-    this.root.innerHTML = html;
+  setText(text: string): void {
+    this.root.textContent = text;
   }
 
   dispose(): void {

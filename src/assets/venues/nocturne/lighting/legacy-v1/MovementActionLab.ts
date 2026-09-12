@@ -174,7 +174,6 @@ export class MovementActionLab {
     if (!returned) return false;
     if (!await this.waitBeats(1, token)) return false;
     this.prepared = { actionId, group };
-    if (actionId === 'hold') this.startHoldPreparationMotion(fixtures);
     this.emit('READY', '已回到标准初始状态 · 可继续观察', 1);
     return true;
   }

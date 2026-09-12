@@ -1,12 +1,9 @@
 import * as THREE from 'three';
-import { LayoutEditorRuntime } from './LayoutEditorRuntime';
 
-type RuntimeWithCameraInternals = LayoutEditorRuntime & {
+interface CameraPanTarget {
   camera: THREE.PerspectiveCamera;
   cameraTarget: THREE.Vector3;
-  renderer: {
-    renderer: THREE.WebGLRenderer;
-  };
+  element: HTMLCanvasElement;
   applyCamera: () => void;
 };
 
@@ -20,41 +17,9 @@ interface PanState {
   onPointerEnd: (event: PointerEvent) => void;
 }
 
-const states = new WeakMap<LayoutEditorRuntime, PanState>();
-let installed = false;
-
-/**
- * Layout Lab only: add editor-style camera panning without changing the normal app.
- *
- * Controls:
- * - left drag on empty space: orbit (existing runtime behavior)
- * - wheel: zoom (existing runtime behavior)
- * - right or middle drag: pan across the stage floor
- */
-export function installLayoutEditorCameraPan(): void {
-  if (installed) return;
-  installed = true;
-
-  const prototype = LayoutEditorRuntime.prototype;
-  const originalStart = prototype.start;
-  const originalDispose = prototype.dispose;
-
-  prototype.start = async function startWithCameraPan() {
-    attachCameraPan(this);
-    return originalStart.call(this);
-  };
-
-  prototype.dispose = function disposeWithCameraPan() {
-    detachCameraPan(this);
-    return originalDispose.call(this);
-  };
-}
-
-function attachCameraPan(runtime: LayoutEditorRuntime): void {
-  if (states.has(runtime)) return;
-
-  const internals = runtime as RuntimeWithCameraInternals;
-  const element = internals.renderer.renderer.domElement;
+/** Explicitly attach gestures to one editor; the returned function releases them. */
+export function attachCameraPan(internals: CameraPanTarget): () => void {
+  const element = internals.element;
   const worldUp = new THREE.Vector3(0, 1, 0);
   const forward = new THREE.Vector3();
   const right = new THREE.Vector3();
@@ -117,16 +82,11 @@ function attachCameraPan(runtime: LayoutEditorRuntime): void {
   element.addEventListener('pointerup', state.onPointerEnd);
   element.addEventListener('pointercancel', state.onPointerEnd);
   element.addEventListener('lostpointercapture', state.onPointerEnd);
-  states.set(runtime, state);
-}
-
-function detachCameraPan(runtime: LayoutEditorRuntime): void {
-  const state = states.get(runtime);
-  if (!state) return;
-  state.element.removeEventListener('pointerdown', state.onPointerDown);
-  state.element.removeEventListener('pointermove', state.onPointerMove);
-  state.element.removeEventListener('pointerup', state.onPointerEnd);
-  state.element.removeEventListener('pointercancel', state.onPointerEnd);
-  state.element.removeEventListener('lostpointercapture', state.onPointerEnd);
-  states.delete(runtime);
+  return () => {
+    element.removeEventListener('pointerdown', state.onPointerDown);
+    element.removeEventListener('pointermove', state.onPointerMove);
+    element.removeEventListener('pointerup', state.onPointerEnd);
+    element.removeEventListener('pointercancel', state.onPointerEnd);
+    element.removeEventListener('lostpointercapture', state.onPointerEnd);
+  };
 }

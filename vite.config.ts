@@ -33,8 +33,10 @@ export default defineConfig({
         'assets/venues/nocturne/index.html',
         'studio/layout/index.html',
         'studio/band/index.html',
+        'studio/cello/index.html',
         'tools/audio/calibration/index.html',
         'tools/audio/mix/index.html',
+        'tools/audio/player/index.html',
         // Compatibility entry points for old local URLs.
         'layout.html',
         'calibration.html',

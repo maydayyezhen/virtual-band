@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { AcousticGuitarSampler } from '../../audio/AcousticGuitarSampler';
+import type { AcousticGuitarAudio } from '../../audio/InstrumentAudio';
 import {
   DEFAULT_ACOUSTIC_GUITAR_PROGRAM,
   getAcousticGuitarProgram,
@@ -14,6 +14,7 @@ import {
 import { StringFingeringState, type StringFingeringValue } from '../shared/StringFingeringState';
 import {
   buildLegacyAcousticAsset,
+  type AcousticModelVariant,
   type AcousticStrumDirection,
   type LegacyAcousticController,
   type LegacyAcousticHitEvent,
@@ -53,15 +54,16 @@ export class AcousticGuitarInstrument implements Instrument {
   setInstanceId(value: string): void {
 
     this.instanceId = value;
+    this.root.userData.instrumentId = value;
 
   }
   readonly role = 'acoustic';
-  readonly label = 'Atelier · Acoustic 01';
+  get label(): string { return this.variant === 'cutaway-sunburst' ? 'Atelier · Amber Cutaway' : 'Atelier · Acoustic 01'; }
   readonly root: THREE.Group;
 
   private readonly model: LegacyAcousticModel;
   private readonly controller: LegacyAcousticController;
-  private readonly sampler: AcousticGuitarSampler;
+  private readonly sampler: AcousticGuitarAudio;
   private readonly interactionVoices = new Map<string, InteractionVoice>();
   private readonly fingeringState = new StringFingeringState(STRING_ORDER, 20);
   private readonly previewMarker: THREE.Mesh;
@@ -72,7 +74,8 @@ export class AcousticGuitarInstrument implements Instrument {
   private constructor(
     model: LegacyAcousticModel,
     controller: LegacyAcousticController,
-    sampler: AcousticGuitarSampler,
+    sampler: AcousticGuitarAudio,
+    readonly variant: AcousticModelVariant,
   ) {
     this.model = model;
     this.controller = controller;
@@ -87,26 +90,33 @@ export class AcousticGuitarInstrument implements Instrument {
     this.syncFingeringMarkers();
   }
 
-  static async create(sampler: AcousticGuitarSampler): Promise<AcousticGuitarInstrument> {
+  static async create(sampler: AcousticGuitarAudio, variant: AcousticModelVariant = 'natural'): Promise<AcousticGuitarInstrument> {
     let instrument: AcousticGuitarInstrument | null = null;
     const { model, controller } = await buildLegacyAcousticAsset({
       onHit: (event) => instrument?.playAudio(event),
-    });
-    instrument = new AcousticGuitarInstrument(model, controller, sampler);
+    }, variant);
+    instrument = new AcousticGuitarInstrument(model, controller, sampler, variant);
     instrument.setProgram(DEFAULT_ACOUSTIC_GUITAR_PROGRAM);
     return instrument;
   }
+
+  private visualOnly = false;
+
+  visualNoteOn(note: number, velocity: number): void {
+    this.visualOnly = true;
+    try { this.controller.api.noteOn(note, velocity); }
+    finally { this.visualOnly = false; }
+  }
+
+  visualNoteOff(note: number): void { this.controller.api.noteOff(note); }
 
   noteOn(note: number, velocity: number): void {
     this.controller.api.noteOn(note, velocity);
   }
 
   noteOff(note: number): void {
-    const affectedStrings = this.controller.api.getFingering()
-      .filter((fingering) => fingering.note === note)
-      .map((fingering) => fingering.string);
-    if (!this.controller.api.noteOff(note)) return;
-    for (const stringNumber of affectedStrings) this.sampler.noteOff(stringNumber);
+    this.controller.api.noteOff(note);
+    this.sampler.noteOffPitch(note);
   }
 
   pluck(stringNumber: number, velocity = 100, fret = 0): LegacyAcousticHitEvent | false {
@@ -369,6 +379,7 @@ export class AcousticGuitarInstrument implements Instrument {
   }
 
   private playAudio(event: LegacyAcousticHitEvent): void {
+    if (this.visualOnly) return;
     const strum = this.pendingStrumHits[0] === event.string;
     if (strum) this.pendingStrumHits.shift();
     const directPluck = this.pendingDirectPluckString === event.string;

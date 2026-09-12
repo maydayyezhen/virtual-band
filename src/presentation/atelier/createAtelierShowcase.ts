@@ -1,47 +1,32 @@
-import type {
-  CameraRegistry,
-  InstrumentCameraView,
-  InstrumentOrbitCameraView,
-} from '../../camera/CameraRegistry';
+import { INSTRUMENT_DEFINITIONS, type InstrumentType } from '../../instruments/InstrumentDefinitions';
+import type { Instrument } from '../../instruments/Instrument';
+import type { CameraRegistry } from '../../camera/CameraRegistry';
 import type { CameraSystem } from '../../camera/CameraSystem';
-import { ATELIER_ACOUSTIC_VIEWS, ATELIER_ACOUSTIC_VIEW_IDS } from '../../camera/presets/AtelierAcousticViews';
-import { ATELIER_BASS_VIEWS, ATELIER_BASS_VIEW_IDS } from '../../camera/presets/AtelierBassViews';
-import { ATELIER_DRUM_VIEWS, ATELIER_DRUM_VIEW_IDS } from '../../camera/presets/AtelierDrumViews';
-import { ATELIER_ELECTRIC_VIEWS, ATELIER_ELECTRIC_VIEW_IDS } from '../../camera/presets/AtelierElectricViews';
-import { ATELIER_KEYBOARD_VIEWS, ATELIER_KEYBOARD_VIEW_IDS } from '../../camera/presets/AtelierKeyboardViews';
-import { ATELIER_VIOLIN_VIEWS, ATELIER_VIOLIN_VIEW_IDS } from '../../camera/presets/AtelierViolinViews';
-import type { AcousticGuitarInstrument } from '../../instruments/acoustic/AcousticGuitarInstrument';
-import type { BassInstrument } from '../../instruments/bass/BassInstrument';
-import type { DrumsInstrument } from '../../instruments/drums/DrumsInstrument';
-import type { ElectricGuitarInstrument } from '../../instruments/electric/ElectricGuitarInstrument';
 import type { InstrumentInteractionSystem } from '../../instruments/InstrumentInteractionSystem';
-import type { KeyboardInstrument } from '../../instruments/keyboard/KeyboardInstrument';
-import type { ViolinInstrument } from '../../instruments/violin/ViolinInstrument';
 import type { PresentationMode } from '../PresentationManager';
-import { AtelierAcousticShowcaseMode } from './AtelierAcousticShowcaseMode';
-import { AtelierBassShowcaseMode } from './AtelierBassShowcaseMode';
-import { AtelierDrumShowcaseMode } from './AtelierDrumShowcaseMode';
-import { AtelierElectricShowcaseMode } from './AtelierElectricShowcaseMode';
-import { AtelierKeyboardShowcaseMode } from './AtelierKeyboardShowcaseMode';
-import { AtelierViolinShowcaseMode } from './AtelierViolinShowcaseMode';
+import type { DrumsInstrument } from '../../instruments/drums/DrumsInstrument';
+import type { AtelierDrumShowcaseMode } from './AtelierDrumShowcaseMode';
+import type { KeyboardInstrument } from '../../instruments/keyboard/KeyboardInstrument';
+import type { AtelierKeyboardShowcaseMode } from './AtelierKeyboardShowcaseMode';
+import type { ViolinInstrument } from '../../instruments/violin/ViolinInstrument';
+import type { AtelierViolinShowcaseMode } from './AtelierViolinShowcaseMode';
+import type { ElectricGuitarInstrument } from '../../instruments/electric/ElectricGuitarInstrument';
+import type { AtelierElectricShowcaseMode } from './AtelierElectricShowcaseMode';
+import type { AcousticGuitarInstrument } from '../../instruments/acoustic/AcousticGuitarInstrument';
+import type { AtelierAcousticShowcaseMode } from './AtelierAcousticShowcaseMode';
+import type { BassInstrument } from '../../instruments/bass/BassInstrument';
+import type { AtelierBassShowcaseMode } from './AtelierBassShowcaseMode';
+import type { GrandPianoInstrument } from '../../instruments/piano/GrandPianoInstrument';
+import type { PianoShowcaseMode } from './PianoShowcaseMode';
+import type { SaxophoneInstrument } from '../../instruments/saxophone/SaxophoneInstrument';
+import type { SaxophoneShowcaseMode } from './SaxophoneShowcaseMode';
+import type { CelloInstrument } from '../../instruments/cello/CelloInstrument';
+import type { CelloShowcaseMode } from './CelloShowcaseMode';
 
-/**
- * Single assembly point for the six Atelier presentation modes.
- *
- * Every mode takes the same shape — `{ element, camera, cameraRegistry, interactions }` plus
- * its own instrument — so building them here keeps the wiring in one place. The main app
- * (`VirtualBandApp`) and the band view both construct the same set; neither owns a private
- * copy.
- */
-
-/**
- * The six instruments a showcase can be built from.
- *
- * Every field is optional because a band built from a score need not have all six — a file with no
- * strings has no violin to step into, and that is not an error. Only the instruments present get a
- * mode and a set of views.
- */
 export interface AtelierShowcaseInstruments {
+  cello?: CelloInstrument;
+  saxophone?: SaxophoneInstrument;
+  piano?: GrandPianoInstrument;
   drums?: DrumsInstrument;
   keyboard?: KeyboardInstrument;
   violin?: ViolinInstrument;
@@ -55,10 +40,13 @@ export interface AtelierShowcaseInput {
   camera: CameraSystem;
   cameraRegistry: CameraRegistry;
   interactions: InstrumentInteractionSystem;
-  instruments: AtelierShowcaseInstruments;
+  instruments: AtelierShowcaseInstruments | readonly Instrument[];
 }
 
 export interface AtelierShowcase {
+  readonly cello: CelloShowcaseMode | null;
+  readonly saxophone: SaxophoneShowcaseMode | null;
+  readonly piano: PianoShowcaseMode | null;
   /** Each is null when the band has no instrument of that type. */
   readonly drums: AtelierDrumShowcaseMode | null;
   readonly keyboard: AtelierKeyboardShowcaseMode | null;
@@ -74,76 +62,41 @@ export interface AtelierShowcase {
   readonly wholeViewIds: ReadonlyMap<string, string>;
 }
 
+function instances(input: AtelierShowcaseInput['instruments']): Instrument[] {
+  return Object.values(input).filter((instrument): instrument is Instrument => Boolean(instrument));
+}
+
 export function createAtelierShowcase(input: AtelierShowcaseInput): AtelierShowcase {
-  const shared = {
-    element: input.element,
-    camera: input.camera,
-    cameraRegistry: input.cameraRegistry,
-    interactions: input.interactions,
-  };
-  const { drums, keyboard, violin, electric, acoustic, bass } = input.instruments;
-
-  const drumMode = drums ? new AtelierDrumShowcaseMode({ ...shared, drums }) : null;
-  const keyboardMode = keyboard ? new AtelierKeyboardShowcaseMode({ ...shared, keyboard }) : null;
-  const violinMode = violin ? new AtelierViolinShowcaseMode({ ...shared, violin }) : null;
-  const electricMode = electric ? new AtelierElectricShowcaseMode({ ...shared, electric }) : null;
-  const acousticMode = acoustic ? new AtelierAcousticShowcaseMode({ ...shared, acoustic }) : null;
-  const bassMode = bass ? new AtelierBassShowcaseMode({ ...shared, bass }) : null;
-
-  const modes = [drumMode, keyboardMode, violinMode, electricMode, acousticMode, bassMode].filter(
-    (mode) => mode !== null,
-  ) as PresentationMode[];
-
   const byInstrumentId = new Map<string, PresentationMode>();
   const wholeViewIds = new Map<string, string>();
-  const pair = (
-    mode: PresentationMode | null,
-    instrument: { id: string } | undefined,
-    viewId: string,
-  ): void => {
-    if (!mode || !instrument) return;
+  const first: Partial<Record<InstrumentType, PresentationMode>> = {};
+  for (const instrument of instances(input.instruments)) {
+    const type = instrument.role as InstrumentType;
+    const definition = INSTRUMENT_DEFINITIONS[type];
+    if (!definition) throw new Error(`No presentation definition for ${instrument.role}`);
+    const mode = definition.createMode(instrument, input);
     byInstrumentId.set(instrument.id, mode);
-    wholeViewIds.set(instrument.id, viewId);
-  };
-  pair(drumMode, drums, ATELIER_DRUM_VIEW_IDS.whole);
-  pair(keyboardMode, keyboard, ATELIER_KEYBOARD_VIEW_IDS.whole);
-  pair(violinMode, violin, ATELIER_VIOLIN_VIEW_IDS.whole);
-  pair(electricMode, electric, ATELIER_ELECTRIC_VIEW_IDS.whole);
-  pair(acousticMode, acoustic, ATELIER_ACOUSTIC_VIEW_IDS.whole);
-  pair(bassMode, bass, ATELIER_BASS_VIEW_IDS.whole);
-
+    wholeViewIds.set(instrument.id, `${instrument.id}:whole`);
+    first[type] ??= mode;
+  }
   return {
-    drums: drumMode,
-    keyboard: keyboardMode,
-    violin: violinMode,
-    electric: electricMode,
-    acoustic: acousticMode,
-    bass: bassMode,
-    modes,
-    byInstrumentId,
-    wholeViewIds,
+    cello: (first.cello as CelloShowcaseMode | undefined) ?? null,
+    saxophone: (first.saxophone as SaxophoneShowcaseMode | undefined) ?? null,
+    piano: (first.piano as PianoShowcaseMode | undefined) ?? null,
+    drums: (first.drums as AtelierDrumShowcaseMode | undefined) ?? null,
+    keyboard: (first.keyboard as AtelierKeyboardShowcaseMode | undefined) ?? null,
+    violin: (first.violin as AtelierViolinShowcaseMode | undefined) ?? null,
+    electric: (first.electric as AtelierElectricShowcaseMode | undefined) ?? null,
+    acoustic: (first.acoustic as AtelierAcousticShowcaseMode | undefined) ?? null,
+    bass: (first.bass as AtelierBassShowcaseMode | undefined) ?? null,
+    modes: [...byInstrumentId.values()], byInstrumentId, wholeViewIds,
   };
 }
 
-/**
- * Registers the 29 authored instrument views. Kept beside the mode factory so a stage that
- * builds one always has the other — the views and the modes that select them are one unit.
- */
-export function registerAtelierViews(
-  registry: CameraRegistry,
-  instruments: AtelierShowcaseInstruments,
-): void {
-  const bind = (
-    instrument: { id: string } | undefined,
-    views: readonly (InstrumentCameraView | InstrumentOrbitCameraView)[],
-  ): void => {
-    if (!instrument) return;
-    registry.setInstrumentViews(instrument.id, [...views]);
-  };
-  bind(instruments.drums, ATELIER_DRUM_VIEWS);
-  bind(instruments.keyboard, ATELIER_KEYBOARD_VIEWS);
-  bind(instruments.violin, ATELIER_VIOLIN_VIEWS);
-  bind(instruments.electric, ATELIER_ELECTRIC_VIEWS);
-  bind(instruments.acoustic, ATELIER_ACOUSTIC_VIEWS);
-  bind(instruments.bass, ATELIER_BASS_VIEWS);
+export function registerAtelierViews(registry: CameraRegistry, input: AtelierShowcaseInput['instruments']): void {
+  for (const instrument of instances(input)) {
+    const definition = INSTRUMENT_DEFINITIONS[instrument.role as InstrumentType];
+    if (!definition) throw new Error(`No camera definition for ${instrument.role}`);
+    registry.setInstrumentViews(instrument.id, [...definition.views]);
+  }
 }

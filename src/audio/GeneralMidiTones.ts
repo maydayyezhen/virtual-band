@@ -2,8 +2,7 @@
  * The 128 General MIDI melodic tones, in order, with their 16 families.
  *
  * Ids are zero-based GM program numbers, matching every other tone table in the project. The
- * families matter beyond presentation: the MIDI routing rule assigns whole families to
- * instruments, so this is the table it reads.
+ * family ranges describe the GM sound set. Visual routing has explicit exceptions in routeTracks.
  *
  * The percussion bank (bank 128) is not here — that is a note map, not a program list.
  */

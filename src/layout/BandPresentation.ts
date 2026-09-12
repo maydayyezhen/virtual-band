@@ -2,15 +2,8 @@ import * as THREE from 'three';
 import type { InstrumentFootprint } from './AutoLayout';
 import { getInstrumentDefinition, type LayoutInstrumentType } from './LayoutDocument';
 
-/**
- * Presentation scale for the six instruments.
- *
- * `LayoutDocument.targetHeight` stays the real-world reference in metres, but a life-size
- * band reads as miniature clutter on the 30 m NOCTURNE stage, so the band is presented
- * larger than life. 1 = real metres. Tune this single number to change how large the band
- * sits on the stage.
- */
-export const BAND_SCALE = 1.5;
+/** Normalize assets to real metres. Display scale belongs to each layout instance. */
+export const BAND_SCALE = 1;
 
 export interface NormalizedInstrument {
   /** Donor model wrapped so its base sits on y = 0 and its footprint is centred on x/z. */
@@ -46,7 +39,10 @@ export function normalizeInstrument(
 
   const holder = new THREE.Group();
   holder.name = `band:${type}`;
-  holder.add(modelRoot);
+  const assetFrame = new THREE.Group();
+  assetFrame.name = 'asset:meter-normalization';
+  assetFrame.add(modelRoot);
+  holder.add(assetFrame);
   holder.updateMatrixWorld(true);
 
   const rawBounds = new THREE.Box3().setFromObject(holder);
@@ -54,8 +50,9 @@ export function normalizeInstrument(
   if (!Number.isFinite(rawHeight) || rawHeight <= 0) throw new Error(`无法测量乐器高度：${type}`);
 
   const scale = targetHeight / rawHeight;
-  holder.scale.setScalar(scale);
-  holder.position.y = -rawBounds.min.y * scale;
+  const center = rawBounds.getCenter(new THREE.Vector3());
+  assetFrame.scale.setScalar(scale);
+  assetFrame.position.set(-center.x * scale, -rawBounds.min.y * scale, -center.z * scale);
   holder.updateMatrixWorld(true);
 
   const size = new THREE.Box3().setFromObject(holder).getSize(new THREE.Vector3());

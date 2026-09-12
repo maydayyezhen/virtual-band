@@ -47,6 +47,7 @@
     const pick=new T.Group();pick.name='Animated plectrum';pick.userData.dynamic=true;root.add(pick);
     const ps=new T.Shape();ps.moveTo(-.075,.071);ps.quadraticCurveTo(0,.13,.075,.071);ps.quadraticCurveTo(.080,.024,0,-.099);ps.quadraticCurveTo(-.080,.024,-.075,.071);ps.closePath();slab(ps,.012,0,mat.bone,pick,.004);pick.position.set(.10,-1.13,.535);pick.visible=false;
     // A compact A-frame stand and a loose lead give the instrument a stage base.
+    const standStart=root.children.length;
     for(const s of [-1,1]){
       rod(V(s*.72,-3.49,.42),V(s*.24,-.89,-.56),.037,mat.black,root,14);
       rod(V(s*.72,-3.49,.42),V(s*.65,-3.49,-.92),.034,mat.black,root,14);
@@ -56,13 +57,15 @@
     }
     rod(V(-.63,-3.26,-.57),V(.63,-3.26,-.57),.030,mat.black);rod(V(-.24,-.89,-.56),V(.24,-.89,-.56),.038,mat.black);
     ball(0,-.89,-.346,.27,.12,.10,mat.rubber);
+    const stand=new T.Group();stand.name='electric:stand';stand.userData.electricAppearance=true;
+    for(const part of root.children.slice(standStart))stand.add(part);root.add(stand);
     rod(V(1.51,-2.37,-.025),V(1.667,-2.41,-.025),.047,mat.chrome,root,20);rod(V(1.66,-2.41,-.025),V(1.82,-2.46,-.025),.045,mat.rubber,root,16);
     wire([V(1.81,-2.46,-.025),V(2.0,-2.85,.03),V(1.76,-3.49,.38),V(1.14,-3.50,.89),V(1.61,-3.50,1.21),V(2.34,-3.50,.75),V(2.02,-3.50,.38),V(1.66,-3.50,.93),V(2.80,-3.50,.96)],.021,mat.rubber,root,120,8);
     // Merge only static meshes. Strings, position markers, controls and pick
     // keep their own geometry for animation and picking.
     function batch(group){
       root.updateMatrixWorld(true);const inv=group.matrixWorld.clone().invert(),batches=new Map();
-      function visit(o){if(o.userData.dynamic)return;if(o.isMesh){const key=o.material.uuid+':'+o.castShadow+':'+o.receiveShadow;if(!batches.has(key))batches.set(key,[]);batches.get(key).push(o);}for(const c of o.children)visit(c);}
+      function visit(o){if(o.userData.dynamic||o.userData.electricAppearance)return;if(o.isMesh){const key=o.material.uuid+':'+o.castShadow+':'+o.receiveShadow;if(!batches.has(key))batches.set(key,[]);batches.get(key).push(o);}for(const c of o.children)visit(c);}
       for(const o of group.children)visit(o);
       for(const meshes of batches.values()){
         if(meshes.length<2)continue;const p=[],n=[],u=[];
@@ -71,7 +74,7 @@
         const m=add(g,meshes[0].material,group,'Merged hardware');m.castShadow=meshes[0].castShadow;m.receiveShadow=meshes[0].receiveShadow;meshes.forEach(o=>o.removeFromParent());
       }
     }
-    for(const id of ['volume','tone','pickup'])batch(controls[id].group);batch(tremolo);batch(pick);batch(root);
+    batch(exterior);batch(stand);for(const id of ['volume','tone','pickup'])batch(controls[id].group);batch(tremolo);batch(pick);batch(root);
     return {root,strings,controls,pick,frets,nutY,scale,bridgeY,boardZ,boardHalf};
   }
   function createElectricController(model,hooks={}){

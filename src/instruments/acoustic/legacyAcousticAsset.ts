@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
 export type AcousticStrumDirection = 'down' | 'up';
+export type AcousticModelVariant = 'natural' | 'cutaway-sunburst';
 
 export interface LegacyAcousticHitEvent {
   note: number;
@@ -200,9 +201,10 @@ function tortoiseTexture(): THREE.CanvasTexture {
   });
 }
 
-let donorFactoryPromise: Promise<() => THREE.Group> | null = null;
+type AcousticDonorFactory = (variant?: AcousticModelVariant) => THREE.Group;
+let donorFactoryPromise: Promise<AcousticDonorFactory> | null = null;
 
-async function loadDonorFactory(): Promise<() => THREE.Group> {
+async function loadDonorFactory(): Promise<AcousticDonorFactory> {
   if (donorFactoryPromise) return donorFactoryPromise;
   donorFactoryPromise = (async () => {
     const response = await fetch('/legacy-assets/acoustic-guitar.js');
@@ -225,7 +227,7 @@ async function loadDonorFactory(): Promise<() => THREE.Group> {
       woodTextureFactory: typeof woodTexture,
       tortoiseTextureFactory: typeof tortoiseTexture,
       clampFactory: typeof clamp,
-    ) => () => THREE.Group;
+    ) => AcousticDonorFactory;
     return compile(THREE, V, TAU, canvasTexture, woodTexture, tortoiseTexture, clamp);
   })();
   return donorFactoryPromise;
@@ -233,9 +235,10 @@ async function loadDonorFactory(): Promise<() => THREE.Group> {
 
 export async function buildLegacyAcousticAsset(
   hooks: LegacyAcousticControllerHooks = {},
+  variant: AcousticModelVariant = 'natural',
 ): Promise<{ model: LegacyAcousticModel; controller: LegacyAcousticController }> {
   const createGuitar = await loadDonorFactory();
-  const root = createGuitar();
+  const root = createGuitar(variant);
   const donorStrings = (root.userData.playableStrings ?? []) as DonorStringRecord[];
   const fretGeometry = root.userData.fretGeometry as DonorFretGeometry | undefined;
   if (donorStrings.length !== 6 || !fretGeometry?.frets?.length) {

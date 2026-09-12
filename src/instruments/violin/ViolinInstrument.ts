@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { ViolinSampler } from '../../audio/ViolinSampler';
+import type { ViolinAudio } from '../../audio/InstrumentAudio';
 import {
   DEFAULT_VIOLIN_PROGRAM,
   VIOLIN_PROGRAM_IDS,
@@ -61,6 +61,7 @@ export class ViolinInstrument implements Instrument {
   setInstanceId(value: string): void {
 
     this.instanceId = value;
+    this.root.userData.instrumentId = value;
 
   }
   readonly role = 'violin';
@@ -69,7 +70,7 @@ export class ViolinInstrument implements Instrument {
 
   private readonly model: LegacyViolinModel;
   private readonly controller: LegacyViolinController;
-  private readonly sampler: ViolinSampler;
+  private readonly sampler: ViolinAudio;
   private readonly interactionVoices = new Map<string, InteractionVoice>();
   private readonly releaseTails = new Map<number, VisualReleaseTail>();
   private readonly fingeringState = new StringFingeringState(STRING_ORDER, 24);
@@ -79,7 +80,7 @@ export class ViolinInstrument implements Instrument {
   private constructor(
     model: LegacyViolinModel,
     controller: LegacyViolinController,
-    sampler: ViolinSampler,
+    sampler: ViolinAudio,
   ) {
     this.model = model;
     this.controller = controller;
@@ -94,13 +95,24 @@ export class ViolinInstrument implements Instrument {
     this.syncFingeringMarkers();
   }
 
-  static async create(sampler: ViolinSampler): Promise<ViolinInstrument> {
+  static async create(sampler: ViolinAudio): Promise<ViolinInstrument> {
     const { model, controller } = await buildLegacyViolinAsset();
     const instrument = new ViolinInstrument(model, controller, sampler);
     // Make the starting tuning and tone explicit rather than relying on donor literals.
     instrument.setProgram(DEFAULT_VIOLIN_PROGRAM);
     return instrument;
   }
+
+  visualNoteOn(note: number, velocity: number, _tier?: 'lower' | 'upper', program?: number): void {
+    if (program !== undefined) this.controller.api.setArticulation(program === 45 ? 'pizzicato' : 'arco');
+    const preset = program === undefined ? null : getViolinProgram(program);
+    if (preset && preset.id !== this.programId) {
+      this.controller.api.setTuning(preset.tuning);
+      this.programId = preset.id;
+    }
+    this.controller.api.noteOn(note, velocity);
+  }
+  visualNoteOff(note: number): void { this.controller.api.noteOff(note); }
 
   noteOn(note: number, velocity: number): void {
     const result = this.controller.api.noteOn(note, velocity);
@@ -111,9 +123,10 @@ export class ViolinInstrument implements Instrument {
     const affectedStrings = [...this.model.strings.values()]
       .filter((string) => string.held && string.note === note)
       .map((string) => string.number);
-    if (!this.controller.api.noteOff(note)) return;
+    this.controller.api.noteOff(note);
+    const tail = this.sampler.noteOffPitch(note);
     for (const stringNumber of affectedStrings) {
-      this.beginReleaseTail(stringNumber, this.sampler.noteOff(stringNumber));
+      this.beginReleaseTail(stringNumber, tail);
     }
   }
 
@@ -375,6 +388,7 @@ export class ViolinInstrument implements Instrument {
 
   dispose(): void {
     this.reset();
+    this.sampler.dispose();
     this.root.removeFromParent();
 
     const geometries = new Set<THREE.BufferGeometry>();

@@ -8,7 +8,8 @@ import { BAND_INSTRUMENT_TYPES } from './types';
  *
  * - `drums` and `bass` are always one. A drum kit is one person with many pieces, an electric bass
  *   is one person with one instrument, and neither ever doubles in reality.
- * - Everything else is sized by how many of its tracks are *sounding at the same moment*. Tracks
+ * - Keyboard fallback parts share one visual instrument; tiers can display layered parts.
+ * - Other instruments are sized by how many tracks are *sounding at the same moment*. Tracks
  *   that take turns are one player switching patches; tracks that overlap are two players.
  *
  * A patch change is free, so overlap — not track count — is what costs an instrument.
@@ -29,8 +30,6 @@ const PART_GAP_SECONDS = 1;
 const TRACKS_PER_PLAYER = 2;
 /** Past this many of one instrument the stage stops reading as a band. */
 const MAX_PER_TYPE = 3;
-/** A part this short is a placeholder or debris, not a performance. */
-export const MIN_NOTES_PER_TRACK = 3;
 /** Notes above this, or below its counterpart, have no key on the upper tier. */
 export const UPPER_TIER_MIN_NOTE = 36;
 export const UPPER_TIER_MAX_NOTE = 96;
@@ -160,11 +159,39 @@ function fitsUpperTier(track: MidiTrack): boolean {
   return track.notes.every((note) => note.note >= UPPER_TIER_MIN_NOTE && note.note <= UPPER_TIER_MAX_NOTE);
 }
 
+/** MIDI sound is sequenced independently: a visual manual can show several patches at once. */
+function planKeyboard(tracks: readonly RoutedTrack[]): InstrumentPlan {
+  const slots: Slot[] = [
+    { instance: 0, tier: 'lower', tracks: [], intervals: [] },
+    { instance: 0, tier: 'upper', tracks: [], intervals: [] },
+  ];
+  const ordered = [...tracks].sort((a, b) =>
+    Number(fitsUpperTier(a)) - Number(fitsUpperTier(b)) || a.firstNote - b.firstNote || a.index - b.index,
+  );
+  const assignments = ordered.map((track): TrackAssignment => {
+    const intervals = soundingIntervals(track);
+    const usable = fitsUpperTier(track) ? slots : [slots[0]];
+    const target = usable.reduce((best, candidate) => {
+      const difference = overlapSeconds(candidate.intervals, intervals) - overlapSeconds(best.intervals, intervals);
+      return difference < 0 || (difference === 0 && candidate.tracks.length < best.tracks.length) ? candidate : best;
+    });
+    target.tracks.push(track);
+    target.intervals.push(intervals);
+    return { track, instance: 0, tier: target.tier };
+  });
+  return {
+    type: 'keyboard', count: 1, assignments,
+    peakTogether: peakSoundingTogether(tracks).peak,
+    reason: `${tracks.length} 条声部合并到一台双层键盘，按音域和重叠分层；原曲音频独立播放`,
+  };
+}
+
 function planType(
   type: BandInstrumentType,
   tracks: readonly RoutedTrack[],
   diagnostics: string[],
 ): InstrumentPlan {
+  if (type === 'keyboard') return planKeyboard(tracks);
   if (type === 'drums' || type === 'bass') {
     const assignments = tracks.map((track) => ({ track, instance: 0, tier: null as null }));
     return {
@@ -178,52 +205,33 @@ function planType(
 
   const { peak, at } = peakSoundingTogether(tracks);
   const count = Math.max(1, Math.min(MAX_PER_TYPE, Math.ceil(peak / TRACKS_PER_PLAYER)));
-  const isKeyboard = type === 'keyboard';
 
   // First fit: walk tracks in start order and drop each into the earliest slot it can occupy.
-  // A slot is one player — for the keyboard that is one manual, so a keyboard offers two.
+  // A slot is one player; keyboard layers are handled separately above.
   const slots: Slot[] = [];
   const crowded: Array<{ track: RoutedTrack; instance: number; tier: 'lower' | 'upper' | null }> = [];
   const openInstance = (): void => {
     const instance = slots.length ? Math.max(...slots.map((slot) => slot.instance)) + 1 : 0;
-    if (isKeyboard) {
-      slots.push({ instance, tier: 'lower', tracks: [], intervals: [] });
-      slots.push({ instance, tier: 'upper', tracks: [], intervals: [] });
-    } else {
-      slots.push({ instance, tier: null, tracks: [], intervals: [] });
-    }
+    slots.push({ instance, tier: null, tracks: [], intervals: [] });
   };
   openInstance();
 
-  // Most constrained first. A part that cannot sit on the upper tier has to claim a lower slot
-  // before parts that could go anywhere take it; otherwise an unconstrained part parks downstairs
-  // and forces an extra keyboard onto the stage for no reason.
-  const ordered = [...tracks].sort((a, b) => {
-    if (isKeyboard) {
-      const constraint = Number(fitsUpperTier(a)) - Number(fitsUpperTier(b));
-      if (constraint !== 0) return constraint;
-    }
-    return a.firstNote - b.firstNote;
-  });
+  const ordered = [...tracks].sort((a, b) => a.firstNote - b.firstNote);
   const assignments: TrackAssignment[] = [];
   for (const track of ordered) {
     const intervals = soundingIntervals(track);
-    const fits = (candidate: Slot): boolean =>
-      !(isKeyboard && candidate.tier === 'upper' && !fitsUpperTier(track));
-
-    let target = slots.find((candidate) => fits(candidate) && !collidesWithSlot(candidate.intervals, intervals));
+    let target = slots.find((candidate) => !collidesWithSlot(candidate.intervals, intervals));
 
     if (!target) {
       const nextInstance = slots.length ? Math.max(...slots.map((slot) => slot.instance)) + 1 : 0;
       if (nextInstance < MAX_PER_TYPE) {
         openInstance();
-        target = isKeyboard ? slots[slots.length - 2] : slots[slots.length - 1];
+        target = slots[slots.length - 1];
       } else {
         // The cap is reached. Rather than stand another one on stage, the part shares a slot with
         // whichever player is already least busy during it — the instrument plays what it can
         // reach and drops the rest, which is what a real player does with an impossible part.
-        const usable = slots.filter(fits);
-        target = usable.reduce((best, candidate) =>
+        target = slots.reduce((best, candidate) =>
           overlapSeconds(candidate.intervals, intervals) < overlapSeconds(best.intervals, intervals)
             ? candidate
             : best,
@@ -251,9 +259,7 @@ function planType(
     );
   }
 
-  const reason = isKeyboard
-    ? `一台琴两层，同时最多 ${peak} 条轨（${at.toFixed(0)}s 起）`
-    : `同时最多 ${peak} 条轨在响（${at.toFixed(0)}s 起），一件最多承担 ${TRACKS_PER_PLAYER} 条`;
+  const reason = `同时最多 ${peak} 条轨在响（${at.toFixed(0)}s 起），一件最多承担 ${TRACKS_PER_PLAYER} 条`;
 
   return { type, count: Math.max(count, used), reason, peakTogether: peak, assignments };
 }
@@ -268,12 +274,6 @@ export function planBand(routed: readonly RoutedTrack[]): BandPlan {
     instruments.push(planType(type, tracks, diagnostics));
   }
 
-  const single = routed.filter((track) => track.notes.length <= 2);
-  for (const track of single) {
-    diagnostics.push(
-      `轨 ${track.index}（${track.name}）只有 ${track.notes.length} 个音，可能是占位或杂物，仍按 ${track.type} 处理`,
-    );
-  }
 
   return {
     instruments,

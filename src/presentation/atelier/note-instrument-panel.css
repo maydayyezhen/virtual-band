@@ -1,0 +1,8 @@
+.note-instrument-panel { position: fixed; right: 20px; bottom: 100px; z-index: 20; max-width: min(380px, calc(100vw - 40px)); padding: 15px 18px; box-sizing: border-box; border: 1px solid #bba66b44; border-radius: 10px; color: #ded8c9; background: #10171be8; font: 12px/1.6 system-ui, sans-serif; backdrop-filter: blur(16px); }
+.note-instrument-panel[hidden] { display: none; }
+.note-instrument-panel strong { color: #cbb581; font-size: 11px; letter-spacing: 2px; }
+.note-instrument-panel div { display: flex; gap: 7px; margin-top: 10px; }
+.note-instrument-panel button { min-height: 36px; padding: 4px 15px; border: 1px solid #bba66b55; border-radius: 5px; background: transparent; color: inherit; cursor: pointer; }
+.note-instrument-panel button:hover, .note-instrument-panel button[aria-pressed="true"] { background: #bba66b25; color: #efdbac; }
+.note-instrument-panel button:focus-visible { outline: 2px solid #e2c784; outline-offset: 3px; }
+.note-instrument-panel p { margin: 10px 0 0; color: #b4b9b9; }

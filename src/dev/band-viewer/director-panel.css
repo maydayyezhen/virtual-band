@@ -1,0 +1,12 @@
+.band-director { border-top: 1px solid #c8d8e225; margin-top: 12px; padding-top: 10px; max-width: 410px; }
+.band-director label { display: flex; align-items: center; gap: 7px; min-height: 38px; }
+.band-director input { accent-color: #c4decf; width: 16px; height: 16px; }
+.band-director select { width: 100%; margin: 5px 0 8px; }
+.band-director span { display: block; margin-top: 7px; color: #b5c7d1; font-size: 12px; }
+.band-title-previews { display: flex; gap: 8px; flex-wrap: wrap; }
+.band-title-previews button { min-height: 36px; }
+.band-title-previews button:focus-visible { outline: 2px solid #aed9ff; outline-offset: 3px; }
+.concert-watch .band-camera, .concert-watch .mb-bar, .concert-watch .mb-hint { display: none; }
+.concert-watch-exit { display: none; position: fixed; top: 12px; right: 12px; z-index: 50; border: 1px solid #ffffff35; border-radius: 8px; background: #111820c9; color: #dae6ee; padding: 9px 12px; cursor: pointer; }
+.concert-watch .concert-watch-exit { display: block; }
+.concert-watch-exit:focus-visible { outline: 2px solid #aed9ff; outline-offset: 3px; }

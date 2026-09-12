@@ -1,175 +1,78 @@
 # Virtual Band V2 Architecture
 
-## Goal
+## Current runtime (2026-09-11)
 
-V2 is a clean application, not a refactor of the old runtime. The old branch and frozen donor files are sources of reusable modeling / animation algorithms and authored visual behavior.
+The instrument library (`VirtualBandApp`), band viewer and layout editor remain separate page hosts. Shared responsibilities belong to modules, not copied page setup code:
 
-## Composition root
-
-`VirtualBandApp` is the only place allowed to wire top-level systems together.
-
-```text
-VirtualBandApp
-├── RendererHost
-├── Engine
-├── Transport
-├── AudioEngine
-├── SampleLibrary
-├── Sf2BankLibrary
-├── instrument audio backends
-├── InstrumentRegistry
-├── InstrumentInteractionSystem
-├── VenueManager
-├── CameraRegistry / CameraSystem
-├── PresentationManager
-├── ShowcaseSwitchController
-├── ShowScheduler
-├── ControlArbiter
-└── AppState
-```
-
-`Sf2BankLibrary` and the SF2 backends are part of the V2 runtime. Samplers prefer SF2 when the shared bank is ready and retain the existing MP3 path as fallback.
-
-## Non-negotiable rules
-
-1. **One frame loop.** Only `Engine` owns `requestAnimationFrame` for simulation/rendering. Venue, presentation, camera, lighting, screens, instruments and editors expose `update()` instead of starting their own loops.
-2. **One transport clock.** Song time comes from `Transport`. DOM progress bars, camera modules and venue modules never infer playback time independently. Presentation-only demos consume Engine `dt`; they do not create another RAF or wall-clock loop.
-3. **Stable entity IDs.** Systems address instruments by IDs such as `drums.main`, `keyboard.main`, `violin.main`, `electric.main`, `acoustic.main` or `bass.main`. Object names are labels, not identity or routing logic.
-4. **Venues are first-class.** `atelier-studio`, `empty-stage`, `nocturne` and future stages implement the same `Venue` interface. A Venue owns environment, fog, floor, fixed lighting, renderer profile and spatial layout.
-5. **One camera system.** Presentation modes, manual control, editor, auto director and Agent command `CameraSystem`; none creates a second output camera or a second render loop.
-6. **Presentation is separate from Venue.** A Venue answers “where and under what light”; a PresentationMode answers “how the user observes and interacts with it”. Atelier showcase modes own orbit/pan/zoom/play gesture behavior without owning saved camera assets, the renderer or the output camera.
-7. **Saved camera views belong to CameraRegistry.** Venue views use world coordinates. Instrument views use instrument-local coordinates and may include authored orbit/framing data.
-8. **3D picking is a service, not gesture ownership.** `InstrumentInteractionSystem` owns the shared raycast and dispatches start/end interactions. Instruments may map the nearest intersection to stable part IDs through `resolveHit()`.
-9. **Single-instrument showcase selection is explicit.** `ShowcaseSwitchController` chooses only the visible registered instrument and active `PresentationMode`; it does not own cameras, audio, Venue state or instrument behavior.
-10. **Show control is arbitrated.** Camera / lighting / screen writers acquire channel ownership through `ControlArbiter`; priority is explicit instead of systems repeatedly overwriting each other.
-11. **UI is optional.** Runtime systems never query or mutate UI DOM.
-12. **No runtime monkey patches.** Do not patch Three.js prototypes, `renderer.render`, venue APIs or unrelated systems to steal ownership.
-13. **No load-order architecture.** Dependencies are explicit ES modules; frozen donor chunks are loaded only inside narrow legacy adapters and never expose runtime globals.
-
-## Atelier donor parity boundary
-
-The GPT-generated Atelier instrument HTML files are treated as golden references for instrument geometry, materials and authored mechanical animation. Their reusable responsibilities are separated rather than bundled into standalone pages:
+- `BandAudioGraph`: host AudioContext/master bus and shared free-play audio resources.
+- `SpessaSynthEngine`: SpessaSynth worklet/SoundFont lifecycle, used by MIDI and free play.
+- `MidiPlayback`: original MIDI bytes, native sequencer, playback clock, pause/seek/stop.
+- `LiveAudioEngine`: independent, recycled MIDI channel leases for live instrument instances.
+- `InstrumentDefinitions`: one catalog of model, sound-port adapter, camera templates and interaction mode per type.
+- `InstrumentRegistry`: unique instance identity, ownership of scene roots and disposal.
+- `InstrumentInteractionSystem`: shared raycast, part resolution and gesture dispatch.
+- `CameraRegistry` / `CameraSystem`: named views, finite camera transitions and one output camera.
+- `OrbitController`: shared orbit/pan/zoom and preset handoff for the stage and all six showcase modes.
+- `FreeCameraController`: horizontal/vertical venue roaming, drag/pan/FOV zoom and optional native Three.js mouse-look.
+- `PresentationManager`: active interaction mode; band `StageDirector` owns the exclusive stage/showcase/spectator mode and frame handoff.
+- `RendererHost`: renderer and an explicit, disposable scene-render-pass attachment.
+- `NocturneVenue`: independent scene assets, venue-owned layout/camera bounds, explicit update and disposal. Both stage and editor use it directly.
+- `BandSession`: prepares and validates ID-based layouts before application; startup, MIDI replacement and saved layouts share the host's `mountBand` commit path.
 
 ```text
-Frozen donor geometry/controller
-        ↓
-legacy*Asset adapter
-        ↓
-Instrument adapter ───────→ sampler / AudioEngine
-        ↓
-AtelierStudioVenue
-        ↓
-CameraRegistry
-        ↓
-Atelier*ShowcaseMode
-        ↓
-CameraSystem
+Original MIDI ──> MidiPlayback / SpessaSynth Sequencer ──> audio
+                          │ native playback clock
+                          v
+@tonejs/midi ──> band plan ──> VisualPerformance ──> silent model animation
+
+User gesture ──> Instrument ──> InstrumentAudio port ──> LiveAudioEngine ──> audio
 ```
 
-The drum kit uses `DrumsInstrument + DrumSampler`; the dual stage keyboard uses `KeyboardInstrument + KeyboardSampler`; the violin uses `ViolinInstrument + ViolinSampler`; the electric guitar uses `ElectricGuitarInstrument + ElectricGuitarSampler`; the acoustic guitar uses `AcousticGuitarInstrument + AcousticGuitarSampler`; the four-string bass uses `BassInstrument + BassSampler`.
+The live and file paths share the same synthesis implementation, with separate synthesizer state. Song reset/program/controller/SysEx events must not change live channels. Visual planning never reconstructs the audio MIDI stream or schedules sound from render frames. The legacy `Transport` is not the MIDI song clock.
 
-Donor geometry remains intact. Differences in donor coordinate systems are normalized only through Atelier Venue layout transforms, so the common studio environment stays fixed while each instrument keeps its authored local geometry and local camera views.
+## Instrument instances
 
-The violin keeps the donor's four physical strings, continuous fretless fingerboard positioning, independent string vibration, bow engagement, adjacent-string double-stop bow logic, vibrato, pitch-bend animation and arco/pizzicato articulation state. The electric guitar keeps six independently animated strings, 22-fret fingering, pick animation, tremolo/pitch-bend motion, sustain state, volume/tone/pickup controls and delayed down/up strum controller. The acoustic guitar keeps the authored spruce/rosewood model and 20-fret geometry while its V2 adapter adds six dynamic playable strings, fretting markers, animated plectrum motion, pitch-bend deformation and delayed down/up strum behavior. The bass keeps the authored four-string Jazz-style model and five local camera views while its adapter adds 21-fret fingering, persistent per-string markers, independent low-frequency string vibration and E1/A1/D2/G2 physical-string routing.
+A type definition supplies a model builder, live audio adapter, authored camera templates and a mode factory. A stage member is an instance descriptor such as `{ id: 'keyboard.2', type: 'keyboard' }`. Hosts use `createInstrumentInstance` and register every resulting object. Repeating a type does not require a second type-specific setup path.
 
-Audio compatibility may intentionally cover a wider set of programs than the current authored geometry. The current acoustic model is visually a steel-string guitar: GM 25 Steel is aligned with that model, while GM 24 Nylon is an audio-compatibility mode using the same visual asset. See `docs/INSTRUMENT_FIDELITY.md`.
+- Assign IDs before registration; each registered root has one owner.
+- Picking resolves the registered owner of the intersected mesh. A cloned mesh's old `userData.instrumentId` is not authoritative.
+- Camera templates use local coordinates and are copied/rebound to `${instanceId}:${viewName}`.
+- Modes use `${instanceId}:showcase` and resolve their own instance's views.
+- Instances own their sound ports; disposal releases channel leases and model resources. The host owns the synthesizer and AudioContext.
+- The initial instrument library still has six authored showcase controls. The band viewer accepts a list with multiple instances of every supported type. Adding a new type requires an implementation in the catalog, not merely a new name.
 
-## Audio backend boundary
+## Audio boundary
 
-Audio receives the same semantic note events as visual animation. Mouse, computer keyboard, presentation demos and future MIDI routing converge on instrument APIs instead of maintaining separate sound and animation paths.
+`InstrumentAudio.ts` declares small semantic ports for keyboard tiers, strings/articulation and percussion. Models do not import a concrete sampler or SF2 backend. `LiveInstrumentAudio` maps these gestures to native MIDI commands; SpessaSynth owns SoundFont parsing, sample playback, envelopes, effects, sustain and bends.
 
-The ownership layers are:
+A keyboard gets independent tier channels; a guitar/bass gets independent string channels; violin uses bowed and pizzicato channels; a drum kit gets a percussion channel. Channels are recycled with fresh program/controller state. Source ownership prevents releasing one held keyboard source from stopping another source at the same pitch. Audio release does not depend on a model fingering potentially overwritten by MIDI animation.
 
-```text
-Instrument adapter
-        ↓ semantic note / articulation / gesture
-Sampler
-        ↓ instrument policy
-Audio backend
-   ├── SF2 path (preferred)
-   └── MP3 sample path (fallback)
-        ↓
-AudioEngine
-```
+The old `SampleLibrary`, samplers and `audio/sf2` implementation remain available to calibration/development tools. They are outside the library/band runtime graph. Those tools' custom mix/EQ/effect profiles do not tune the new engine. GM has no physical pickup selector; the existing pickup control maps approximately to native brightness.
 
-`SampleLibrary` owns MP3 path construction support, fetch/decode and decoded-buffer caching. Samplers own instrument-specific program, articulation, sustain, pitch, tone/effect, gesture and voice semantics.
+See [MIDI_PLAYBACK.md](MIDI_PLAYBACK.md) for native seek behavior, exact boundaries and browser checks. Full GM/GS/XG conformance is not asserted.
 
-`Sf2BankLibrary` owns shared SoundFont fetch/parse work; `Sf2Synth` owns SoundFont voice DSP; `ProgramToneBackend`/specialized sustain backends form the sampler-facing boundary. Parser and synth code must not know about Three.js donors, camera state or UI.
+## Preserved visual assets
 
-Performance profiles are intentionally above the parser/synth layer:
+Frozen Atelier donors remain geometry/material/mechanical-animation references, accessed through narrow `legacy*Asset` adapters. Instruments own local models; venue/layout code applies stage transforms. Existing physical fingerings, strum gestures, bow animations and local camera composition are retained. Visual constraints may simplify a score; they cannot remove notes from audio playback.
 
-```text
-SoundFont generators
-        ↓
-Sf2Parser / Sf2Synth
-        ↓
-ProgramToneBackend performance profile
-        ↓
-Sampler gesture policy
-```
+Venues supply environment and placement constraints. Presentation supplies orbit/pan/zoom and playing gestures. Saved views belong to CameraRegistry. NOCTURNE attaches through `RendererHost.setSceneRenderPass`; `NocturneAsset.js` is a static, instance-local procedural visual asset behind a typed interface. It has no page bootstrap, window bridge, decompression, source-string patching, camera controller or private RAF. Editor panning uses an explicit camera/target API.
 
-This allows instrument-specific brightness, velocity/filter response and gesture ring ceilings without corrupting SoundFont generator semantics or introducing 3D/audio coupling. Detailed experimental audio semantics are documented in `docs/SF2_AUDIO_ENGINE.md`.
+Automatic placement uses `Formation.ts`: explicit venue space + instance occupancy and placement roles → complete concert formation → collision adjustment. `AutoLayout` adapts saved documents and measured geometry; `validateLayout` checks exact saved poses separately. MIDI roster changes reflow automatic positions while preserving explicit locks, model identity, rotation and scale. The core imports no venue implementation, instrument catalog or renderer. See [FORMATION.md](FORMATION.md).
 
-Atelier starts audio warmup in parallel with donor/model setup. A future formal song-playback path should derive exact Program + Note requirements from the loaded MIDI and await required audio readiness before starting `Transport`.
+Song lighting has a separate boundary: original MIDI → `MusicAnalysis` + beat-indexed `SectionShow` → complete `LightingFrame` → the venue's exclusive `LightingPort`. `LightingSession` runs from the existing playback clock and releases control back to the decorative look. `ConcertShow` provides reusable patterns so a song can be a section table, demonstrated by `shows/BohemianRhapsody.ts`. The venue owns optional pixels/gobos and a six-slot surface-light pool. Screens and cameras are excluded from lighting frames. See [LIGHTING_SYSTEM.md](LIGHTING_SYSTEM.md).
 
-## Data direction
+## Working rules and remaining work
 
-```text
-MIDI file
-   ↓
-MidiParser
-   ↓
-Song
-   ↓
-Transport
-   ↓
-SongAnalysis
-   ↓
-ShowPlan
-   ↓
-ShowScheduler
-   ↓
-ControlArbiter
-   ├── CameraSystem
-   ├── LightingChannel
-   └── ScreenChannel
-```
+Each host owns its frame loop. Modules expose update/dispose instead of starting extra RAF loops. Song time comes from the native sequencer; DOM and renderer time are not audio clocks. Keep rendering, audio and camera dependencies explicit, with no runtime monkey patches or load-order globals.
 
-Audio routing is driven by the same Song/Transport semantic events, but the audio backend does not own song time.
+LED sources use a parallel boundary: `ScreenContent.create` returns a media/canvas/texture player; `ScreenSession` supplies song or local time and owns loading/cancellation/disposal. `NocturneVenue.screens` grants per-screen display leases and restores the default hardware state. `ScreenAudioTap` reads the existing mix without owning playback. See [SCREEN_CONTENT.md](SCREEN_CONTENT.md).
 
-## Migration policy
+`src/shows/catalog.ts` composes lighting and screen arrangements from one `MusicAnalysis`, matching exact MIDI bytes. The Bohemian theatre is a regular `ScreenContent` with extracted, instance-owned Canvas artwork and deterministic absolute-time motion. `SongScreens` releases song-owned screens by content object identity; manual replacements remain independent. The catalogue coordinates preparation, not rendering or camera control.
 
-The following may be reimplemented from old code after clean interfaces exist:
+The authored instrument controllers and six presentation modes still contain substantial instrument-specific behavior. This change centralizes assembly and instance ownership; it does not claim a full rewrite of those internals. `ShowScheduler` and `ControlArbiter` remain groundwork for future coordinated shows and do not own current MIDI playback.
 
-- procedural instrument geometry;
-- instrument animation/controller algorithms;
-- Standard MIDI parsing and GM routing logic;
-- authored studio/stage environment, lighting and camera behavior;
-- NOCTURNE authored stage assets and fixture/screen behavior;
-- lighting/LED look-development and song-specific cue ideas.
+Future changes should remain runnable in stages. Validate with typecheck/build, visual timeline checks, layout checks and Chrome behavior tests after the last relevant edit.
 
-The following must not be copied into V2 runtime:
+The band viewer is the primary integration page. See [CAMERA_SYSTEM.md](CAMERA_SYSTEM.md) for camera responsibilities and verification.
 
-- old `app.js`;
-- camera capture/runtime bridges;
-- renderer or Three.js monkey patches;
-- independent venue clocks;
-- LED ownership guards;
-- UI-sync patches;
-- DOM-derived playback clocks;
-- bootstrap-script dependency chains.
-
-## Build sequence
-
-1. Runtime skeleton and first-class Venue/Presentation ownership.
-2. Migrate donor instruments behind the common `Instrument` boundary.
-3. MIDI `Song` model + parser + audio-backed Transport.
-4. Complete InstrumentRegistry and venue layouts.
-5. Camera interaction/editor on top of CameraRegistry / CameraSystem / PresentationManager.
-6. Reintegrate NOCTURNE behind the Venue interface.
-7. SongAnalysis + ShowPlan + lighting/screen channels.
-8. Practice/free-play features and production UI when needed.
-
-Future experimental audio-engine work may proceed on separate branches, but promotion into `architecture-v2` requires a clean, reviewed boundary and passing build/behavior validation.
-
-Each milestone must remain directly runnable before moving to the next one.
+See [BAND_MAINLINE_PLAN.md](BAND_MAINLINE_PLAN.md) for the delivered venue/layout boundaries and remaining work. Song lighting and the reference theatre are connected through independent ports. Automatic camera control remains outside this integration.

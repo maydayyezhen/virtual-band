@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { BassSampler } from '../../audio/BassSampler';
+import type { BassAudio } from '../../audio/InstrumentAudio';
 import { DEFAULT_BASS_PROGRAM, getBassProgram, type BassProgramId } from '../../audio/BassProgram';
 import type { Instrument, InstrumentFrameResult, InstrumentInteraction } from '../Instrument';
 import {
@@ -48,6 +48,7 @@ export class BassInstrument implements Instrument {
   setInstanceId(value: string): void {
 
     this.instanceId = value;
+    this.root.userData.instrumentId = value;
 
   }
   readonly role = 'bass';
@@ -56,14 +57,14 @@ export class BassInstrument implements Instrument {
 
   private readonly model: LegacyBassModel;
   private readonly controller: LegacyBassController;
-  private readonly sampler: BassSampler;
+  private readonly sampler: BassAudio;
   private readonly fingeringState = new StringFingeringState(STRING_ORDER, 21);
   private readonly interactionVoices = new Map<string, InteractionVoice>();
   private readonly previewMarker: THREE.Mesh;
   private fingeringPreview: { stringNumber: number; fret: number } | null = null;
   private pendingDirectPluckString: number | null = null;
 
-  private constructor(model: LegacyBassModel, controller: LegacyBassController, sampler: BassSampler) {
+  private constructor(model: LegacyBassModel, controller: LegacyBassController, sampler: BassAudio) {
     this.model = model;
     this.controller = controller;
     this.sampler = sampler;
@@ -76,7 +77,7 @@ export class BassInstrument implements Instrument {
     this.syncFingeringMarkers();
   }
 
-  static async create(sampler: BassSampler): Promise<BassInstrument> {
+  static async create(sampler: BassAudio): Promise<BassInstrument> {
     let instrument: BassInstrument | null = null;
     const { model, controller } = await buildLegacyBassAsset({
       onHit: (event) => instrument?.playAudio(event),
@@ -86,16 +87,23 @@ export class BassInstrument implements Instrument {
     return instrument;
   }
 
+  private visualOnly = false;
+
+  visualNoteOn(note: number, velocity: number): void {
+    this.visualOnly = true;
+    try { this.controller.api.noteOn(note, velocity); }
+    finally { this.visualOnly = false; }
+  }
+
+  visualNoteOff(note: number): void { this.controller.api.noteOff(note); }
+
   noteOn(note: number, velocity: number): void {
     this.controller.api.noteOn(note, velocity);
   }
 
   noteOff(note: number): void {
-    const strings = this.controller.api.getFingering()
-      .filter((fingering) => fingering.note === note)
-      .map((fingering) => fingering.string);
-    if (!this.controller.api.noteOff(note)) return;
-    for (const stringNumber of strings) this.sampler.noteOff(stringNumber);
+    this.controller.api.noteOff(note);
+    this.sampler.noteOffPitch(note);
   }
 
   pluck(stringNumber: number, velocity = 100, fret = 0): LegacyBassHitEvent | false {
@@ -280,6 +288,7 @@ export class BassInstrument implements Instrument {
   }
 
   private playAudio(event: LegacyBassHitEvent): void {
+    if (this.visualOnly) return;
     this.sampler.noteOn(event.string, event.note, event.velocity, this.pendingDirectPluckString === event.string ? 'pluck' : 'gated');
   }
 

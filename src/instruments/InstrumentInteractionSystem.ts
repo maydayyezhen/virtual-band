@@ -66,24 +66,16 @@ export class InstrumentInteractionSystem {
       .find((hit) => isRenderedVisible(hit.object));
     if (!intersection) return null;
 
+    const instrument = this.instruments.ownerOf(intersection.object);
+    if (!instrument || (instrumentId && instrument.id !== instrumentId)) return null;
+    const resolvedInstrumentId = instrument.id;
     let node: THREE.Object3D | null = intersection.object;
     let partId: string | null = null;
-    let resolvedInstrumentId: string | null = null;
-
     while (node) {
       if (!partId && typeof node.userData.hit === 'string') partId = node.userData.hit;
-      if (typeof node.userData.instrumentId === 'string') {
-        resolvedInstrumentId = node.userData.instrumentId;
-        break;
-      }
+      if (node === instrument.root) break;
       node = node.parent;
     }
-
-    if (!resolvedInstrumentId) return null;
-    if (instrumentId && resolvedInstrumentId !== instrumentId) return null;
-
-    const instrument = this.instruments.get(resolvedInstrumentId);
-    if (!instrument) return null;
     if (!partId && instrument.resolveHit) partId = instrument.resolveHit(intersection);
     if (!partId) return null;
 

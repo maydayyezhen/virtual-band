@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/svg+xml" href="/virtual-band-icon.svg" />
+  <title>Atelier · 大提琴样板</title>
+</head>
+<body>
+  <main id="study-stage" aria-label="乐器三维展台"></main>
+  <aside class="study-panel">
+    <p class="eyebrow">ATELIER / INSTRUMENT STUDY</p>
+    <h1>大提琴样板</h1>
+    <p class="intro">先看轮廓、结构和材质。与现有小提琴共用灯光，保持真实尺寸比例。</p>
+    <fieldset id="subjects"><legend>查看对象</legend>
+      <button type="button" data-subject="cello" aria-pressed="true">大提琴</button>
+      <button type="button" data-subject="violin" aria-pressed="false">小提琴基准</button>
+      <button type="button" data-subject="compare" aria-pressed="false">并排对比</button>
+    </fieldset>
+    <fieldset id="materials"><legend>表面</legend>
+      <button type="button" data-material="finish" aria-pressed="true">木材与漆面</button>
+      <button type="button" data-material="clay" aria-pressed="false">白模</button>
+    </fieldset>
+    <fieldset id="views"><legend>观察位置</legend>
+      <button type="button" data-view="three-quarter">整体</button>
+      <button type="button" data-view="front">正面</button>
+      <button type="button" data-view="side">侧面</button>
+      <button type="button" data-view="back">背面</button>
+      <button type="button" data-view="scroll">琴头</button>
+      <button type="button" data-view="bridge">琴桥</button>
+      <button type="button" data-view="body">琴身</button>
+      <button type="button" data-view="bow">琴弓</button>
+      <button type="button" data-view="bow-frog">弓根</button>
+      <button type="button" data-view="bow-tip">弓尖</button>
+    </fieldset>
+    <p class="hint">拖动旋转 · 滚轮缩放 · 右键平移</p>
+    <p id="study-status" role="status">正在准备模型…</p>
+  </aside>
+  <div class="study-caption"><span id="study-label">CELLO</span><span>静态模型检查 · 演奏已接入乐队舞台</span></div>
+  <script type="module" src="/src/dev/cello-study/main.ts"></script>
+</body>
+</html>

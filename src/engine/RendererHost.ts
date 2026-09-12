@@ -7,6 +7,12 @@ export interface RendererViewport {
   aspect: number;
 }
 
+export interface SceneRenderPass {
+  /** Return true when the pass rendered the frame. */
+  render(camera: THREE.Camera): boolean;
+  dispose(): void;
+}
+
 export class RendererHost {
   readonly scene = new THREE.Scene();
   readonly renderer: THREE.WebGLRenderer;
@@ -18,6 +24,7 @@ export class RendererHost {
   private pixelRatioProfile: VenueSceneProfile['pixelRatio'] = { desktopMax: 2 };
   private environmentTarget: THREE.WebGLRenderTarget | null = null;
   private environmentSource: THREE.Texture | null = null;
+  private scenePass: SceneRenderPass | null = null;
 
   constructor(mount: HTMLElement) {
     this.mount = mount;
@@ -89,11 +96,19 @@ export class RendererHost {
     if (this.renderer.shadowMap.enabled) this.renderer.shadowMap.needsUpdate = true;
   }
 
+  setSceneRenderPass(pass: SceneRenderPass): void {
+    this.scenePass?.dispose();
+    this.scenePass = pass;
+  }
+
   render(camera: THREE.Camera): void {
+    if (this.scenePass?.render(camera)) return;
     this.renderer.render(this.scene, camera);
   }
 
   dispose(): void {
+    this.scenePass?.dispose();
+    this.scenePass = null;
     this.disposeEnvironment();
     this.renderer.dispose();
     this.renderer.domElement.remove();

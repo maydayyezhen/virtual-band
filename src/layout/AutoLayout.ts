@@ -1,96 +1,56 @@
-import {
-  cloneLayout,
-  getInstrumentDefinition,
-  type LayoutDocument,
-  type LayoutInstrumentInstance,
-  type LayoutInstrumentType,
-  type LayoutRole,
-} from './LayoutDocument.ts';
+import { cloneLayout, getInstrumentDefinition, type LayoutDocument, type LayoutInstrumentInstance } from './LayoutDocument.ts';
+import type { StageLayout } from '../venues/StageLayout.ts';
+import { arrangeFormation, validateFormation, type FormationMember } from './Formation.ts';
 
-export interface InstrumentFootprint {
-  width: number;
-  depth: number;
+export interface InstrumentFootprint { width: number; depth: number }
+export type InstrumentFootprints = Partial<Record<string, InstrumentFootprint>>;
+export interface LayoutResult { layout: LayoutDocument; unplaced: string[]; issues: string[] }
+export interface ArrangeOptions { stage: StageLayout; lockedIds?: ReadonlySet<string> }
+
+/** Rotated, conservative occupation rectangle: measured geometry plus room to perform. */
+export function occupation(instance: LayoutInstrumentInstance, footprints: InstrumentFootprints): InstrumentFootprint {
+  const measured = footprints[instance.id] ?? footprints[instance.type];
+  if (!measured || ![measured.width, measured.depth].every(n => Number.isFinite(n) && n > 0)) throw new Error(`自动排布缺少 ${instance.id} 的有效尺寸`);
+  const space = getInstrumentDefinition(instance.type).space;
+  const width = Math.max(measured.width, space.width) * instance.transform.scale;
+  const depth = Math.max(measured.depth, space.depth) * instance.transform.scale;
+  const c = Math.abs(Math.cos(instance.transform.rotation[1])), s = Math.abs(Math.sin(instance.transform.rotation[1]));
+  return { width: c * width + s * depth, depth: s * width + c * depth };
 }
 
-export type InstrumentFootprints = Record<LayoutInstrumentType, InstrumentFootprint>;
-
-interface PackedItem {
-  instance: LayoutInstrumentInstance;
-  width: number;
-  depth: number;
+/** Adapt the application catalog/document into renderer-independent formation descriptions. */
+function describe(source: LayoutDocument, footprints: InstrumentFootprints, lockedIds?: ReadonlySet<string>): FormationMember[] {
+  return source.instances.map(instance => {
+    if (!Number.isFinite(instance.transform.scale) || instance.transform.scale <= 0 || ![...instance.transform.position, ...instance.transform.rotation].every(Number.isFinite)) throw new Error(`${instance.id} 变换无效`);
+    if (Math.abs(instance.transform.rotation[0]) > 1e-6 || Math.abs(instance.transform.rotation[2]) > 1e-6) throw new Error(`${instance.id} 仅支持水平旋转`);
+    return { id: instance.id, ...occupation(instance, footprints), role: getInstrumentDefinition(instance.type).placement,
+      position: { x: instance.transform.position[0], z: instance.transform.position[2] }, locked: !!instance.locked || !!lockedIds?.has(instance.id) };
+  });
 }
 
-const MAX_ROW_WIDTH = 7.2;
-const ITEM_GAP = 0.38;
-const ROW_GAP = 0.5;
-
-export function autoArrangeLayout(
-  source: LayoutDocument,
-  footprints: InstrumentFootprints,
-): LayoutDocument {
-  const document = cloneLayout(source);
-  const backline = document.instances.filter((instance) => roleOf(instance) === 'backline');
-  const frontline = document.instances.filter((instance) => roleOf(instance) === 'frontline');
-
-  placeRows(packRows(backline, footprints), -1.45, -1);
-  placeRows(packRows(frontline, footprints), 0.72, 1);
-  return document;
+export function validateLayout(source: LayoutDocument, footprints: InstrumentFootprints, stage: StageLayout): string[] {
+  if (source.venueId !== stage.venueId) return ['布局与当前场馆不匹配'];
+  try { return validateFormation(describe(source, footprints), stage); }
+  catch (error) { return [String(error)]; }
 }
 
-function packRows(
-  instances: LayoutInstrumentInstance[],
-  footprints: InstrumentFootprints,
-): PackedItem[][] {
-  const rows: PackedItem[][] = [];
-  let row: PackedItem[] = [];
-  let rowWidth = 0;
-
-  for (const instance of instances) {
-    const footprint = footprints[instance.type];
-    if (!footprint) {
-      throw new Error(
-        `自动排布缺少 ${instance.type} 的尺寸：请用一套包含全部六件乐器的编制测量 footprints，` +
-          `否则排布结果取决于谁先被量过`,
-      );
-    }
-    const item: PackedItem = {
-      instance,
-      width: Math.max(0.28, footprint.width * instance.transform.scale),
-      depth: Math.max(0.2, footprint.depth * instance.transform.scale),
-    };
-    const nextWidth = row.length === 0 ? item.width : rowWidth + ITEM_GAP + item.width;
-    if (row.length > 0 && nextWidth > MAX_ROW_WIDTH) {
-      rows.push(row);
-      row = [];
-      rowWidth = 0;
-    }
-    row.push(item);
-    rowWidth = row.length === 1 ? item.width : rowWidth + ITEM_GAP + item.width;
+/** Pure planning: failed layouts never mutate the source document or the live scene. */
+export function arrangeLayout(source: LayoutDocument, footprints: InstrumentFootprints, options: ArrangeOptions): LayoutResult {
+  if (!options?.stage) throw new Error('自动编队必须显式提供场馆空间约束');
+  const layout = cloneLayout(source);
+  if (source.venueId !== options.stage.venueId) return { layout, unplaced: [], issues: ['布局与当前场馆不匹配'] };
+  let members: FormationMember[];
+  try { members = describe(source, footprints, options.lockedIds); }
+  catch (error) { return { layout, unplaced: [], issues: [String(error)] }; }
+  const result = arrangeFormation(members, options.stage);
+  if (!result.issues.length) for (const instance of layout.instances) {
+    const p = result.positions.get(instance.id)!;
+    instance.transform.position = [p.x, instance.transform.position[1], p.z];
   }
-  if (row.length) rows.push(row);
-  return rows;
+  return { layout, unplaced: result.unplaced, issues: result.issues };
 }
-
-function placeRows(rows: PackedItem[][], firstZ: number, direction: -1 | 1): void {
-  let z = firstZ;
-  for (const row of rows) {
-    const width = row.reduce((total, item) => total + item.width, 0) + ITEM_GAP * Math.max(0, row.length - 1);
-    const rowDepth = Math.max(...row.map((item) => item.depth));
-    let x = -width / 2;
-    for (const item of row) {
-      const definition = getInstrumentDefinition(item.instance.type);
-      item.instance.transform.position = [round(x + item.width / 2), 0, round(z)];
-      item.instance.transform.rotation = [0, definition.defaultYaw, 0];
-      x += item.width + ITEM_GAP;
-    }
-    z += direction * (rowDepth + ROW_GAP);
-  }
-}
-
-function roleOf(instance: LayoutInstrumentInstance): LayoutRole {
-  return getInstrumentDefinition(instance.type).role;
-}
-
-function round(value: number): number {
-  return Math.round(value * 1000) / 1000;
+export function autoArrangeLayout(source: LayoutDocument, footprints: InstrumentFootprints, options: ArrangeOptions): LayoutDocument {
+  const result = arrangeLayout(source, footprints, options);
+  if (result.issues.length) throw new Error(result.issues.join('；'));
+  return result.layout;
 }

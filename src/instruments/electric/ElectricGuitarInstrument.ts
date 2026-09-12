@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import type { ElectricGuitarSampler } from '../../audio/ElectricGuitarSampler';
+import { applyElectricVariant, type ElectricModelVariant } from './applyElectricVariant';
+import type { ElectricGuitarAudio } from '../../audio/InstrumentAudio';
 import {
   DEFAULT_ELECTRIC_GUITAR_PROGRAM,
   getElectricGuitarProgram,
@@ -54,15 +55,19 @@ export class ElectricGuitarInstrument implements Instrument {
   setInstanceId(value: string): void {
 
     this.instanceId = value;
+    this.root.userData.instrumentId = value;
 
   }
   readonly role = 'electric';
-  readonly label = 'Atelier · Volt Electric';
+  get label(): string {
+    return this.variant === 'flying-v' ? 'Atelier · Amber V'
+      : this.variant === 'single-cut' ? 'Atelier · Garnet Electric' : 'Atelier · Volt Electric';
+  }
   readonly root: THREE.Group;
 
   private readonly model: LegacyElectricModel;
   private readonly controller: LegacyElectricController;
-  private readonly sampler: ElectricGuitarSampler;
+  private readonly sampler: ElectricGuitarAudio;
   private readonly interactionVoices = new Map<string, InteractionVoice>();
   private readonly fingeringState = new StringFingeringState(STRING_ORDER, 22);
   private readonly previewMarker: THREE.Mesh;
@@ -73,7 +78,8 @@ export class ElectricGuitarInstrument implements Instrument {
   private constructor(
     model: LegacyElectricModel,
     controller: LegacyElectricController,
-    sampler: ElectricGuitarSampler,
+    sampler: ElectricGuitarAudio,
+    readonly variant: ElectricModelVariant,
   ) {
     this.model = model;
     this.controller = controller;
@@ -88,26 +94,34 @@ export class ElectricGuitarInstrument implements Instrument {
     this.syncFingeringMarkers();
   }
 
-  static async create(sampler: ElectricGuitarSampler): Promise<ElectricGuitarInstrument> {
+  static async create(sampler: ElectricGuitarAudio, variant: ElectricModelVariant = 'classic'): Promise<ElectricGuitarInstrument> {
     let instrument: ElectricGuitarInstrument | null = null;
     const { model, controller } = await buildLegacyElectricAsset({
       onHit: (event) => instrument?.playAudio(event),
     });
-    instrument = new ElectricGuitarInstrument(model, controller, sampler);
+    applyElectricVariant(model, variant);
+    instrument = new ElectricGuitarInstrument(model, controller, sampler, variant);
     instrument.setProgram(DEFAULT_ELECTRIC_GUITAR_PROGRAM);
     return instrument;
   }
+
+  private visualOnly = false;
+
+  visualNoteOn(note: number, velocity: number): void {
+    this.visualOnly = true;
+    try { this.controller.api.noteOn(note, velocity); }
+    finally { this.visualOnly = false; }
+  }
+
+  visualNoteOff(note: number): void { this.controller.api.noteOff(note); }
 
   noteOn(note: number, velocity: number): void {
     this.controller.api.noteOn(note, velocity);
   }
 
   noteOff(note: number): void {
-    const affectedStrings = [...this.model.strings.values()]
-      .filter((string) => string.held && string.note === note)
-      .map((string) => string.number);
-    if (!this.controller.api.noteOff(note)) return;
-    for (const stringNumber of affectedStrings) this.sampler.noteOff(stringNumber);
+    this.controller.api.noteOff(note);
+    this.sampler.noteOffPitch(note);
   }
 
   pluck(stringNumber: number, velocity = 100, fret = 0): LegacyElectricHitEvent | false {
@@ -367,6 +381,7 @@ export class ElectricGuitarInstrument implements Instrument {
 
   dispose(): void {
     this.reset();
+    this.sampler.dispose();
     this.root.removeFromParent();
 
     const geometries = new Set<THREE.BufferGeometry>();
@@ -391,6 +406,7 @@ export class ElectricGuitarInstrument implements Instrument {
   }
 
   private playAudio(event: LegacyElectricHitEvent): void {
+    if (this.visualOnly) return;
     const strum = this.pendingStrumHits[0] === event.string;
     if (strum) this.pendingStrumHits.shift();
     const directPluck = this.pendingDirectPluckString === event.string;

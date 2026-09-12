@@ -1,3 +1,5 @@
+import { createInstrumentLibrary } from '../instruments/InstrumentAssets';
+import { InstrumentAssetPanel } from './InstrumentAssetPanel';
 import * as THREE from 'three';
 import { AppState } from './AppState';
 import { createBandAudioGraph } from '../audio/BandAudioGraph';
@@ -33,25 +35,9 @@ export class VirtualBandApp {
   readonly state = new AppState();
   readonly transport = new Transport();
 
-  // One shared audio graph. Field names are kept as aliases so existing callers and the dev
-  // console handle (`window.virtualBandV2.audio`, `.violinSf2`) keep working unchanged.
   private readonly graph = createBandAudioGraph();
   readonly audio = this.graph.audio;
-  readonly samples = this.graph.samples;
-  readonly sf2Banks = this.graph.banks;
-
-  readonly drumsSf2 = this.graph.drumsSf2;
-  readonly drumSampler = this.graph.drumSampler;
-  readonly electricSf2 = this.graph.electricSf2;
-  readonly electricSampler = this.graph.electricSampler;
-  readonly acousticSf2 = this.graph.acousticSf2;
-  readonly acousticSampler = this.graph.acousticSampler;
-  readonly bassSf2 = this.graph.bassSf2;
-  readonly bassSampler = this.graph.bassSampler;
-  readonly keyboardSf2 = this.graph.keyboardSf2;
-  readonly keyboardSampler = this.graph.keyboardSampler;
-  readonly violinSf2 = this.graph.violinSf2;
-  readonly violinSampler = this.graph.violinSampler;
+  readonly liveAudio = this.graph.live;
 
   readonly instruments = new InstrumentRegistry();
   readonly cameraRegistry = new CameraRegistry();
@@ -78,11 +64,15 @@ export class VirtualBandApp {
   private acousticMode: AtelierAcousticShowcaseMode | null = null;
   private bassMode: AtelierBassShowcaseMode | null = null;
   private showcaseSwitch: ShowcaseSwitchController | null = null;
+  private assetPanel: InstrumentAssetPanel | null = null;
   private started = false;
   private lastStateTime = -Infinity;
 
   constructor(options: { mount: HTMLElement }) {
     this.renderer = new RendererHost(options.mount);
+    options.mount.removeAttribute('aria-hidden');
+    this.renderer.renderer.domElement.setAttribute('aria-label', '可弹奏的三维乐器');
+    this.renderer.renderer.domElement.tabIndex = 0;
     this.instrumentLayer.name = 'virtual-band:instruments';
     this.renderer.scene.add(this.instrumentLayer);
 
@@ -121,18 +111,10 @@ export class VirtualBandApp {
     this.state.patch({ error: null });
 
     try {
-      // One shared SF2 bank warms in parallel with MP3 fallback samples and donor
-      // setup. The visual scene never waits for the 148 MB SoundFont to parse.
-      void this.prepareShowcaseAudio();
-
-      const [drums, keyboard, violin, electric, acoustic, bass] = await Promise.all([
-        DrumsInstrument.create(this.drumSampler),
-        KeyboardInstrument.create(this.keyboardSampler),
-        ViolinInstrument.create(this.violinSampler),
-        ElectricGuitarInstrument.create(this.electricSampler),
-        AcousticGuitarInstrument.create(this.acousticSampler),
-        BassInstrument.create(this.bassSampler),
-      ]);
+      this.liveAudio.onError = (error) => this.state.patch({ error: `音源：${String(error)}` });
+      void this.prepareShowcaseAudio().catch(this.liveAudio.onError);
+      const { defaults: library, list } = await createInstrumentLibrary(this.liveAudio);
+      const { drums, keyboard, violin, electric, acoustic, bass } = library;
       this.drums = drums;
       this.keyboard = keyboard;
       this.violin = violin;
@@ -140,16 +122,13 @@ export class VirtualBandApp {
       this.acoustic = acoustic;
       this.bass = bass;
 
-      this.instruments.register(drums);
-      this.instruments.register(keyboard);
-      this.instruments.register(violin);
-      this.instruments.register(electric);
-      this.instruments.register(acoustic);
-      this.instruments.register(bass);
-      this.instrumentLayer.add(drums.root, keyboard.root, violin.root, electric.root, acoustic.root, bass.root);
+      for (const instrument of list) {
+        this.instruments.register(instrument);
+        this.instrumentLayer.add(instrument.root);
+      }
 
       // Saved views are reusable camera assets, not presentation-mode data.
-      registerAtelierViews(this.cameraRegistry, { drums, keyboard, violin, electric, acoustic, bass });
+      registerAtelierViews(this.cameraRegistry, list);
 
       this.activateVenue('atelier-studio');
 
@@ -158,7 +137,7 @@ export class VirtualBandApp {
         camera: this.camera,
         cameraRegistry: this.cameraRegistry,
         interactions: this.interactions,
-        instruments: { drums, keyboard, violin, electric, acoustic, bass },
+        instruments: list,
       });
       this.atelierMode = showcase.drums;
       this.keyboardMode = showcase.keyboard;
@@ -171,16 +150,13 @@ export class VirtualBandApp {
       this.showcaseSwitch = new ShowcaseSwitchController({
         instruments: this.instruments,
         presentation: this.presentation,
-        entries: [
-          { instrumentId: drums.id, presentationId: showcase.drums!.id },
-          { instrumentId: keyboard.id, presentationId: showcase.keyboard!.id },
-          { instrumentId: violin.id, presentationId: showcase.violin!.id },
-          { instrumentId: electric.id, presentationId: showcase.electric!.id },
-          { instrumentId: acoustic.id, presentationId: showcase.acoustic!.id },
-          { instrumentId: bass.id, presentationId: showcase.bass!.id },
-        ],
-        initialInstrumentId: drums.id,
-        onChanged: () => this.renderer.invalidateShadows(),
+        entries: [...showcase.byInstrumentId].map(([instrumentId, mode]) => ({ instrumentId, presentationId: mode.id })),
+        initialInstrumentId: new URLSearchParams(location.search).get('asset') ?? drums.id,
+        onChanged: id => { this.renderer.invalidateShadows(); this.assetPanel?.update(id); },
+      });
+      this.assetPanel = new InstrumentAssetPanel({
+        select: id => { this.showcaseSwitch?.select(id); },
+        next: direction => this.showcaseSwitch?.next(direction),
       });
       this.showcaseSwitch.activateInitial();
 
@@ -282,6 +258,7 @@ export class VirtualBandApp {
     this.engine.stop();
     this.showcaseSwitch?.dispose();
     this.showcaseSwitch = null;
+    this.assetPanel?.dispose(); this.assetPanel = null;
     this.presentation.dispose();
     this.atelierMode = null;
     this.keyboardMode = null;
@@ -304,15 +281,7 @@ export class VirtualBandApp {
     this.electric = null;
     this.acoustic = null;
     this.bass = null;
-    this.drumSampler.dispose();
-    this.keyboardSampler.dispose();
-    this.violinSampler.dispose();
-    this.electricSampler.dispose();
-    this.acousticSampler.dispose();
-    this.bassSampler.dispose();
-    this.sf2Banks.dispose();
-    this.samples.dispose();
-    this.audio.dispose();
+    this.graph.dispose();
     this.instrumentLayer.removeFromParent();
     this.venues.dispose();
     this.renderer.dispose();

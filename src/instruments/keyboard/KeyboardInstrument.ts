@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { generalMidiToneName } from '../../audio/GeneralMidiTones';
-import type { KeyboardSampler } from '../../audio/KeyboardSampler';
+import type { KeyboardAudio } from '../../audio/InstrumentAudio';
 import type { Instrument, InstrumentFrameResult, InstrumentInteraction } from '../Instrument';
 import {
   buildLegacyKeyboardAsset,
@@ -56,6 +56,7 @@ export class KeyboardInstrument implements Instrument {
   setInstanceId(value: string): void {
 
     this.instanceId = value;
+    this.root.userData.instrumentId = value;
 
   }
   readonly role = 'keyboard';
@@ -63,17 +64,32 @@ export class KeyboardInstrument implements Instrument {
   readonly root: THREE.Group;
 
   private readonly model: LegacyKeyboardModel;
-  private readonly sampler: KeyboardSampler;
+  private readonly sampler: KeyboardAudio;
 
-  private constructor(model: LegacyKeyboardModel, sampler: KeyboardSampler) {
+  private constructor(model: LegacyKeyboardModel, sampler: KeyboardAudio) {
     this.model = model;
     this.sampler = sampler;
     this.root = model.root;
     this.root.userData.instrumentId = this.id;
   }
 
-  static async create(sampler: KeyboardSampler): Promise<KeyboardInstrument> {
+  static async create(sampler: KeyboardAudio): Promise<KeyboardInstrument> {
     return new KeyboardInstrument(await buildLegacyKeyboardAsset(), sampler);
+  }
+
+  visualNoteOn(note: number, velocity: number, tier: KeyboardTier = 'lower'): void {
+    const key = this.getKey(note, tier);
+    if (!key) return;
+    key.sources.set('score-visual', velocity);
+    this.recalculateKey(key);
+    this.changed(tier);
+  }
+  visualNoteOff(note: number, tier: KeyboardTier = 'lower'): void {
+    const key = this.getKey(note, tier);
+    if (!key) return;
+    key.sources.delete('score-visual');
+    this.recalculateKey(key);
+    this.changed(tier);
   }
 
   noteOn(note: number, velocity: number): void {
@@ -116,9 +132,8 @@ export class KeyboardInstrument implements Instrument {
   /**
    * GM program a tier is set to, or null when there is no tone backend.
    *
-   * Every tier is a whole synth, so one program covers all of its keys — a tier cannot have a
-   * different tone per key. A second simultaneous tone comes from the other tier, and a third
-   * from a second keyboard.
+   * This patch applies to live playing on the tier. MIDI playback keeps its original multi-part
+   * audio in the sequencer; visual notes from several patches may share this tier.
    */
   program(tier: KeyboardTier): number | null {
     return this.sampler.program(tier);
@@ -319,6 +334,7 @@ export class KeyboardInstrument implements Instrument {
 
   dispose(): void {
     this.reset();
+    this.sampler.dispose();
     this.root.removeFromParent();
 
     const geometries = new Set<THREE.BufferGeometry>();

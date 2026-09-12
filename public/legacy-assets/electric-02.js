@@ -5,9 +5,11 @@
     shape.bezierCurveTo(-1.19,.02,-1.49,-.29,-1.57,-.87);
     shape.bezierCurveTo(-1.73,-1.59,-1.60,-2.52,-1.20,-2.93);
     shape.bezierCurveTo(-.89,-3.20,-.48,-3.25,-.10,-3.22);shape.closePath();
-    const body=slab(shape,.36,-.18,mat.paint,root,.065,7);body.name='Deep marine metallic double-cut body';
+    // Keep replaceable exterior separate from the shared animated instrument.
+    const exterior=new T.Group();exterior.name='electric:exterior';exterior.userData.electricAppearance=true;root.add(exterior);
+    const body=slab(shape,.36,-.18,mat.paint,exterior,.065,7);body.name='Deep marine metallic double-cut body';
     // A narrow cream pinstripe follows the rounded face, with no floating decal.
-    wire(shape.getSpacedPoints(220).slice(0,-1).map(p=>V(p.x,p.y,.251)),.0085,mat.bone,root,280,6,true);
+    wire(shape.getSpacedPoints(220).slice(0,-1).map(p=>V(p.x,p.y,.251)),.0085,mat.bone,exterior,280,6,true);
     const guard=new T.Shape();guard.moveTo(-.33,.31);guard.lineTo(.33,.31);guard.lineTo(.33,-.40);
     guard.bezierCurveTo(.35,-.61,.64,-.54,.66,-.83);guard.lineTo(.67,-1.69);
     guard.bezierCurveTo(.69,-1.96,.40,-2.06,.09,-2.06);
@@ -16,10 +18,10 @@
     guard.bezierCurveTo(-.95,.58,-.84,1.05,-.71,1.10);
     guard.bezierCurveTo(-.62,1.09,-.74,.52,-.63,.31);
     guard.bezierCurveTo(-.53,.15,-.41,.13,-.33,.31);guard.closePath();
-    slab(guard,.006,.251,mat.guard,root,.002);
-    slab(guard,.006,.258,mat.guardEdge,root,.001);
-    slab(guard,.009,.265,mat.guard,root,.002);
-    [[-.71,.94],[-.98,-.10],[-1.16,-.72],[-1.13,-1.35],[-.71,-1.82],[-.06,-1.96],[.53,-1.78],[.56,-1.04],[.45,-.55],[-.39,.15]].forEach(([x,y])=>screw(x,y,.278,root,.019));
+    slab(guard,.006,.251,mat.guard,exterior,.002);
+    slab(guard,.006,.258,mat.guardEdge,exterior,.001);
+    slab(guard,.009,.265,mat.guard,exterior,.002);
+    [[-.71,.94],[-.98,-.10],[-1.16,-.72],[-1.13,-1.35],[-.71,-1.82],[-.06,-1.96],[.53,-1.78],[.56,-1.04],[.45,-.55],[-.39,.15]].forEach(([x,y])=>screw(x,y,.278,exterior,.019));
     function pickup(y,covered){
       const g=new T.Group();g.position.set(0,y,.273);g.name=covered?'Neck humbucker / nickel cover':'Bridge humbucker / zebra coils';root.add(g);
       roundBox(.92,.39,.025,.035,0,0,0,mat.black,g,.004);
@@ -76,8 +78,10 @@
     for(let i=0;i<6;i++){const slot=roundBox(.032,.31,.002,.015,(i-2.5)*.10,-2.07,-.269,mat.rubber,root,.001);}
     roundBox(.51,1.18,.016,.14,1.02,-1.65,-.262,mat.black,root,.003);
     [V(1.02,-1.16,-.268),V(1.02,-2.12,-.268)].forEach(v=>screw(v.x,v.y,v.z,root,.018,true));
-    rod(V(-.755,1.45,-.02),V(-.78,1.572,-.02),.029,mat.chrome,root,20,.055);
-    rod(V(-.09,-3.268,-.02),V(-.09,-3.392,-.02),.029,mat.chrome,root,20,.055);
+    const upperStrap=new T.Group(),lowerStrap=new T.Group();upperStrap.name='electric:upper-strap';lowerStrap.name='electric:lower-strap';
+    for(const g of [upperStrap,lowerStrap]){g.userData.electricAppearance=true;root.add(g);}
+    rod(V(-.755,1.45,-.02),V(-.78,1.572,-.02),.029,mat.chrome,upperStrap,20,.055);
+    rod(V(-.09,-3.268,-.02),V(-.09,-3.392,-.02),.029,mat.chrome,lowerStrap,20,.055);
     const boardEnd=nutY-scale*(1-2**(-22.65/12)),boardHalf=y=>.220+clamp((nutY-y)/(nutY-boardEnd),0,1)*.109;
     const boardZ=(x,y)=>.366-.011*(x/boardHalf(y))**2;
     const np=[],nu=[],ni=[],neckRows=38,neckSides=24;

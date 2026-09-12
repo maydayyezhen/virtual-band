@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MIDI 播放器 · Virtual Band</title>
+  <style>
+    :root { color-scheme: dark; font: 16px/1.6 system-ui, sans-serif; background: #0c1218; color: #eaf0f4; }
+    body { max-width: 720px; margin: 64px auto; padding: 0 24px; }
+    h1 { margin-bottom: 8px; } p { color: #a7b8c7; }
+    a { color: #9fc6ff; } input, button { font: inherit; }
+    button { padding: 8px 20px; cursor: pointer; } button:disabled { cursor: default; }
+    :focus-visible { outline: 2px solid #9fc6ff; outline-offset: 4px; }
+    .controls { display: flex; flex-wrap: wrap; gap: 12px; margin: 28px 0 16px; }
+    #seek { width: 100%; margin: 16px 0; } #status { min-height: 3em; overflow-wrap: anywhere; }
+    #clock { font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+  <a href="/">← 工作区</a>
+  <h1>MIDI 播放器</h1>
+  <p>先听原曲。这个页面与乐队舞台使用同一播放器，不加载 3D 场景。</p>
+  <label for="midi-file">选择 MIDI 文件</label>
+  <input id="midi-file" type="file" accept=".mid,.midi,audio/midi" />
+  <p id="status" role="status" aria-live="polite">选择文件后载入音源。首次载入可能需要一些时间。</p>
+  <div class="controls">
+    <button id="play" disabled>播放</button>
+    <button id="pause" disabled>暂停</button>
+    <button id="stop" disabled>停止</button>
+  </div>
+  <label for="seek">播放进度</label>
+  <input id="seek" type="range" min="0" max="1" step="0.01" value="0" disabled />
+  <output id="clock">0:00 / 0:00</output>
+  <p>跳转后会从后续音符继续播放；已经开始的长音不会重新触发。</p>
+  <p><a href="/studio/band/">进入乐队舞台 →</a></p>
+  <script type="module" src="/src/dev/midi-player/main.ts"></script>
+</body>
+</html>

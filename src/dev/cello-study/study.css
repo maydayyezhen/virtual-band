@@ -1,0 +1,28 @@
+:root { color-scheme: dark; font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif; color: #dedbd1; background: #303136; }
+* { box-sizing: border-box; }
+body { margin: 0; overflow: hidden; }
+#study-stage { position: fixed; inset: 0; }
+#study-stage canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.study-panel { position: fixed; left: 24px; top: 24px; width: 270px; padding: 22px; border: 1px solid #e4d2b726; background: #171b1fef; border-radius: 12px; max-height: calc(100dvh - 48px); overflow: auto; }
+.eyebrow { margin: 0 0 14px; font-size: 9px; letter-spacing: 2px; color: #baa681; }
+h1 { margin: 0; font-size: 24px; font-weight: 500; letter-spacing: 2px; }
+.intro { font-size: 12px; line-height: 1.8; color: #a6a8a6; margin: 14px 0 22px; }
+fieldset { border: 0; padding: 0; margin: 0 0 18px; display: flex; flex-wrap: wrap; gap: 6px; }
+legend { display: block; width: 100%; font-size: 11px; margin: 0 0 10px; color: #b3b2aa; }
+button { min-height: 38px; padding: 6px 10px; border: 1px solid #89908740; border-radius: 5px; background: #20262a; color: #c9ccc7; font: inherit; font-size: 11px; cursor: pointer; }
+button:hover { background: #303635; }
+button[aria-pressed="true"] { color: #f0dcad; border-color: #c5aa715e; background: #82704530; }
+button:disabled { opacity: .4; cursor: default; }
+button:focus-visible { outline: 2px solid #e9cc92; outline-offset: 3px; }
+.hint { font-size: 10px; color: #919795; border-top: 1px solid #a3a89825; padding-top: 17px; }
+#study-status { font-size: 11px; color: #c3ae88; line-height: 1.7; margin-bottom: 0; }
+.study-caption { position: fixed; bottom: 26px; left: 330px; right: 34px; display: flex; justify-content: space-between; color: #a9aaa6; font-size: 11px; pointer-events: none; }
+#study-label { letter-spacing: 4px; color: #d7c4a0; }
+@media (max-width: 700px) {
+  .study-panel { width: calc(100% - 24px); top: 12px; left: 12px; padding: 12px 14px; max-height: 34dvh; }
+  h1 { font-size: 18px; display: inline; } .eyebrow, .intro { display: none; }
+  fieldset { display: inline-flex; margin: 8px 10px 0 0; vertical-align: top; gap: 4px; }
+  legend { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  button { padding: 5px 8px; min-height: 34px; } .hint { display: none; }
+  #study-status { margin: 8px 0 0; } .study-caption { left: 20px; bottom: 18px; right: 20px; font-size: 9px; }
+}

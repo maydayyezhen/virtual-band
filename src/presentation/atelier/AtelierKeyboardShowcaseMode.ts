@@ -1,9 +1,8 @@
 import * as THREE from 'three';
-import { distanceForOrbitView } from '../../camera/CameraFraming';
+import { OrbitController } from '../../camera/OrbitController';
 import type { CameraRegistry, InstrumentOrbitCameraView } from '../../camera/CameraRegistry';
 import type { CameraSystem } from '../../camera/CameraSystem';
 import {
-  ATELIER_KEYBOARD_VIEW_IDS,
   type AtelierKeyboardViewName,
 } from '../../camera/presets/AtelierKeyboardViews';
 import type { InstrumentHit, InstrumentInteractionSystem } from '../../instruments/InstrumentInteractionSystem';
@@ -12,13 +11,6 @@ import type { KeyboardTier } from '../../instruments/keyboard/legacyKeyboardAsse
 import type { PresentationMode } from '../PresentationManager';
 import { ATELIER_KEYBOARD_KEYMAP } from './AtelierKeyboardKeymap';
 import { AtelierKeyboardPanel, installKeyboardPanelStyles } from './AtelierKeyboardPanel';
-
-interface CameraState {
-  target: THREE.Vector3;
-  yaw: number;
-  pitch: number;
-  distance: number;
-}
 
 interface PointerState {
   id: number;
@@ -40,38 +32,20 @@ interface HeldComputerNote {
 }
 
 export class AtelierKeyboardShowcaseMode implements PresentationMode {
-  readonly id = 'atelier-keyboard';
+  get id(): string { return `${this.keyboard.id}:showcase`; }
 
   private readonly element: HTMLCanvasElement;
   private readonly panel: AtelierKeyboardPanel;
-  private readonly camera: CameraSystem;
   private readonly cameraRegistry: CameraRegistry;
   private readonly keyboard: KeyboardInstrument;
   private readonly interactions: InstrumentInteractionSystem;
-  private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  private readonly orbit: OrbitController;
   private readonly pointers = new Map<number, PointerState>();
   private readonly computerKeys = new Map<string, HeldComputerNote>();
-  private readonly current: CameraState = {
-    target: new THREE.Vector3(),
-    yaw: 0,
-    pitch: 0,
-    distance: 20,
-  };
-  private readonly want: CameraState = {
-    target: new THREE.Vector3(),
-    yaw: 0,
-    pitch: 0,
-    distance: 20,
-  };
 
   private active = false;
   private inputTier: KeyboardTier = 'lower';
   private preset: AtelierKeyboardViewName = 'whole';
-  private zoom = 1;
-  private width = 1;
-  private height = 1;
-  private momentumX = 0;
-  private momentumY = 0;
   private previousGesture: GestureState | null = null;
   private sustainTier: KeyboardTier | null = null;
 
@@ -83,10 +57,11 @@ export class AtelierKeyboardShowcaseMode implements PresentationMode {
     interactions: InstrumentInteractionSystem;
   }) {
     this.element = options.element;
-    this.camera = options.camera;
     this.cameraRegistry = options.cameraRegistry;
     this.keyboard = options.keyboard;
     this.interactions = options.interactions;
+    this.orbit = new OrbitController({ camera: options.camera, element: options.element,
+      subject: options.keyboard.root, pitchRange: [0.04, 1.43], floorY: 0.13 });
     installKeyboardPanelStyles();
     this.panel = new AtelierKeyboardPanel(options.keyboard, document.body);
   }
@@ -95,7 +70,6 @@ export class AtelierKeyboardShowcaseMode implements PresentationMode {
     if (this.active) return;
     this.active = true;
     this.attachInput();
-    this.syncViewport(true);
     this.selectView('whole', true);
     this.panel.setVisible(true);
   }
@@ -106,59 +80,19 @@ export class AtelierKeyboardShowcaseMode implements PresentationMode {
     this.releaseInputState();
     this.detachInput();
     this.element.classList.remove('dragging', 'playable');
-    this.camera.resetLens();
     this.panel.setVisible(false);
   }
 
   update(dt: number): void {
     if (!this.active) return;
-    this.panel.update();
-    this.syncViewport(false);
-
-    if (
-      this.pointers.size === 0
-      && !this.reducedMotion.matches
-      && Math.abs(this.momentumX) + Math.abs(this.momentumY) > 0.0001
-    ) {
-      const damping = Math.exp(-dt * 11);
-      this.momentumX *= damping;
-      this.momentumY *= damping;
-      this.want.yaw += this.momentumX * dt * 23;
-      this.want.pitch = THREE.MathUtils.clamp(this.want.pitch + this.momentumY * dt * 23, 0.04, 1.43);
-    }
-
-    const ease = this.reducedMotion.matches ? 1 : 1 - Math.exp(-dt * 13);
-    this.current.yaw += (this.want.yaw - this.current.yaw) * ease;
-    this.current.pitch += (this.want.pitch - this.current.pitch) * ease;
-    this.current.distance += (this.want.distance - this.current.distance) * ease;
-    this.current.target.lerp(this.want.target, ease);
-    this.applyCamera();
+    this.orbit.update(dt);
   }
 
   selectView(id: AtelierKeyboardViewName, instant = false): boolean {
     const preset = this.getPreset(id);
     if (!preset) return false;
-
     this.preset = id;
-    this.zoom = 1;
-    this.momentumX = 0;
-    this.momentumY = 0;
-    this.camera.setLens({ fov: preset.fov, near: preset.near, far: preset.far });
-    this.want.target.set(...preset.target);
-    this.want.yaw = this.current.yaw + Math.atan2(
-      Math.sin(preset.yaw - this.current.yaw),
-      Math.cos(preset.yaw - this.current.yaw),
-    );
-    this.want.pitch = preset.pitch;
-    this.want.distance = this.distanceFor(preset);
-
-    if (instant || this.reducedMotion.matches) {
-      this.current.target.copy(this.want.target);
-      this.current.yaw = this.want.yaw;
-      this.current.pitch = this.want.pitch;
-      this.current.distance = this.want.distance;
-      this.applyCamera();
-    }
+    this.orbit.setView(preset, instant);
     return true;
   }
 
@@ -176,7 +110,7 @@ export class AtelierKeyboardShowcaseMode implements PresentationMode {
   }
 
   private getPreset(id: AtelierKeyboardViewName): InstrumentOrbitCameraView | null {
-    const view = this.cameraRegistry.get(ATELIER_KEYBOARD_VIEW_IDS[id]);
+    const view = this.cameraRegistry.get(`${this.keyboard.id}:${id}`);
     return view?.kind === 'instrument-orbit' ? view : null;
   }
 
@@ -224,8 +158,6 @@ export class AtelierKeyboardShowcaseMode implements PresentationMode {
     };
     this.pointers.set(event.pointerId, pointer);
     this.element.setPointerCapture(event.pointerId);
-    this.momentumX = 0;
-    this.momentumY = 0;
     this.previousGesture = null;
     if (hit) this.playHit(pointer, hit);
     else this.element.classList.add('dragging');
@@ -264,15 +196,10 @@ export class AtelierKeyboardShowcaseMode implements PresentationMode {
         this.pan(x - this.previousGesture.x, y - this.previousGesture.y);
       }
       this.previousGesture = { d: distance, x, y };
-      this.momentumX = 0;
-      this.momentumY = 0;
-    } else if (pointer.mode === 'pan') {
+      } else if (pointer.mode === 'pan') {
       this.pan(dx, dy);
     } else {
-      this.momentumX = -dx * 0.0055;
-      this.momentumY = dy * 0.0047;
-      this.want.yaw += this.momentumX;
-      this.want.pitch = THREE.MathUtils.clamp(this.want.pitch + this.momentumY, 0.04, 1.43);
+      this.orbit.orbitBy(dx, dy);
     }
   };
 
@@ -320,16 +247,16 @@ export class AtelierKeyboardShowcaseMode implements PresentationMode {
       this.computerKeys.clear();
       this.sustainTier = null;
     } else if (event.code === 'ArrowLeft') {
-      this.want.yaw -= 0.10;
+      this.orbit.rotateBy(-0.10, 0);
       handled = true;
     } else if (event.code === 'ArrowRight') {
-      this.want.yaw += 0.10;
+      this.orbit.rotateBy(0.10, 0);
       handled = true;
     } else if (event.code === 'ArrowUp') {
-      this.want.pitch = THREE.MathUtils.clamp(this.want.pitch + 0.08, 0.04, 1.43);
+      this.orbit.rotateBy(0, 0.08);
       handled = true;
     } else if (event.code === 'ArrowDown') {
-      this.want.pitch = THREE.MathUtils.clamp(this.want.pitch - 0.08, 0.04, 1.43);
+      this.orbit.rotateBy(0, -0.08);
       handled = true;
     } else {
       handled = false;
@@ -396,61 +323,8 @@ export class AtelierKeyboardShowcaseMode implements PresentationMode {
     this.element.classList.remove('dragging');
   }
 
-  private changeZoom(factor: number): void {
-    const preset = this.getPreset(this.preset);
-    if (!preset) return;
-    this.zoom = THREE.MathUtils.clamp(this.zoom * factor, 0.28, 1.75);
-    this.want.distance = this.distanceFor(preset) * this.zoom;
-  }
+  private changeZoom(factor: number): void { this.orbit.zoomBy(factor); }
 
-  private pan(dx: number, dy: number): void {
-    if (this.height <= 0) return;
-    const preset = this.getPreset(this.preset);
-    if (!preset) return;
+  private pan(dx: number, dy: number): void { this.orbit.panBy(dx, dy); }
 
-    this.keyboard.root.updateWorldMatrix(true, true);
-    const worldTarget = this.keyboard.root.localToWorld(this.current.target.clone());
-    const worldDistance = this.camera.output.position.distanceTo(worldTarget);
-    const scale = worldDistance * 2 * Math.tan(THREE.MathUtils.degToRad(preset.fov / 2)) / this.height;
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.output.quaternion);
-    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.output.quaternion);
-    const movedWorldTarget = worldTarget
-      .addScaledVector(right, -dx * scale)
-      .addScaledVector(up, dy * scale);
-    this.want.target.copy(this.keyboard.root.worldToLocal(movedWorldTarget));
-  }
-
-  private syncViewport(force: boolean): void {
-    const width = this.element.clientWidth;
-    const height = this.element.clientHeight;
-    if (!width || !height) return;
-    if (!force && width === this.width && height === this.height) return;
-    this.width = width;
-    this.height = height;
-    const preset = this.getPreset(this.preset);
-    if (!preset) return;
-    const distance = this.distanceFor(preset) * this.zoom;
-    this.want.distance = distance;
-    this.current.distance = distance;
-  }
-
-  private distanceFor(preset: InstrumentOrbitCameraView): number {
-    return distanceForOrbitView(preset, this.width, this.height);
-  }
-
-  private applyCamera(): void {
-    const preset = this.getPreset(this.preset);
-    if (!preset) return;
-
-    this.keyboard.root.updateWorldMatrix(true, true);
-    const cp = Math.cos(this.current.pitch);
-    const localPosition = new THREE.Vector3(
-      this.current.target.x + Math.sin(this.current.yaw) * cp * this.current.distance,
-      this.current.target.y + Math.sin(this.current.pitch) * this.current.distance,
-      this.current.target.z + Math.cos(this.current.yaw) * cp * this.current.distance,
-    );
-    const position = this.keyboard.root.localToWorld(localPosition);
-    const target = this.keyboard.root.localToWorld(this.current.target.clone());
-    this.camera.setPose({ position, target, fov: preset.fov }, true);
-  }
 }

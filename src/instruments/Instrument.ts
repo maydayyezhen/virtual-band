@@ -46,6 +46,9 @@ export interface Instrument {
   setProgram?(first: number | string, second?: number): boolean;
   noteOn(note: number, velocity: number): void;
   noteOff(note: number): void;
+  /** MIDI playback is already audible: these methods only animate the model. */
+  visualNoteOn(note: number, velocity: number, tier?: 'lower' | 'upper', program?: number): void;
+  visualNoteOff(note: number, tier?: 'lower' | 'upper'): void;
   update(dt: number): InstrumentFrameResult | void;
   reset(): void;
   /**
@@ -71,18 +74,32 @@ export interface Instrument {
 }
 
 export class InstrumentRegistry {
+  private readonly owners = new Map<THREE.Object3D, Instrument>();
   private readonly items = new Map<string, Instrument>();
 
   register(instrument: Instrument): void {
     if (this.items.has(instrument.id)) throw new Error(`Instrument already registered: ${instrument.id}`);
     this.items.set(instrument.id, instrument);
+    this.owners.set(instrument.root, instrument);
   }
 
   unregister(id: string): Instrument | null {
     const instrument = this.items.get(id) ?? null;
     if (!instrument) return null;
     this.items.delete(id);
+    this.owners.delete(instrument.root);
     return instrument;
+  }
+
+  /** Resolve actual scene ownership, even when a cloned mesh carries an old tag. */
+  ownerOf(object: THREE.Object3D): Instrument | null {
+    let node: THREE.Object3D | null = object;
+    while (node) {
+      const owner = this.owners.get(node);
+      if (owner) return owner;
+      node = node.parent;
+    }
+    return null;
   }
 
   get(id: string): Instrument | null {
@@ -111,6 +128,7 @@ export class InstrumentRegistry {
   dispose(): void {
     for (const instrument of this.items.values()) instrument.dispose();
     this.items.clear();
+    this.owners.clear();
   }
 
   get size(): number {

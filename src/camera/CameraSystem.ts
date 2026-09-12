@@ -30,29 +30,13 @@ interface CameraPose {
 }
 
 const DEFAULT_LENS = Object.freeze({ fov: 42, near: 0.05, far: 300 });
-/** Scratch vectors for the orbit-space transition; `update` runs every frame. */
-const TRANSITION_A = new THREE.Vector3();
-const TRANSITION_B = new THREE.Vector3();
-const MIN_ORBIT_RADIUS = 1e-3;
-/**
- * Camera moves are paced by travel distance, not by a fixed time constant.
- *
- * A pure exponential settles in the same ~0.5 s whatever the distance, so a cross-stage move
- * (bass at the front to keyboard at the back, ~7 m) whips while a nudge takes just as long.
- * `MOVE_SPEED` is the cruise speed and therefore the speed cap; the two bounds keep tiny
- * adjustments snappy and stop a very long move from dragging.
- */
-const MOVE_SPEED = 4;
-const MIN_MOVE_SECONDS = 0.5;
-const MAX_MOVE_SECONDS = 2.6;
+/** Finite, shared camera moves. Translation and gaze are interpolated independently. */
+const MIN_MOVE_SECONDS = 0.65;
+const MAX_MOVE_SECONDS = 1.9;
 
-/** Time a move needs at cruise speed, clamped so short moves stay snappy and long ones do not drag. */
 function moveSeconds(from: CameraPose, to: CameraPose): number {
-  const travel = Math.max(
-    from.position.distanceTo(to.position),
-    from.target.distanceTo(to.target),
-  );
-  return THREE.MathUtils.clamp(travel / MOVE_SPEED, MIN_MOVE_SECONDS, MAX_MOVE_SECONDS);
+  const travel = from.position.distanceTo(to.position);
+  return THREE.MathUtils.clamp(0.6 + Math.sqrt(travel) * 0.24, MIN_MOVE_SECONDS, MAX_MOVE_SECONDS);
 }
 
 const round3 = (value: number): number => Math.round(value * 1000) / 1000;
@@ -92,6 +76,9 @@ export class CameraSystem {
   private from: CameraPose | null = null;
   private elapsed = 0;
   private duration = 0;
+  private readonly path = new THREE.CubicBezierCurve3();
+  private clearanceY = 4.5;
+  private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   private currentViewId: string | null = null;
   private currentViewPose: CameraPose | null = null;
   private bounds: THREE.Box3 | null = null;
@@ -162,7 +149,8 @@ export class CameraSystem {
   }
 
   private startTransition(pose: CameraPose, instant: boolean): void {
-    if (instant) {
+    if (this.bounds) this.bounds.clampPoint(pose.position, pose.position);
+    if (instant || this.reducedMotion.matches) {
       this.applyPose(pose);
       this.desired = null;
       this.from = null;
@@ -178,6 +166,31 @@ export class CameraSystem {
     this.desired = pose;
     this.elapsed = 0;
     this.duration = moveSeconds(this.from, pose);
+    const start = this.from.position;
+    const end = pose.position;
+    this.path.v0.copy(start);
+    this.path.v3.copy(end);
+    this.path.v1.lerpVectors(start, end, 0.3);
+    this.path.v2.lerpVectors(start, end, 0.7);
+    // Long cross-stage moves travel above the instruments instead of spiralling around a moving pivot.
+    if (Math.hypot(end.x - start.x, end.z - start.z) > 4) {
+      const lift = Math.max(start.y, end.y, (this.clearanceY - 0.25 * Math.min(start.y, end.y)) / 0.75);
+      this.path.v1.y = lift;
+      this.path.v2.y = lift;
+    }
+    const fromBearing = new THREE.Vector2(start.x - this.from.target.x, start.z - this.from.target.z);
+    const toBearing = new THREE.Vector2(end.x - pose.target.x, end.z - pose.target.z);
+    if (fromBearing.lengthSq() > 0.01 && toBearing.lengthSq() > 0.01 && fromBearing.normalize().dot(toBearing.normalize()) < -0.25) {
+      // Opposing views must bypass the look-at pole; a straight overhead crossing flips the horizon.
+      const sideways = new THREE.Vector3(start.z - end.z, 0, end.x - start.x).normalize();
+      const reach = Math.min(5, start.distanceTo(end) * 0.4);
+      this.path.v1.addScaledVector(sideways, reach);
+      this.path.v2.addScaledVector(sideways, reach);
+    }
+    if (this.bounds) {
+      this.bounds.clampPoint(this.path.v1, this.path.v1);
+      this.bounds.clampPoint(this.path.v2, this.path.v2);
+    }
   }
 
   /**
@@ -271,53 +284,31 @@ export class CameraSystem {
     return diagnostics;
   }
 
+  /** Manual control takes over from the currently displayed pose, never a stale endpoint. */
+  cancelTransition(): void {
+    this.desired = null;
+    this.from = null;
+    this.currentViewId = null;
+    this.currentViewPose = null;
+  }
+
+  setTransitionClearance(y: number): void { if (Number.isFinite(y)) this.clearanceY = y; }
+
   update(dt: number): void {
-    if (!this.desired || !this.from) return;
-
+    if (!this.desired || !this.from || !Number.isFinite(dt)) return;
     this.elapsed += Math.max(0, dt);
-    const t = this.duration <= 0 ? 1 : Math.min(1, this.elapsed / this.duration);
-    const alpha = t * t * (3 - 2 * t); // smoothstep: gentle at both ends
-
-    // Ease the orbit, not the raw position.
-    //
-    // Interpolating positions walks the camera along a straight line between the two standpoints:
-    // for a cross-stage move that line runs through the middle of the band. Interpolating the
-    // offset *vector* instead fixes that but breaks the opposite case — the great circle between
-    // two opposing standpoints passes over the target's zenith, where `lookAt` is degenerate and
-    // the camera's roll snaps (measured: audience → rear peaked at 75° above the target).
-    //
-    // So interpolate the orbit itself — yaw, pitch, radius — which sweeps around the subject and
-    // never crosses the pole unless both ends are already near it.
-    const fromOffset = TRANSITION_A.copy(this.from.position).sub(this.from.target);
-    const toOffset = TRANSITION_B.copy(this.desired.position).sub(this.desired.target);
-    const fromRadius = fromOffset.length();
-    const toRadius = toOffset.length();
-
+    const t = Math.min(1, this.elapsed / this.duration);
+    // Quintic easing has zero velocity and acceleration at both ends.
+    const alpha = t * t * t * (t * (t * 6 - 15) + 10);
+    this.path.getPoint(alpha, this.output.position);
     this.target.lerpVectors(this.from.target, this.desired.target, alpha);
-
-    if (fromRadius > MIN_ORBIT_RADIUS && toRadius > MIN_ORBIT_RADIUS) {
-      const fromYaw = Math.atan2(fromOffset.x, fromOffset.z);
-      const fromPitch = Math.asin(THREE.MathUtils.clamp(fromOffset.y / fromRadius, -1, 1));
-      const toYaw = Math.atan2(toOffset.x, toOffset.z);
-      const toPitch = Math.asin(THREE.MathUtils.clamp(toOffset.y / toRadius, -1, 1));
-
-      // Shortest way round, so an opposing view does not sweep the long way by accident.
-      const yawDelta = Math.atan2(Math.sin(toYaw - fromYaw), Math.cos(toYaw - fromYaw));
-      orbitPosition(
-        this.target,
-        fromRadius + (toRadius - fromRadius) * alpha,
-        fromYaw + yawDelta * alpha,
-        fromPitch + (toPitch - fromPitch) * alpha,
-        this.output.position,
-      );
-    } else {
-      this.output.position.lerpVectors(this.from.position, this.desired.position, alpha);
-    }
-
-    this.output.fov = this.from.fov + (this.desired.fov - this.from.fov) * alpha;
+    // Interpolate lens magnification rather than degrees to avoid a late zoom surge.
+    const fromLens = 1 / Math.tan(THREE.MathUtils.degToRad(this.from.fov / 2));
+    const toLens = 1 / Math.tan(THREE.MathUtils.degToRad(this.desired.fov / 2));
+    this.output.fov = THREE.MathUtils.radToDeg(2 * Math.atan(1 / THREE.MathUtils.lerp(fromLens, toLens, alpha)));
     this.output.lookAt(this.target);
     this.output.updateProjectionMatrix();
-
+    this.output.updateMatrixWorld(true);
     if (t >= 1) {
       this.applyPose(this.desired);
       this.desired = null;
@@ -325,7 +316,8 @@ export class CameraSystem {
     }
   }
 
-  private resolve(view: CameraView): CameraPose | null {
+  /** Resolve authored framing without taking camera ownership. */
+  resolve(view: CameraView): CameraPoseInput | null {
     if (view.kind === 'world') {
       return {
         position: new THREE.Vector3(...view.position),

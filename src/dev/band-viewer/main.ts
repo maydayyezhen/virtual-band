@@ -1,69 +1,56 @@
+import { createDefaultInstruments, createInstrumentInstance } from '../../instruments/InstrumentDefinitions';
+import { parseLayoutDocument } from '../../layout/LayoutDocument';
 import * as THREE from 'three';
 import { createBandAudioGraph } from '../../audio/BandAudioGraph';
 import { CameraRegistry } from '../../camera/CameraRegistry';
 import { CameraSystem } from '../../camera/CameraSystem';
+import { FreeCameraController } from '../../camera/FreeCameraController';
+import { BandCameraPanel } from './BandCameraPanel';
 import { OrbitController } from '../../camera/OrbitController';
 import { RendererHost } from '../../engine/RendererHost';
-import { AcousticGuitarInstrument } from '../../instruments/acoustic/AcousticGuitarInstrument';
-import { BassInstrument } from '../../instruments/bass/BassInstrument';
-import { DrumsInstrument } from '../../instruments/drums/DrumsInstrument';
-import { ElectricGuitarInstrument } from '../../instruments/electric/ElectricGuitarInstrument';
 import { InstrumentRegistry } from '../../instruments/Instrument';
 import { InstrumentInteractionSystem } from '../../instruments/InstrumentInteractionSystem';
-import { KeyboardInstrument } from '../../instruments/keyboard/KeyboardInstrument';
-import { ViolinInstrument } from '../../instruments/violin/ViolinInstrument';
 import { createAtelierShowcase, registerAtelierViews } from '../../presentation/atelier/createAtelierShowcase';
 import { PresentationManager } from '../../presentation/PresentationManager';
 import type { Instrument } from '../../instruments/Instrument';
-import { AtelierStudioVenue } from '../../venues/atelier-studio/AtelierStudioVenue';
-import {
-  bandLayout,
-  footprintsOf,
-  prepareMember,
-  presentBand,
-  type BandComposition,
-  type PresentedBand,
-  type PreparedMember,
-} from '../../layout/presentBand';
-import type { InstrumentFootprints } from '../../layout/AutoLayout';
-import { registerBandViews, BAND_VIEW_SCOPE } from './BandViews';
+import { NocturneVenue } from '../../venues/nocturne/NocturneVenue';
+import { NOCTURNE_STAGE, NOCTURNE_CAMERA_VOLUME } from '../../venues/nocturne/NocturneSpec';
+import { BandSession } from '../../layout/BandSession';
+import { registerBandViews } from './BandViews';
 import { analyzeMidi } from '../../midi';
 import { buildMidiBand, type BuiltBand } from './buildMidiBand';
 import { BandPlayer } from './BandPlayer';
+import { MidiPlayback } from '../../audio/MidiPlayback';
 import { DropHint, TransportBar } from './TransportBar';
 import type { LayoutInstrumentType } from '../../layout/LayoutDocument';
-import { installNocturneLayoutStage } from '../layout-editor/NocturneLayoutStage';
 import { StageDirector } from './StageDirector';
+import { LightingSession } from '../../lighting/LightingSession';
+import { SHOW_EXAMPLES, prepareMatchingShow, type PreparedBandShow } from '../../shows/catalog';
+import { LightingPanel } from './LightingPanel';
+import { SongScreens } from '../../screens/SongScreens';
+import { ScreenSession } from '../../screens/ScreenSession';
+import { ScreenAudioTap } from '../../screens/ScreenAudioTap';
+import { ScreenPanel } from './ScreenPanel';
+import { CameraShowPlayer } from '../../camera/CameraShowPlayer';
+import { DirectorPanel } from './DirectorPanel';
+import { TitleLayer } from '../../titles/TitleLayer';
+import { OfflineStage } from '../../export/OfflineStage';
 
-/**
- * Band View — the band exactly as the Layout Lab arranges it, with no interface at all.
- *
- * Two states, owned by `StageDirector`:
- *   band  — six instruments, inert; drag orbits the stage, double click steps inside.
- *   focus — one instrument running its own Atelier presentation mode, which owns every input.
- *
- * The instruments are the project's real `Instrument` instances and the presentation modes are
- * the same six the instrument library uses, assembled by the same factory — nothing about
- * playing, sliding or camera framing is re-implemented here.
- */
+const offlineMode = import.meta.env.DEV && new URLSearchParams(location.search).get('offline') === '1';
 
-const STAGE_SURFACE_Y = 1.2;
+const STAGE_SURFACE_Y = NOCTURNE_STAGE.surfaceY;
 const MAX_FRAME_SECONDS = 0.05;
 const PITCH_RANGE: readonly [number, number] = [-0.15, 1.35];
 /**
- * The volume a camera may sit in, from the NOCTURNE venue: a 30 × 16 m deck spanning z ∈ [-8, 8],
- * with the LED wall at z ≈ -8.2 and the truss top around y = 14. Declared so `validateViews()`
- * can catch a stage view that would park the camera inside a wall.
+ * NOCTURNE's full hall, including the audience floor and upper galleries. Keep the rear
+ * limit in front of the opaque LED wall; free movement uses an additional floor clearance.
  */
 const VENUE_CAMERA_BOUNDS = new THREE.Box3(
-  new THREE.Vector3(-16, 0.4, -8),
-  new THREE.Vector3(16, 15, 11),
+  new THREE.Vector3(...NOCTURNE_CAMERA_VOLUME.min),
+  new THREE.Vector3(...NOCTURNE_CAMERA_VOLUME.max),
 );
 
-/** The band never stands behind the LED wall; anything past it is pushed back in front. */
-const LED_CLEARANCE_Z = -8.17 + 0.95;
 
-installNocturneLayoutStage();
 
 const mount = document.querySelector<HTMLElement>('[data-band-view]');
 if (!mount) throw new Error('Band view mount is missing');
@@ -72,22 +59,11 @@ if (!mount) throw new Error('Band view mount is missing');
  * Audio — the same shared graph the instrument library builds.
  * ------------------------------------------------------------------ */
 const graph = createBandAudioGraph();
-const {
-  audio,
-  drumSampler,
-  keyboardSampler,
-  violinSampler,
-  electricSampler,
-  acousticSampler,
-  bassSampler,
-} = graph;
+const { audio, live } = graph;
 
-/**
- * Warms every sampler at load. Not optional: `BassSampler` is the one instrument with no MP3
- * fallback, so an unprepared bass backend silently drops every note. None of it needs a user
- * gesture — only starting the AudioContext does — and the scene never waits for it.
- */
 const prepareAudio = (): Promise<void> => graph.prepare();
+const midiOutput = audio.createBus(1);
+const playback = new MidiPlayback(audio.getContext(), midiOutput.input);
 
 /** Browsers only allow an AudioContext to start inside a user gesture. */
 let audioUnlocked = false;
@@ -106,12 +82,19 @@ async function unlockAudio(): Promise<void> {
  * ------------------------------------------------------------------ */
 const instruments = new InstrumentRegistry();
 const host = new RendererHost(mount);
-const venue = new AtelierStudioVenue();
-host.scene.add(venue.root);
-host.applySceneProfile(venue.sceneProfile);
+host.renderer.domElement.removeAttribute('aria-hidden');
+host.renderer.domElement.setAttribute('aria-label', '乐队三维场景');
+host.renderer.domElement.tabIndex = 0;
+const venue = new NocturneVenue(host);
+const lighting = new LightingSession(venue.lighting);
+const screens = new ScreenSession(venue.screens);
+const songScreens = new SongScreens(screens);
+const screenAudio = new ScreenAudioTap(audio);
 
 const cameraRegistry = new CameraRegistry();
 const camera = new CameraSystem(cameraRegistry, instruments);
+const cameraShow = new CameraShowPlayer(camera);
+const titles = new TitleLayer();
 
 /** Holds the current band. Replaced whenever the band is rebuilt from a score. */
 let band = new THREE.Group();
@@ -144,12 +127,13 @@ function instrumentAt(clientX: number, clientY: number): string | null {
   pickRaycaster.setFromCamera(pickPointer, camera.output);
 
   const roots = instruments.list().filter((item) => item.root.visible).map((item) => item.root);
+  for (const root of roots) root.updateWorldMatrix(true, true);
   for (const intersection of pickRaycaster.intersectObjects(roots, true)) {
-    let node: THREE.Object3D | null = intersection.object;
-    while (node) {
-      if (typeof node.userData?.instrumentId === 'string') return node.userData.instrumentId;
-      node = node.parent;
-    }
+    let visible = true;
+    for (let node: THREE.Object3D | null = intersection.object; node; node = node.parent) visible &&= node.visible;
+    if (!visible) continue;
+    const owner = instruments.ownerOf(intersection.object);
+    if (owner) return owner.id;
   }
   return null;
 }
@@ -158,7 +142,6 @@ let presentation = new PresentationManager();
 
 /** Stage views, filled in once the layout is known. Index 0 is the audience view. */
 let bandViewIds: string[] = [];
-let bandViewIndex = 0;
 
 
 /**
@@ -172,94 +155,97 @@ const orbit = new OrbitController({
   pitchRange: PITCH_RANGE,
 });
 
-let stage!: StageDirector;
+const audience = new FreeCameraController(camera, host.renderer.domElement, VENUE_CAMERA_BOUNDS, STAGE_SURFACE_Y);
+let stage: StageDirector | null = null;
+audience.onUnlock = () => { if (stage?.current.kind === 'audience') stage.showBand(); };
+const cameraPanel = new BandCameraPanel({
+  onBandView: (id) => stage?.selectBandView(id),
+  onAudience: () => stage?.enterAudience(),
+  onBack: () => stage?.showBand(),
+  onLock: () => audience.lockPointer(),
+  onHome: () => audience.resetPosition(),
+  onMove: (key, down) => audience.setMoveKey(key, down),
+  onArrange: () => {
+    if (!bandSession) return;
+    try { mountBand(bandSession.rearrange(), instruments.list()); dropHint.setVisible(false); }
+    catch (error) { dropHint.setText(String(error)); dropHint.setVisible(true); }
+  },
+});
+const lightingPanel = new LightingPanel(lighting, {
+  loadExample: id => { void loadLightingExample(id); },
+  toggle: enabled => { lighting.setEnabled(enabled, player?.time ?? 0); lightingPanel.update(); },
+  seek: seconds => player?.seek(seconds),
+});
+cameraPanel.appendPanel(lightingPanel.element);
+const screenPanel = new ScreenPanel(screens, songScreens);
+cameraPanel.appendPanel(screenPanel.element);
+const directorPanel = new DirectorPanel({
+  toggle: enabled => {
+    if (enabled && cameraShow.available) stage?.startBroadcast();
+    else if (stage?.current.kind === 'broadcast') stage.takeBandControl();
+  },
+  seek: time => { player?.seek(time); if (cameraShow.available) stage?.startBroadcast(); },
+  toggleTitles: enabled => { titles.enabled = enabled; },
+});
+cameraPanel.appendPanel(directorPanel.element);
+function refreshCameraScene(): void {
+  const bounds = new THREE.Box3().setFromObject(band);
+  camera.setTransitionClearance(bounds.max.y + 1);
+  audience.setScene(bounds);
+}
 
-/**
- * Swap in a freshly presented band.
- *
- * The old group is removed rather than emptied, so the scene never holds two bands at once while a
- * replacement is being measured.
- */
-function adoptBand(presented: PresentedBand): void {
+
+let bandSession: BandSession | null = null;
+
+/** One commit path for startup and MIDI changes. All placement has succeeded before this runs. */
+function mountBand(next: BandSession, list: readonly Instrument[], instant = false): void {
+  audience.exit();
+  presentation.dispose();
+  const retained = new Set(list);
+  for (const previous of instruments.list()) {
+    cameraRegistry.clearInstrumentViews(previous.id);
+    instruments.unregister(previous.id);
+    if (!retained.has(previous)) previous.dispose();
+  }
+  presentation = new PresentationManager();
+  for (const instrument of list) instruments.register(instrument);
+  const presented = next.apply();
   host.scene.remove(band);
   band = presented.group;
   host.scene.add(band);
+  bandSession = next;
+  registerAtelierViews(cameraRegistry, list);
+  const showcase = createAtelierShowcase({ element: host.renderer.domElement, camera, cameraRegistry, interactions, instruments: list });
+  for (const mode of showcase.modes) presentation.register(mode);
+  bandViewIds = registerBandViews(cameraRegistry, new THREE.Box3().setFromObject(band), venue.overviewBounds);
+  refreshCameraScene();
+  stage = new StageDirector({ camera, instruments, presentation,
+    modes: showcase.byInstrumentId, entryViewIds: showcase.wholeViewIds,
+    bandViewId: bandViewIds[0], orbit, audience,
+    onChange: focus => {
+      cameraPanel.update(focus, instruments, stage?.activeBandViewId);
+      directorPanel.update(focus.kind === 'broadcast');
+    },
+  });
+  camera.setCameraBounds(venue.cameraBounds);
+  stage.selectBandView(bandViewIds[0], instant);
   host.invalidateShadows();
-  band.updateMatrixWorld(true);
 }
 
 async function buildBand(): Promise<void> {
-  const [drums, keyboard, violin, electric, acoustic, bass] = await Promise.all([
-    DrumsInstrument.create(drumSampler),
-    KeyboardInstrument.create(keyboardSampler),
-    ViolinInstrument.create(violinSampler),
-    ElectricGuitarInstrument.create(electricSampler),
-    AcousticGuitarInstrument.create(acousticSampler),
-    BassInstrument.create(bassSampler),
-  ]);
-
-  const six = { drums, keyboard, violin, electric, acoustic, bass };
-  for (const instrument of Object.values(six)) instruments.register(instrument);
-
-  // Saved instrument views: the same 29 the instrument library uses.
-  registerAtelierViews(cameraRegistry, six);
-
-  // The six instruments the page starts with are also the yardstick for every arrangement: their
-  // measured footprints are what the layout engine packs rows with, here and for any band a file
-  // asks for later. Measured once, from a complete band.
-  const members = (Object.keys(six) as LayoutInstrumentType[]).map((type) =>
-    prepareMember(six[type].id, type, six[type].root),
-  );
-  footprints = footprintsOf(members);
-  adoptBand(
-    presentBand({
-      members,
-      home: bandLayout(COMPLETE_BAND, footprints),
-      surfaceY: STAGE_SURFACE_Y,
-      clearanceZ: LED_CLEARANCE_Z,
-    }),
-  );
-  host.invalidateShadows();
-
-  band.updateMatrixWorld(true);
-
-  // Declarative stage views: angles around the band's own box, so the framing survives both a
-  // layout change and a viewport change. A `world` view stores a finished position and does neither.
-  bandViewIds = registerBandViews(cameraRegistry, new THREE.Box3().setFromObject(band));
-  bandViewIndex = 0;
-
-  // Anything outside this is behind the LED wall (z ≈ -8.2) or off the deck, and renders black.
-  camera.setCameraBounds(VENUE_CAMERA_BOUNDS);
-  const diagnostics = camera.validateViews();
-  if (diagnostics.length) {
-    console.warn(`[Band View] ${diagnostics.length} 个机位不可用：`);
-    for (const item of diagnostics) {
-      console.warn(`  · ${item.viewId} (${item.label}) — ${item.problem}`);
-    }
-  }
-
-  const showcase = createAtelierShowcase({
-    element: host.renderer.domElement,
-    camera,
-    cameraRegistry,
-    interactions,
-    instruments: six,
-  });
-  for (const mode of showcase.modes) presentation.register(mode);
-
-  stage = new StageDirector({
-    camera,
-    instruments,
-    presentation,
-    modes: showcase.byInstrumentId,
-    entryViewIds: showcase.wholeViewIds,
-    bandViewId: bandViewIds[0],
-  });
-
-  camera.goToView(bandViewIds[0], true);
-
-  // Seed the orbit from the resolved view, so the first drag continues from where it landed.
-  orbit.adoptCamera();
+  const variant = new URLSearchParams(location.search).get('electric');
+  const acousticVariant = new URLSearchParams(location.search).get('acoustic');
+  const defaults = await createDefaultInstruments(live,
+    variant === 'single-cut' || variant === 'flying-v' ? variant : 'classic',
+    acousticVariant === 'cutaway-sunburst' ? acousticVariant : 'natural');
+  const list = Object.values(defaults);
+  try {
+    const next = BandSession.prepare(Object.entries(defaults).map(([type, instrument]) =>
+      ({ id: instrument.id, type: type as LayoutInstrumentType, root: instrument.root })), venue.layout);
+    mountBand(next, list, true);
+    if (variant === 'single-cut' || variant === 'flying-v') stage?.focusInstrument(defaults.electric.id, true);
+    else if (acousticVariant === 'cutaway-sunburst') stage?.focusInstrument(defaults.acoustic.id, true);
+  } catch(error) { for (const instrument of list) instrument.dispose(); throw error; }
 }
 
 /* ------------------------------------------------------------------ *
@@ -287,6 +273,7 @@ function releasePointer(element: HTMLElement, pointerId: number): void {
 
 function attachStageInput(): void {
   const element = host.renderer.domElement;
+  element.addEventListener('contextmenu', event => event.preventDefault());
   let press: {
     x: number;
     y: number;
@@ -296,15 +283,16 @@ function attachStageInput(): void {
 
   element.addEventListener('pointerdown', (event) => {
     void unlockAudio();
+    if (!stage) return;
     press = {
       x: event.clientX,
       y: event.clientY,
       button: event.button,
       moved: false,
     };
-    if (stage.isBand && event.button === 0) {
+    if ((stage?.isBand || stage?.current.kind === 'broadcast') && event.button === 0) {
       capturePointer(element, event.pointerId);
-      orbit.beginOrbit();
+      stage.takeBandControl();
     }
   });
 
@@ -315,7 +303,7 @@ function attachStageInput(): void {
     if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
     press.moved = true;
 
-    if (press.button !== 0 || !stage.isBand) return;
+    if (press.button !== 0 || !stage?.isBand) return;
     orbit.orbitBy(dx, dy);
     press.x = event.clientX;
     press.y = event.clientY;
@@ -323,21 +311,21 @@ function attachStageInput(): void {
 
   const release = (event: PointerEvent): void => {
     releasePointer(element, event.pointerId);
-    orbit.endOrbit();
     const gesture = press;
     press = null;
     if (!gesture || gesture.moved || event.button !== gesture.button) return;
 
     if (gesture.button !== 2) return;
     // Right click steps back out; right *drag* stays as the mode's pan.
-    if (!stage.isBand) stage.showBand();
+    if (stage?.current.kind === 'instrument') stage.showBand();
   };
   element.addEventListener('pointerup', release);
   element.addEventListener('pointercancel', release);
 
   element.addEventListener('wheel', (event) => {
-    if (!stage.isBand) return;
+    if (!stage?.isBand && stage?.current.kind !== 'broadcast') return;
     event.preventDefault();
+    stage.takeBandControl();
     orbit.zoomBy(Math.exp(event.deltaY * 0.001));
   }, { passive: false });
 
@@ -347,8 +335,8 @@ function attachStageInput(): void {
   element.addEventListener('dblclick', (event) => {
     const instrumentId = instrumentAt(event.clientX, event.clientY);
     if (!instrumentId) return;
-    if (instrumentId === stage.focusedInstrumentId) return;
-    stage.focusInstrument(instrumentId);
+    if (instrumentId === stage?.focusedInstrumentId) return;
+    stage?.focusInstrument(instrumentId);
   });
 
   document.addEventListener('keydown', (event) => {
@@ -359,10 +347,11 @@ function attachStageInput(): void {
     // Inside an instrument the mode owns the number keys (its own saved views), so this only
     // answers while the whole band is on screen.
     if (event.code === 'Escape') {
-      if (!stage.isBand) stage.showBand();
+      document.body.classList.remove('concert-watch');
+      if (!stage?.isBand) stage?.showBand();
       return;
     }
-    if (!stage.isBand) return;
+    if (!stage?.isBand && stage?.current.kind !== 'broadcast') return;
 
     // Stage views. The camera layer takes both a move and a cut; this call site asks for the
     // default (a move) and nothing more.
@@ -372,9 +361,7 @@ function attachStageInput(): void {
     const viewId = bandViewIds[index];
     if (!viewId) return;
     event.preventDefault();
-    bandViewIndex = index;
-    stage.setBandView(viewId);
-    camera.goToView(viewId);
+    stage?.selectBandView(viewId);
   });
 }
 
@@ -385,28 +372,24 @@ function resize(): void {
 
 let lastFrame = performance.now();
 function loop(): void {
+  if (offlineMode) return; // The export controller owns time and rendering in its isolated page.
   const now = performance.now();
   const dt = Math.min(MAX_FRAME_SECONDS, (now - lastFrame) / 1000);
   lastFrame = now;
 
   player?.update();
-  for (const record of performanceBand?.built ?? []) record.instrument.update(dt);
+  lighting.update(player?.time ?? 0);
+  screens.update(dt, player ? { time: player.time, playing: player.isPlaying } : null, screenAudio.sample());
+  venue.update(dt);
+  lightingPanel.update();
+  screenPanel.update();
   instruments.update(dt);
-  presentation.update(dt);
-  stage?.update();
-  // Only the band state drives the orbit controller; a live mode owns the camera itself.
-  // The orbit owns the camera whenever the whole band is on screen, so it must not fight the
-  // flight to a new stage view: wait for the move to land, then adopt where it arrived.
-  if (stage?.isBand && !camera.isTransitioning) {
-    if (pendingOrbitAdopt) {
-      orbit.adoptCamera();
-      pendingOrbitAdopt = false;
-    }
-    orbit.update(dt);
-  }
-  camera.update(dt);
   resize();
+  if (stage?.current.kind === 'broadcast') directorPanel.update(true, cameraShow.update(player?.time ?? 0));
+  stage?.update(dt);
   host.render(camera.output);
+  titles.update(player?.time ?? 0);
+  titles.render(host.renderer);
   if (player) transport.update(player.time, player.total, player.isPlaying);
   requestAnimationFrame(loop);
 }
@@ -422,164 +405,132 @@ function loop(): void {
  * keyboard writing needs three manuals gets three keyboards. `src/midi` decides all of that from the
  * file alone, and this only puts the answer on the stage.
  *
- * Focus and close-ups belong to the interactive band, so they are switched off for the duration —
- * an eight-piece built from a score has no saved views and nothing to step into.
+ * Every planned instance gets its own views and interaction mode, including repeated types.
  */
 const transport = new TransportBar({
-  onPlay: () => void player?.play(),
+  onPlay: () => { void player?.play().catch((error) => {
+    dropHint.setVisible(true);
+    dropHint.setText(String(error));
+  }); },
   onPause: () => player?.pause(),
   onStop: () => player?.stop(),
   onSeek: (seconds) => player?.seek(seconds),
 });
 const dropHint = new DropHint();
 let performanceBand: BuiltBand | null = null;
-/**
- * Measured extent of all six instruments, taken from the band the page opens with.
- *
- * It is deliberately not re-measured from a band built out of a score: row packing asks how wide
- * an instrument is, and a score that leaves the violin out would then arrange the band as if
- * violins did not exist. A seven-piece and a one-piece band of the same instruments must agree
- * about how much room a violin takes.
- */
-let footprints: InstrumentFootprints | null = null;
 /** The stage view is being flown to; the orbit takes over once it lands. */
-let pendingOrbitAdopt = false;
 let player: BandPlayer | null = null;
 let loading = false;
 
-/** One of every instrument: the band the page opens with before a file says otherwise. */
-const COMPLETE_BAND: BandComposition = {
-  drums: 1,
-  keyboard: 1,
-  violin: 1,
-  electric: 1,
-  acoustic: 1,
-  bass: 1,
-};
 
 async function loadMidiFile(file: File): Promise<void> {
+  await loadMidiSource(() => Promise.resolve(file), file.name);
+}
+
+async function loadLightingExample(id: string): Promise<void> {
+  const example = SHOW_EXAMPLES.find(item => item.id === id);
+  if (!example) throw new Error('未知灯光示例');
+  await loadMidiSource(async () => {
+    const response = await fetch(example.midiUrl);
+    if (!response.ok) throw new Error(`示例下载失败：${response.status}`);
+    return new File([await response.arrayBuffer()], `${example.title}.mid`, { type: 'audio/midi' });
+  }, example.title);
+}
+
+async function loadMidiSource(source: () => Promise<File>, label: string): Promise<void> {
   if (loading) return;
   loading = true;
+  lightingPanel.setBusy(true);
   dropHint.setVisible(true);
-  dropHint.setText(`正在解析 ${file.name} …`);
+  dropHint.setText(`正在解析 ${label} …`);
 
   try {
-    const analysis = analyzeMidi(new Uint8Array(await file.arrayBuffer()));
+    await initialBandReady;
+    await audio.resume();
+    const file = await source();
+    const binary = await file.arrayBuffer();
+    const show = await prepareMatchingShow(binary, venue.lighting.rig);
+    const analysis = analyzeMidi(new Uint8Array(binary));
+    if (!analysis.plan.totalInstruments) throw new Error("MIDI 中没有可显示的音符");
+    dropHint.setText('正在准备乐队和布局…');
     dropHint.setText(
-      `${file.name}<br><span style="opacity:.6">${analysis.plan.totalInstruments} 件乐器，正在搭建…</span>`,
+      `${file.name}\n${analysis.plan.totalInstruments} 件乐器，正在搭建…`,
     );
-    await enterPerformanceMode(analysis, file.name);
+    await enterPerformanceMode(analysis, file.name, binary, show);
   } catch (error) {
     console.error('[Band View] MIDI 装载失败', error);
     dropHint.setVisible(true);
-    dropHint.setText(`${file.name} 无法解析<br><span style="opacity:.6">${String(error)}</span>`);
+    dropHint.setText(`${label} 载入失败\n${String(error)}`);
   } finally {
     loading = false;
+    lightingPanel.setBusy(false);
   }
+}
+
+/** The editor's JSON is applied by ID, using exactly the same normalized models and transforms. */
+async function loadLayoutFile(file: File): Promise<void> {
+  if (loading) return;
+  loading = true;
+  lightingPanel.setBusy(true);
+  const created: Instrument[] = [];
+  try {
+    await initialBandReady;
+    if (file.size > 1_000_000) throw new Error('布局文件不能超过 1 MB');
+    const layout = parseLayoutDocument(JSON.parse(await file.text()));
+    const list: Instrument[] = [];
+    for (const descriptor of layout.instances) {
+      const existing = instruments.get(descriptor.id);
+      if (existing && existing.role !== descriptor.type) throw new Error(`${descriptor.id} 的类型与当前实例不符`);
+      const instrument = existing ?? await createInstrumentInstance(descriptor, live);
+      if (!existing) created.push(instrument);
+      list.push(instrument);
+    }
+    const next = BandSession.fromLayout(list.map((instrument, i) => ({ id: instrument.id, type: layout.instances[i].type, root: instrument.root })), layout, venue.layout);
+    player?.stop(); player?.dispose(); player = null;
+    cameraShow.setShow(null); directorPanel.setShow(null);
+    titles.setShow(null); directorPanel.setTitles(null);
+    lighting.setShow(null);
+    await screenPanel.setSong(null);
+    mountBand(next, list);
+    performanceBand = null;
+    transport.setVisible(false);
+    dropHint.setVisible(false);
+  } catch (error) {
+    for (const instrument of created) if (instruments.get(instrument.id) !== instrument) instrument.dispose();
+    dropHint.setText(`布局未应用：${String(error)}`); dropHint.setVisible(true);
+  } finally { loading = false; lightingPanel.setBusy(false); }
 }
 
 async function enterPerformanceMode(
   analysis: ReturnType<typeof analyzeMidi>,
   fileName: string,
+  binary: ArrayBuffer,
+  show: PreparedBandShow | null,
 ): Promise<void> {
+  const built = await buildMidiBand(analysis.plan, graph, instruments);
+  let next: BandSession;
+  try {
+    next = BandSession.prepare(built.built.map(record => ({ id: record.instrument.id, type: record.type, root: record.instrument.root })), venue.layout, bandSession);
+    player?.pause();
+    await playback.load(binary, fileName);
+  } catch(error) { built.discard(); throw error; }
   player?.dispose();
-  player = null;
-  performanceBand?.dispose();
-  performanceBand = null;
-
-  // The old modes hold the old instruments, so the manager goes with them and a fresh one takes
-  // over. Everything else — the camera, the orbit, the stage director — is rebuilt below rather
-  // than switched off: looking around and stepping into an instrument are the point of this page.
-  const replaced = instruments.list();
-  for (const instrument of replaced) {
-    cameraRegistry.clearInstrumentViews(instrument.id);
-    instruments.unregister(instrument.id);
-  }
-  presentation.dispose();
-  presentation = new PresentationManager();
-  band.clear();
-
-  const built = await buildMidiBand(analysis.plan, graph);
+  mountBand(next, built.built.map(record => record.instrument));
   performanceBand = built;
-  // The first of each type keeps the plain name (`violin.main`), because the 29 authored views and
-  // the six showcase modes are keyed by instrument type. Extra instances get their own names and
-  // can play, but have no close-up to step into.
-  const seen = new Map<string, number>();
-  for (const record of built.built) {
-    const index = seen.get(record.type) ?? 0;
-    seen.set(record.type, index + 1);
-    record.instrument.setInstanceId(index === 0 ? `${record.type}.main` : `${record.type}.${index + 1}`);
-    instruments.register(record.instrument);
-  }
-
-  // The arrangement is the layout engine's, not this page's. The plan's counts become a layout
-  // document, the engine packs it into rows, and every member stands on the slot it was given — so
-  // an eight-piece band from a score is arranged exactly as the same eight instruments would be if
-  // someone opened that document in the layout editor. Nothing here decides where anything stands.
-  if (!footprints) throw new Error('footprints are missing; the interactive band never finished building');
-  const composition: BandComposition = {};
-  for (const entry of analysis.plan.instruments) composition[entry.type] = entry.count;
-  const midiLayout = bandLayout(composition, footprints);
-  adoptBand(
-    presentBand({
-      members: built.built.map((record) =>
-        prepareMember(record.instrument.id, record.type, record.instrument.root),
-      ),
-      home: midiLayout,
-      surfaceY: STAGE_SURFACE_Y,
-      clearanceZ: LED_CLEARANCE_Z,
-    }),
-  );
-
-  // Interaction comes back, built for whichever instruments the file kept.
-  const firstOfType = new Map<string, Instrument>();
-  for (const record of built.built) {
-    if (!firstOfType.has(record.type)) firstOfType.set(record.type, record.instrument);
-  }
-  const showcaseInstruments = {
-    drums: firstOfType.get('drums') as DrumsInstrument | undefined,
-    keyboard: firstOfType.get('keyboard') as KeyboardInstrument | undefined,
-    violin: firstOfType.get('violin') as ViolinInstrument | undefined,
-    electric: firstOfType.get('electric') as ElectricGuitarInstrument | undefined,
-    acoustic: firstOfType.get('acoustic') as AcousticGuitarInstrument | undefined,
-    bass: firstOfType.get('bass') as BassInstrument | undefined,
-  };
-  const showcase = createAtelierShowcase({
-    element: host.renderer.domElement,
-    camera,
-    cameraRegistry,
-    interactions,
-    instruments: showcaseInstruments,
-  });
-  for (const mode of showcase.modes) presentation.register(mode);
-  registerAtelierViews(cameraRegistry, showcaseInstruments);
-
-  bandViewIds = registerBandViews(cameraRegistry, new THREE.Box3().setFromObject(band));
-  bandViewIndex = 0;
-  stage = new StageDirector({
-    camera,
-    instruments,
-    presentation,
-    modes: showcase.byInstrumentId,
-    entryViewIds: showcase.wholeViewIds,
-    bandViewId: bandViewIds[0],
-  });
-
-  camera.setCameraBounds(VENUE_CAMERA_BOUNDS);
-  for (const problem of camera.validateViews()) {
-    console.warn(`[Band View] ${problem.viewId} — ${problem.problem}`);
-  }
-  // A move, not a cut: the band changed under the camera, and snapping there reads as a glitch.
-  camera.goToView(bandViewIds[0]);
-
   player = new BandPlayer({
-    graph,
+    playback,
     band: built,
-    routed: analysis.routed,
     plan: analysis.plan,
-    songDuration: analysis.midi.duration,
-    onEnded: () => transport.update(0, player?.total ?? 0, false),
+    onEnded: () => transport.update(playback.total, playback.total, false),
   });
+  lighting.setShow(show?.lighting ?? null, player.time);
+  cameraShow.setShow(show?.camera ?? null, built.built.map(b => ({ type: b.type, instance: b.instance, instrumentId: b.instrument.id })));
+  directorPanel.setShow(show?.camera ?? null);
+  titles.setShow(show?.titles ?? null); titles.enabled = true;
+  directorPanel.setTitles(show?.titles ?? null);
+  if (show?.camera) stage?.startBroadcast();
+  screens.update(0, { time: player.time, playing: player.isPlaying });
+  await screenPanel.setSong(show?.screens ?? null);
   transport.setDuration(player.total);
   transport.setSummary(summarisePlan(analysis, fileName));
   transport.setVisible(true);
@@ -593,6 +544,9 @@ function summarisePlan(analysis: ReturnType<typeof analyzeMidi>, fileName: strin
     drums: '鼓',
     bass: '贝斯',
     keyboard: '键盘',
+    piano: '钢琴',
+    cello: '大提琴',
+    saxophone: '萨克斯',
     acoustic: '木吉他',
     electric: '电吉他',
     violin: '提琴',
@@ -617,11 +571,11 @@ window.addEventListener('dragleave', (event) => {
 window.addEventListener('drop', (event) => {
   event.preventDefault();
   const file = event.dataTransfer?.files?.[0];
-  if (file) void loadMidiFile(file);
+  if (file) void (/\.json$/i.test(file.name) ? loadLayoutFile(file) : loadMidiFile(file));
   else dropHint.setVisible(false);
 });
 
-// A hidden tab keeps its audio clock running, so playback needs rebuilding when it returns.
+// Audio continues in the worklet; only the visual pose needs rebuilding on return.
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) player?.resumeFromSuspension();
 });
@@ -629,17 +583,36 @@ document.addEventListener('visibilitychange', () => {
 attachStageInput();
 resize();
 loop();
-void prepareAudio();
+live.onError = (error) => {
+  console.error('[自由弹奏]', error);
+  dropHint.setText(`自由弹奏音源载入失败：${String(error)}`);
+  dropHint.setVisible(true);
+};
+void prepareAudio().catch(live.onError);
 
-buildBand().catch((error) => {
+const initialBandReady = buildBand();
+void initialBandReady.catch((error) => {
   console.error('[Band View] 装配失败：', error);
+  dropHint.setText(`乐队载入失败：${String(error)}`); dropHint.setVisible(true);
 });
 
 window.addEventListener('pagehide', () => {
+  player?.dispose();
+  playback.dispose();
+  midiOutput.disconnect();
   interactions.dispose();
   presentation.dispose();
   instruments.dispose();
   graph.dispose();
+  audience.dispose();
+  cameraPanel.dispose();
+  lightingPanel.dispose();
+  lighting.dispose();
+  screenPanel.dispose();
+  directorPanel.dispose();
+  titles.dispose();
+  screens.dispose();
+  screenAudio.dispose();
   host.dispose();
 }, { once: true });
 
@@ -648,14 +621,20 @@ if (import.meta.env.DEV) {
   Object.defineProperty(window, 'bandView', {
     configurable: true,
     value: {
-      host, instruments, interactions, camera, cameraRegistry, presentation, audio,
-      instrumentAt,
+      host, venue, lighting, screens, instruments, interactions, camera, cameraRegistry, audio, live,
+      get presentation() { return presentation; },
+      instrumentAt, audience,
       get band() { return band; },
+      get session() { return bandSession; },
       get stage() { return stage; },
       get orbit() { return orbit; },
       get player() { return player; },
       get performanceBand() { return performanceBand; },
+      cameraShow, titles,
+      offline: offlineMode ? new OfflineStage({ player: () => player, instruments, lighting, screens, venue, camera, cameraShow, titles, host }) : null,
       loadMidiFile,
+      loadLightingExample,
+      loadLayoutFile,
       analyzeMidi,
     },
   });

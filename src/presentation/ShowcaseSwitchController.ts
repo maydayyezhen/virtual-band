@@ -77,7 +77,7 @@ export class ShowcaseSwitchController {
   private readonly onKeyDown = (event: KeyboardEvent): void => {
     if (event.code !== 'Tab' || event.ctrlKey || event.altKey || event.metaKey) return;
     const targetTag = event.target instanceof HTMLElement ? event.target.tagName : '';
-    if (/INPUT|TEXTAREA|SELECT/.test(targetTag)) return;
+    if (/INPUT|TEXTAREA|SELECT|BUTTON|A/.test(targetTag)) return;
     event.preventDefault();
     event.stopPropagation();
     this.next(event.shiftKey ? -1 : 1);

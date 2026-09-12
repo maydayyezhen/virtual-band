@@ -1,6 +1,8 @@
 'use strict';
-function createGuitar() {
-    const root = new T.Group(); root.name = 'Procedural acoustic guitar';
+function createGuitar(variant='natural') {
+    const cutaway=variant==='cutaway-sunburst';
+    const root = new T.Group(); root.name = cutaway?'Amber sunburst cutaway acoustic guitar':'Procedural acoustic guitar';
+    root.userData.acousticModelVariant=variant;
     const spruce = woodTexture('spruce'), rosewood = woodTexture('rosewood'), ebony = woodTexture('ebony', 512), mahogany = woodTexture('mahogany', 512);
     const sideTex = rosewood.clone(); sideTex.rotation = Math.PI / 2; sideTex.wrapS = sideTex.wrapT = T.RepeatWrapping; sideTex.repeat.set(1, 2.1);
     const phys = (parameters) => new T.MeshPhysicalMaterial(parameters);
@@ -18,6 +20,10 @@ function createGuitar() {
       pearl: phys({color:0xdedbc5, metalness:.25, roughness:.23, iridescence:.5, iridescenceIOR:1.34, iridescenceThicknessRange:[120,310]}),
       guard: phys({map:tortoiseTexture(), roughness:.25, clearcoat:.85, clearcoatRoughness:.15, color:0xd7b79a}),
     };
+    if(cutaway){
+      mat.top.roughness=.32;mat.top.clearcoat=.58;mat.top.clearcoatRoughness=.22;
+      mat.back.color.setHex(0x957968);mat.side.color.setHex(0xa58c78);
+    }
     const add = (g, material, parent = root, name = '') => {
       const m = new T.Mesh(g, material); parent.add(m); m.name = name;
       m.castShadow = true; m.receiveShadow = true; return m;
@@ -51,8 +57,18 @@ function createGuitar() {
       s.bezierCurveTo(1.10,-3.78,1.90,-3.28,1.90,-2.44);
       s.bezierCurveTo(1.90,-1.90,1.55,-1.47,1.12,-1.03);
       s.bezierCurveTo(.96,-.87,.97,-.58,1.18,-.33);
-      s.bezierCurveTo(1.40,-.09,1.52,.16,1.36,.49);
-      s.bezierCurveTo(1.12,.91,.65,1.04,0,1.04);
+      if(cutaway){
+        // Rounded Venetian cutaway leaves the fretboard and neck joint untouched.
+        s.bezierCurveTo(1.40,-.09,1.49,.16,1.33,.43);
+        s.bezierCurveTo(1.22,.63,1.05,.74,.92,.63);
+        s.bezierCurveTo(.79,.52,.78,.28,.63,.19);
+        s.bezierCurveTo(.50,.11,.39,.20,.36,.39);
+        s.bezierCurveTo(.33,.63,.35,.88,.30,1.02);
+        s.bezierCurveTo(.21,1.04,.11,1.04,0,1.04);
+      }else{
+        s.bezierCurveTo(1.40,-.09,1.52,.16,1.36,.49);
+        s.bezierCurveTo(1.12,.91,.65,1.04,0,1.04);
+      }
       s.bezierCurveTo(-.65,1.04,-1.12,.91,-1.36,.49);
       s.bezierCurveTo(-1.52,.16,-1.40,-.09,-1.18,-.33);
       s.bezierCurveTo(-.97,-.58,-.96,-.87,-1.12,-1.03);
@@ -60,6 +76,32 @@ function createGuitar() {
       s.bezierCurveTo(-1.90,-3.28,-1.10,-3.78,0,-3.76);s.closePath();return s;
     }
     const outline=bodyOutline(), contour=outline.getSpacedPoints(280).slice(0,-1);
+    if(cutaway){
+      // Stain the existing high-resolution spruce grain. The shaded perimeter
+      // follows the real cutaway as well as both bouts, rather than an oval decal.
+      mat.top.map=canvasTexture(1024,1024,(ctx,w,h)=>{
+        ctx.drawImage(spruce.image,0,0,w,h);
+        const xs=contour.map(p=>p.x),ys=contour.map(p=>p.y);
+        const minX=Math.min(...xs)-.014,maxX=Math.max(...xs)+.014;
+        const minY=Math.min(...ys)-.014,maxY=Math.max(...ys)+.014;
+        const trace=()=>{
+          ctx.beginPath();
+          contour.forEach((p,i)=>{
+            const x=(p.x-minX)/(maxX-minX)*w,y=h-(p.y-minY)/(maxY-minY)*h;
+            if(i)ctx.lineTo(x,y);else ctx.moveTo(x,y);
+          });
+          ctx.closePath();
+        };
+        ctx.lineJoin='round';
+        ctx.filter='blur(42px)';ctx.strokeStyle='#63371b';ctx.lineWidth=120;trace();ctx.stroke();
+        ctx.filter='blur(16px)';ctx.strokeStyle='#392015';ctx.lineWidth=38;trace();ctx.stroke();
+        ctx.filter='none';
+        // A translucent stain keeps longitudinal wood fibres visible at the rim.
+        ctx.globalCompositeOperation='soft-light';ctx.globalAlpha=.35;
+        ctx.drawImage(spruce.image,0,0,w,h);
+        ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;
+      });
+    }
     const holeY=-.56,holeR=.525,topZ=.543;
     const top=bodyOutline(),hole=new T.Path();hole.absarc(0,holeY,holeR,0,TAU,true);top.holes.push(hole);
     slab(top,.042,.486,mat.top,root,.014).name='Spruce soundboard with open sound hole';
@@ -110,12 +152,12 @@ function createGuitar() {
     // A real cavity, with braces on its underside and a paper maker's label.
     rod(V(-1.29,-2.72,.39),V(.76,-.73,.39),.047,mat.inner,root,6);
     rod(V(1.29,-2.72,.39),V(-.76,-.73,.39),.047,mat.inner,root,6);
-    box(2.10,.073,.11,0,.29,.41,mat.inner);
+    box(cutaway?1.37:2.10,.073,.11,cutaway?-.365:0,.29,.41,mat.inner);
     box(.090,.64,.10,-.64,-.44,.41,mat.inner);box(.090,.64,.10,.64,-.44,.41,mat.inner);
     const labelTex=canvasTexture(512,256,(ctx,w,h)=>{
       ctx.fillStyle='#c8af80';ctx.fillRect(0,0,w,h);ctx.strokeStyle='#695436';ctx.lineWidth=3;ctx.strokeRect(14,14,w-28,h-28);
       ctx.textAlign='center';ctx.fillStyle='#4a3825';ctx.font='54px Georgia, serif';ctx.fillText('ATELIER',w/2,108);
-      ctx.font='21px Georgia, serif';ctx.fillText('ACOUSTIC  ·  No. 01',w/2,151);ctx.font='15px Georgia, serif';ctx.fillText('SPRUCE  /  ROSEWOOD',w/2,190);
+      ctx.font='21px Georgia, serif';ctx.fillText(cutaway?'ACOUSTIC  ·  No. 02':'ACOUSTIC  ·  No. 01',w/2,151);ctx.font='15px Georgia, serif';ctx.fillText('SPRUCE  /  ROSEWOOD',w/2,190);
     });
     const label=add(new T.PlaneGeometry(.84,.42),new T.MeshStandardMaterial({map:labelTex,roughness:1}));label.position.set(0,-.59,-.487);
 

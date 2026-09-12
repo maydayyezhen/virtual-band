@@ -1,0 +1,51 @@
+.band-camera {
+  position: fixed; z-index: 20; top: 18px; left: 18px; max-width: calc(100vw - 36px);
+  padding: 14px 16px; border: 1px solid #c8d8e225; border-radius: 14px;
+  color: #e8edf1; background: #111820e8; backdrop-filter: blur(16px);
+  font: 13px/1.5 "Segoe UI", "Microsoft YaHei", sans-serif;
+  box-shadow: 0 6px 24px #0003;
+  max-height: calc(100dvh - 130px); overflow-y: auto;
+}
+.band-camera__heading { display: flex; align-items: center; gap: 16px; margin-bottom: 10px; }
+.band-camera__heading strong { font-size: 15px; letter-spacing: .04em; }
+.band-camera__heading span { color: #b5c7d1; font-size: 12px; }
+.band-camera__controls, .band-camera__roam-tools { display: flex; gap: 8px; flex-wrap: wrap; }
+.band-camera button, .band-camera select, .band-camera-pad button {
+  font: inherit; color: #e8edf1; background: #202d37; border: 1px solid #a8c4d12e;
+  border-radius: 8px; min-height: 38px; padding: 7px 12px; cursor: pointer;
+}
+.band-camera button:hover, .band-camera select:hover { background: #2a3b48; }
+.band-camera__controls a { color: #bce3ef; padding: 8px 4px; align-self: center; }
+.band-camera button[aria-pressed="true"] { background: #c4decf; color: #172b21; border-color: #d0e8da; }
+.band-camera :focus-visible, .band-camera-pad :focus-visible { outline: 2px solid #aed9ff; outline-offset: 3px; }
+.band-camera__hint { max-width: 410px; margin: 10px 0 0; color: #b5c2ca; font-size: 12px; }
+.band-camera__roam-tools { margin-top: 8px; }
+.band-camera [hidden], .band-camera-pad[hidden] { display: none; }
+.band-camera button:disabled, .band-camera select:disabled { opacity: .5; cursor: default; }
+.band-lighting { border-top: 1px solid #c8d8e225; margin-top: 12px; padding-top: 12px; }
+.band-lighting label { display: flex; align-items: center; gap: 6px; min-height: 38px; cursor: pointer; }
+.band-lighting input { accent-color: #c4decf; width: 16px; height: 16px; }
+.band-lighting > select { margin-top: 8px; width: 100%; }
+.band-lighting > span { display: block; margin-top: 8px; max-width: 410px; color: #b5c2ca; font-size: 12px; }
+.band-screens { border-top: 1px solid #c8d8e225; margin-top: 12px; padding-top: 10px; max-width: 410px; }
+.band-screens summary { cursor: pointer; min-height: 32px; font-weight: 600; }
+.band-screens > * + * { margin-top: 8px; }
+.band-screens textarea { box-sizing: border-box; width: 100%; resize: vertical; color: #e8edf1; background: #202d37; border: 1px solid #a8c4d12e; border-radius: 8px; padding: 8px; font: inherit; }
+.band-screens label { display: flex; align-items: center; gap: 8px; min-height: 38px; }
+.band-screens input[type="range"] { min-width: 0; flex: 1; accent-color: #bde2eb; }
+.band-screens input[type="checkbox"] { width: 16px; height: 16px; accent-color: #c4decf; }
+.band-screens p { color: #b5c2ca; font-size: 12px; margin-bottom: 0; overflow-wrap: anywhere; }
+.band-camera-pad { position: fixed; bottom: 105px; left: 20px; z-index: 20; display: none; gap: 6px; touch-action: none; }
+.band-camera-pad button { width: 46px; height: 46px; font-size: 20px; }
+[data-band-view] canvas { touch-action: none; }
+[data-band-view] canvas:focus-visible { outline: 2px solid #aed9ff; outline-offset: -2px; }
+@media (pointer: coarse) { .band-camera-pad { display: flex; } }
+@media (max-width: 600px) {
+  .band-camera { top: 10px; left: 10px; max-width: calc(100vw - 44px); padding: 10px 12px; }
+  .band-camera button, .band-camera select { min-height: 44px; }
+  .band-lighting label { min-height: 44px; }
+  .band-screens label, .band-screens summary { min-height: 44px; }
+  .band-camera__heading { gap: 10px; }
+  .band-camera__heading span { max-width: 165px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+@media (prefers-reduced-motion: reduce) { .band-camera * { scroll-behavior: auto; } }

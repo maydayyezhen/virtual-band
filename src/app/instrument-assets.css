@@ -1,0 +1,23 @@
+.instrument-assets {
+  position: fixed; z-index: 100; top: 16px; right: 16px; width: min(280px, calc(100vw - 32px));
+  padding: 14px; border: 1px solid #c8d8e230; border-radius: 12px;
+  background: #111820ed; color: #e8edf1; font: 13px/1.5 "Segoe UI", "Microsoft YaHei", sans-serif;
+  box-shadow: 0 6px 24px #0003;
+}
+.instrument-assets strong { display: block; font-size: 16px; margin-bottom: 10px; }
+.instrument-assets label { display: block; color: #b5c7d1; margin-bottom: 5px; }
+.instrument-assets select, .instrument-assets button {
+  min-height: 40px; padding: 7px 10px; color: inherit; font: inherit;
+  background: #202d37; border: 1px solid #a8c4d140; border-radius: 7px; cursor: pointer;
+}
+.instrument-assets select { width: 100%; }
+.instrument-assets__actions { display: flex; gap: 8px; margin-top: 8px; }
+.instrument-assets button { flex: 1; }
+.instrument-assets button:hover { background: #30434f; }
+.instrument-assets p { color: #b5c7d1; margin: 9px 0; font-size: 12px; }
+.instrument-assets a { color: #bce3ef; display: inline-block; padding: 5px 0; }
+.instrument-assets :focus-visible { outline: 2px solid #aed9ff; outline-offset: 3px; }
+@media (max-width: 600px) {
+  .instrument-assets { top: 8px; right: 8px; width: 225px; padding: 10px; }
+  .instrument-assets button, .instrument-assets select { min-height: 44px; }
+}

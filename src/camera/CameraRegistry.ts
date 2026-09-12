@@ -122,7 +122,10 @@ export class CameraRegistry {
 
   setInstrumentViews(instrumentId: string, views: Array<InstrumentCameraView | InstrumentOrbitCameraView>): void {
     this.clearInstrumentViews(instrumentId);
-    for (const view of views) this.register(view);
+    for (const template of views) {
+      const name = template.id.slice(template.id.indexOf(':') + 1);
+      this.register({ ...structuredClone(template), id: `${instrumentId}:${name}`, instrumentId });
+    }
   }
 
   clearInstrumentViews(instrumentId: string): void {

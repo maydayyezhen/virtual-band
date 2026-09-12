@@ -1,10 +1,9 @@
 import * as THREE from 'three';
 import { getDrumKit } from '../../audio/DrumProgram';
-import { distanceForOrbitView } from '../../camera/CameraFraming';
+import { OrbitController } from '../../camera/OrbitController';
 import type { CameraRegistry, InstrumentOrbitCameraView } from '../../camera/CameraRegistry';
 import type { CameraSystem } from '../../camera/CameraSystem';
 import {
-  ATELIER_DRUM_VIEW_IDS,
   type AtelierDrumViewName,
 } from '../../camera/presets/AtelierDrumViews';
 import type { DrumsInstrument } from '../../instruments/drums/DrumsInstrument';
@@ -14,13 +13,6 @@ import { AtelierDrumDemo } from './AtelierDrumDemo';
 import { ATELIER_DRUM_KEYMAP, type AtelierDrumKeyAction } from './AtelierDrumKeymap';
 
 export type AtelierViewId = AtelierDrumViewName;
-
-interface CameraState {
-  target: THREE.Vector3;
-  yaw: number;
-  pitch: number;
-  distance: number;
-}
 
 interface PointerState {
   id: number;
@@ -37,37 +29,19 @@ interface GestureState {
 }
 
 export class AtelierDrumShowcaseMode implements PresentationMode {
-  readonly id = 'atelier-drums';
+  get id(): string { return `${this.drums.id}:showcase`; }
   readonly demo: AtelierDrumDemo;
 
   private readonly element: HTMLCanvasElement;
-  private readonly camera: CameraSystem;
   private readonly cameraRegistry: CameraRegistry;
   private readonly drums: DrumsInstrument;
   private readonly interactions: InstrumentInteractionSystem;
-  private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  private readonly orbit: OrbitController;
   private readonly pointers = new Map<number, PointerState>();
   private readonly computerKeys = new Map<string, AtelierDrumKeyAction>();
-  private readonly current: CameraState = {
-    target: new THREE.Vector3(),
-    yaw: 0,
-    pitch: 0,
-    distance: 15,
-  };
-  private readonly want: CameraState = {
-    target: new THREE.Vector3(),
-    yaw: 0,
-    pitch: 0,
-    distance: 15,
-  };
 
   private active = false;
   private preset: AtelierViewId = 'whole';
-  private zoom = 1;
-  private width = 1;
-  private height = 1;
-  private momentumX = 0;
-  private momentumY = 0;
   private previousGesture: GestureState | null = null;
   private readonly unsubscribePanic: () => void;
 
@@ -79,10 +53,11 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
     interactions: InstrumentInteractionSystem;
   }) {
     this.element = options.element;
-    this.camera = options.camera;
     this.cameraRegistry = options.cameraRegistry;
     this.drums = options.drums;
     this.interactions = options.interactions;
+    this.orbit = new OrbitController({ camera: options.camera, element: options.element,
+      subject: options.drums.root, pitchRange: [0.04, 1.43], floorY: 0.13 });
     this.demo = new AtelierDrumDemo(this.drums);
     this.unsubscribePanic = this.drums.subscribePanic(() => this.resetInputState());
   }
@@ -91,7 +66,6 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
     if (this.active) return;
     this.active = true;
     this.attachInput();
-    this.syncViewport(true);
     this.selectView('whole', true);
   }
 
@@ -102,60 +76,19 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
     this.releaseInputState();
     this.detachInput();
     this.element.classList.remove('dragging', 'playable');
-    this.camera.resetLens();
   }
 
   update(dt: number): void {
     if (!this.active) return;
-    this.syncViewport(false);
     this.demo.update(dt);
-
-    if (
-      this.pointers.size === 0
-      && !this.reducedMotion.matches
-      && Math.abs(this.momentumX) + Math.abs(this.momentumY) > 0.0001
-    ) {
-      const damping = Math.exp(-dt * 11);
-      this.momentumX *= damping;
-      this.momentumY *= damping;
-      this.want.yaw += this.momentumX * dt * 23;
-      this.want.pitch = THREE.MathUtils.clamp(this.want.pitch + this.momentumY * dt * 23, 0.04, 1.43);
-    }
-
-    const ease = this.reducedMotion.matches ? 1 : 1 - Math.exp(-dt * 13);
-    this.current.yaw += (this.want.yaw - this.current.yaw) * ease;
-    this.current.pitch += (this.want.pitch - this.current.pitch) * ease;
-    this.current.distance += (this.want.distance - this.current.distance) * ease;
-    this.current.target.lerp(this.want.target, ease);
-
-    this.applyCamera();
+    this.orbit.update(dt);
   }
 
   selectView(id: AtelierViewId, instant = false): boolean {
     const preset = this.getPreset(id);
     if (!preset) return false;
-
     this.preset = id;
-    this.zoom = 1;
-    this.momentumX = 0;
-    this.momentumY = 0;
-    this.camera.setLens({ fov: preset.fov, near: preset.near, far: preset.far });
-    this.want.target.set(...preset.target);
-    this.want.yaw = this.current.yaw + Math.atan2(
-      Math.sin(preset.yaw - this.current.yaw),
-      Math.cos(preset.yaw - this.current.yaw),
-    );
-    this.want.pitch = preset.pitch;
-    this.want.distance = this.distanceFor(preset);
-
-    if (instant || this.reducedMotion.matches) {
-      this.current.target.copy(this.want.target);
-      this.current.yaw = this.want.yaw;
-      this.current.pitch = this.want.pitch;
-      this.current.distance = this.want.distance;
-      this.applyCamera();
-    }
-
+    this.orbit.setView(preset, instant);
     return true;
   }
 
@@ -179,7 +112,7 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
   }
 
   private getPreset(id: AtelierViewId): InstrumentOrbitCameraView | null {
-    const view = this.cameraRegistry.get(ATELIER_DRUM_VIEW_IDS[id]);
+    const view = this.cameraRegistry.get(`${this.drums.id}:${id}`);
     return view?.kind === 'instrument-orbit' ? view : null;
   }
 
@@ -232,8 +165,6 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
 
     this.pointers.set(event.pointerId, pointer);
     this.element.setPointerCapture(event.pointerId);
-    this.momentumX = 0;
-    this.momentumY = 0;
     this.previousGesture = null;
 
     if (hit) this.playHit(pointer, hit);
@@ -273,15 +204,10 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
         this.pan(x - this.previousGesture.x, y - this.previousGesture.y);
       }
       this.previousGesture = { d: distance, x, y };
-      this.momentumX = 0;
-      this.momentumY = 0;
-    } else if (pointer.mode === 'pan') {
+      } else if (pointer.mode === 'pan') {
       this.pan(dx, dy);
     } else {
-      this.momentumX = -dx * 0.0055;
-      this.momentumY = dy * 0.0047;
-      this.want.yaw += this.momentumX;
-      this.want.pitch = THREE.MathUtils.clamp(this.want.pitch + this.momentumY, 0.04, 1.43);
+      this.orbit.orbitBy(dx, dy);
     }
   };
 
@@ -312,13 +238,13 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
     if (binding) {
       this.pressKeyboardBinding(event.code, binding, event.repeat);
     } else if (event.code === 'ArrowLeft') {
-      this.want.yaw -= 0.10;
+      this.orbit.rotateBy(-0.10, 0);
     } else if (event.code === 'ArrowRight') {
-      this.want.yaw += 0.10;
+      this.orbit.rotateBy(0.10, 0);
     } else if (event.code === 'ArrowUp') {
-      this.want.pitch = THREE.MathUtils.clamp(this.want.pitch + 0.08, 0.04, 1.43);
+      this.orbit.rotateBy(0, 0.08);
     } else if (event.code === 'ArrowDown') {
-      this.want.pitch = THREE.MathUtils.clamp(this.want.pitch - 0.08, 0.04, 1.43);
+      this.orbit.rotateBy(0, -0.08);
     } else {
       handled = false;
     }
@@ -421,66 +347,11 @@ export class AtelierDrumShowcaseMode implements PresentationMode {
     this.pointers.clear();
     this.computerKeys.clear();
     this.previousGesture = null;
-    this.momentumX = 0;
-    this.momentumY = 0;
     this.element.classList.remove('dragging');
   }
 
-  private changeZoom(factor: number): void {
-    const preset = this.getPreset(this.preset);
-    if (!preset) return;
-    this.zoom = THREE.MathUtils.clamp(this.zoom * factor, 0.28, 1.75);
-    this.want.distance = this.distanceFor(preset) * this.zoom;
-  }
+  private changeZoom(factor: number): void { this.orbit.zoomBy(factor); }
 
-  private pan(dx: number, dy: number): void {
-    if (this.height <= 0) return;
-    const preset = this.getPreset(this.preset);
-    if (!preset) return;
+  private pan(dx: number, dy: number): void { this.orbit.panBy(dx, dy); }
 
-    this.drums.root.updateWorldMatrix(true, true);
-    const worldTarget = this.drums.root.localToWorld(this.current.target.clone());
-    const worldDistance = this.camera.output.position.distanceTo(worldTarget);
-    const scale = worldDistance * 2 * Math.tan(THREE.MathUtils.degToRad(preset.fov / 2)) / this.height;
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.output.quaternion);
-    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.output.quaternion);
-    const movedWorldTarget = worldTarget
-      .addScaledVector(right, -dx * scale)
-      .addScaledVector(up, dy * scale);
-    this.want.target.copy(this.drums.root.worldToLocal(movedWorldTarget));
-  }
-
-  private syncViewport(force: boolean): void {
-    const width = this.element.clientWidth;
-    const height = this.element.clientHeight;
-    if (!width || !height) return;
-    if (!force && width === this.width && height === this.height) return;
-    this.width = width;
-    this.height = height;
-    const preset = this.getPreset(this.preset);
-    if (!preset) return;
-    const distance = this.distanceFor(preset) * this.zoom;
-    this.want.distance = distance;
-    this.current.distance = distance;
-  }
-
-  private distanceFor(preset: InstrumentOrbitCameraView): number {
-    return distanceForOrbitView(preset, this.width, this.height);
-  }
-
-  private applyCamera(): void {
-    const preset = this.getPreset(this.preset);
-    if (!preset) return;
-
-    this.drums.root.updateWorldMatrix(true, true);
-    const cp = Math.cos(this.current.pitch);
-    const localPosition = new THREE.Vector3(
-      this.current.target.x + Math.sin(this.current.yaw) * cp * this.current.distance,
-      Math.max(0.13, this.current.target.y + Math.sin(this.current.pitch) * this.current.distance),
-      this.current.target.z + Math.cos(this.current.yaw) * cp * this.current.distance,
-    );
-    const position = this.drums.root.localToWorld(localPosition);
-    const target = this.drums.root.localToWorld(this.current.target.clone());
-    this.camera.setPose({ position, target, fov: preset.fov }, true);
-  }
 }

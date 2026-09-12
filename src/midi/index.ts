@@ -21,6 +21,9 @@ const TYPE_LABELS: Record<string, string> = {
   drums: '鼓',
   bass: '贝斯',
   keyboard: '键盘',
+  piano: '三角钢琴',
+  cello: '大提琴',
+  saxophone: '中音萨克斯',
   acoustic: '木吉他',
   electric: '电吉他',
   violin: '提琴',
@@ -36,33 +39,12 @@ const TYPE_LABELS: Record<string, string> = {
 export function analyzeMidi(data: ArrayBuffer | Uint8Array): MidiAnalysis {
   const midi = parseMidi(data);
 
-  // A part of two or three notes across a whole song is a placeholder, a stray marker or debris
-  // from whatever exported the file. Letting those claim an instrument costs a player on stage for
-  // nothing, so they are reported and left out of the plan.
-  const ignored = midi.tracks.filter((track) => track.notes.length < MIN_NOTES_PER_TRACK);
-  const routed = midi.tracks
-    .filter((track) => track.notes.length >= MIN_NOTES_PER_TRACK)
-    .map(routeTrack)
+  const routed = midi.tracks.map(routeTrack)
     .sort((a, b) => a.firstNote - b.firstNote || a.index - b.index);
-
-  const planned = planBand(routed);
-  const plan = ignored.length
-    ? {
-        ...planned,
-        diagnostics: [
-          ...planned.diagnostics,
-          ...ignored.map(
-            (track) => `轨 ${track.index}（${track.name}）只有 ${track.notes.length} 个音，判为占位/杂物，不参与编制`,
-          ),
-        ],
-      }
-    : planned;
+  const plan = planBand(routed);
 
   return { midi, routed, plan, report: renderReport(midi, routed, plan) };
 }
-
-/** A part this short is a placeholder or debris, not a performance. */
-const MIN_NOTES_PER_TRACK = 3;
 
 function clock(seconds: number): string {
   const whole = Math.max(0, Math.floor(seconds));

@@ -20,6 +20,8 @@ export interface BandViewPreset {
   readonly pitch: number;
   /** Multiplier on the band's own bounding box, when a view wants a wider or tighter frame. */
   readonly framingScale?: number;
+  /** Optional venue extent, for manually viewing the whole lighting rig. */
+  readonly frameVenue?: boolean;
   readonly fov: number;
 }
 
@@ -35,10 +37,11 @@ const VIEW_ID_PREFIX = 'band:';
  * carry a steep pitch so the horizontal reach stays inside the venue.
  */
 export const BAND_VIEWS: readonly BandViewPreset[] = [
-  { key: 'audience', label: '观众席', yaw: 0, pitch: 0.34, fov: 38 },
+  { key: 'audience', label: '舞台正面', yaw: 0, pitch: 0.34, fov: 38 },
   { key: 'rear', label: '乐队后方', yaw: Math.PI, pitch: 0.85, fov: 38 },
   { key: 'overhead', label: '俯视全队', yaw: 0, pitch: 0.95, fov: 38 },
   { key: 'wing', label: '侧翼', yaw: Math.PI / 2, pitch: 0.26, fov: 38 },
+  { key: 'venue', label: '灯光全景', yaw: 0, pitch: 0.10, fov: 48, frameVenue: true },
 ];
 
 export function bandViewId(key: string): string {
@@ -49,11 +52,11 @@ export function bandViewId(key: string): string {
  * Registers one `band-orbit` view per preset, framed on `bandBox`. Returns their ids in preset
  * order so a caller can bind number keys without repeating the list.
  */
-export function registerBandViews(registry: CameraRegistry, bandBox: THREE.Box3): string[] {
-  const center = bandBox.getCenter(new THREE.Vector3());
-  const size = bandBox.getSize(new THREE.Vector3());
-
+export function registerBandViews(registry: CameraRegistry, bandBox: THREE.Box3, venueBox = bandBox): string[] {
   const views: BandOrbitCameraView[] = BAND_VIEWS.map((preset) => {
+    const box = preset.frameVenue ? venueBox : bandBox;
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
     const scale = preset.framingScale ?? 1;
     return {
       kind: 'band-orbit',
